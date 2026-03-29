@@ -7,6 +7,7 @@ export function StarCanvas() {
     let cancelled = false;
     (async () => {
       const wasm = await import("stars-web");
+      await wasm.default();
       if (cancelled) return;
       await wasm.start_renderer("star-canvas");
     })();
