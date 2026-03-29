@@ -7,6 +7,6 @@ wasm-pack build apps/web --target web --out-dir frontend/pkg
 
 echo "Installing frontend dependencies..."
 cd apps/web/frontend
-npm install
+bun install
 
-echo "Done. Run 'cd apps/web/frontend && npm run dev' to start the dev server."
+echo "Done. Run 'cd apps/web/frontend && bun run dev' to start the dev server."

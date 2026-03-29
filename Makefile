@@ -11,12 +11,12 @@ web-build:
 	wasm-pack build apps/web --target web --out-dir frontend/pkg
 
 web-dev:
-	cd apps/web/frontend && npm run dev
+	cd apps/web/frontend && bun run dev
 
 # Download star catalog
 setup:
 	./scripts/download-catalog.sh
-	cd apps/web/frontend && npm install --cache /tmp/npm-cache
+	cd apps/web/frontend && bun install
 
 # Lint & test
 fmt:
