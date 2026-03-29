@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/stars-catalog",
+    "crates/stars-core",
+    "apps/native",
+]
+# apps/web is excluded from the workspace because it only compiles for wasm32-unknown-unknown.
+# Build it with: wasm-pack build apps/web --target web --out-dir frontend/pkg
+exclude = ["apps/web"]
+
+[workspace.dependencies]
+wgpu = "29"
+bytemuck = { version = "1", features = ["derive"] }
+glam = { version = "0.30", features = ["bytemuck"] }
+log = "0.4"
+csv = "1"
+serde = { version = "1", features = ["derive"] }

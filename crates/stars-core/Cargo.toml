@@ -1,0 +1,11 @@
+[package]
+name = "stars-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+stars-catalog = { path = "../stars-catalog" }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+glam = { workspace = true }
+log = { workspace = true }

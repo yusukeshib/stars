@@ -1,0 +1,15 @@
+[package]
+name = "stars-catalog"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["filesystem"]
+filesystem = []
+embedded = []
+
+[dependencies]
+csv = { workspace = true }
+serde = { workspace = true }
+glam = { workspace = true }
+log = { workspace = true }

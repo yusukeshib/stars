@@ -1,0 +1,9 @@
+/target
+**/target
+node_modules
+pkg
+*.wasm
+dist
+.vite
+Cargo.lock
+crates/stars-catalog/data/*.csv
