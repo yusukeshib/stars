@@ -61,12 +61,10 @@ impl ApplicationHandler for App {
         }))
         .expect("No suitable GPU adapter found");
 
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("Stars Device"),
-                ..Default::default()
-            },
-        ))
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("Stars Device"),
+            ..Default::default()
+        }))
         .expect("Failed to create device");
 
         let surface_caps = surface.get_capabilities(&adapter);
@@ -157,8 +155,12 @@ impl ApplicationHandler for App {
             }
 
             WindowEvent::RedrawRequested => {
-                gpu.renderer
-                    .update_camera(&gpu.queue, &gpu.camera, gpu.size.width, gpu.size.height);
+                gpu.renderer.update_camera(
+                    &gpu.queue,
+                    &gpu.camera,
+                    gpu.size.width,
+                    gpu.size.height,
+                );
 
                 let surface_texture = match gpu.surface.get_current_texture() {
                     wgpu::CurrentSurfaceTexture::Success(t) => t,
@@ -166,8 +168,7 @@ impl ApplicationHandler for App {
                         gpu.surface.configure(&gpu.device, &gpu.config);
                         t
                     }
-                    wgpu::CurrentSurfaceTexture::Outdated
-                    | wgpu::CurrentSurfaceTexture::Lost => {
+                    wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                         gpu.surface.configure(&gpu.device, &gpu.config);
                         return;
                     }
@@ -200,8 +201,8 @@ impl ApplicationHandler for App {
 fn main() {
     env_logger::init();
 
-    let catalog_path =
-        std::env::var("STARS_CATALOG").unwrap_or_else(|_| "crates/stars-catalog/data/hyg_v42.csv".to_string());
+    let catalog_path = std::env::var("STARS_CATALOG")
+        .unwrap_or_else(|_| "crates/stars-catalog/data/hyg_v42.csv".to_string());
 
     log::info!("Loading star catalog from {catalog_path}...");
     let stars = catalog::load_from_file(&catalog_path);

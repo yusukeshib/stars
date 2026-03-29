@@ -8,10 +8,18 @@ pub struct QuadVertex {
 
 impl QuadVertex {
     pub const VERTICES: &[Self] = &[
-        Self { position: [-1.0, -1.0] },
-        Self { position: [1.0, -1.0] },
-        Self { position: [1.0, 1.0] },
-        Self { position: [-1.0, 1.0] },
+        Self {
+            position: [-1.0, -1.0],
+        },
+        Self {
+            position: [1.0, -1.0],
+        },
+        Self {
+            position: [1.0, 1.0],
+        },
+        Self {
+            position: [-1.0, 1.0],
+        },
     ];
 
     pub const INDICES: &[u16] = &[0, 1, 2, 0, 2, 3];
@@ -20,13 +28,11 @@ impl QuadVertex {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-            ],
+            attributes: &[wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 0,
+                format: wgpu::VertexFormat::Float32x2,
+            }],
         }
     }
 }
@@ -72,5 +78,5 @@ impl StarInstance {
 pub fn magnitude_to_size(mag: f32) -> f32 {
     let base_size = 4.0;
     let scale = 10.0_f32.powf(-mag / 5.0);
-    (base_size * scale).max(0.5).min(12.0)
+    (base_size * scale).clamp(0.5, 12.0)
 }

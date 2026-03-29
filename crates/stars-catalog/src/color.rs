@@ -49,7 +49,10 @@ mod tests {
     fn test_white_star() {
         // B-V ≈ 0.0 should be roughly white
         let [r, g, b] = bv_to_rgb(0.0);
-        assert!(r > 0.7 && g > 0.7 && b > 0.7, "Expected whitish: ({r}, {g}, {b})");
+        assert!(
+            r > 0.7 && g > 0.7 && b > 0.7,
+            "Expected whitish: ({r}, {g}, {b})"
+        );
     }
 
     #[test]
