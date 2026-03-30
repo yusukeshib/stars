@@ -6,4 +6,3 @@ pkg
 dist
 .vite
 Cargo.lock
-crates/stars-catalog/data/*.csv
