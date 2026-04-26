@@ -1,8 +1,8 @@
-pub mod camera;
-pub mod pipeline;
+mod camera;
+mod pipeline;
 mod renderer;
-pub mod vertex;
+mod vertex;
 
-pub use camera::{Camera, CameraUniform, LocalView, Observer};
+pub use camera::{Camera, CameraUniform, LocalView};
 pub use renderer::Renderer;
-pub use vertex::{magnitude_to_size, QuadVertex, StarInstance};
+pub use vertex::{magnitude_to_render_params, QuadVertex, RenderParams, StarInstance};

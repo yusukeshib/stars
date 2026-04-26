@@ -1,13 +1,8 @@
 import { useEffect, useRef } from "react";
-import {
-  julianDateFromUnixSeconds,
-  toRad,
-  type Observer,
-  type View,
-} from "../observer";
+import { toRad, type Observer, type View } from "../observer";
 
 type StarViewHandle = {
-  set_observer: (lat: number, lng: number, jd: number) => void;
+  set_observer: (lat: number, lng: number, timeUnixMs: number) => void;
   set_view: (az: number, alt: number, fov: number) => void;
   resize: (w: number, h: number) => void;
   render_frame: () => void;
@@ -25,7 +20,10 @@ type Props = {
 export function StarCanvas({ observer, view, timeMs, onDrag, onWheel }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const handleRef = useRef<StarViewHandle | null>(null);
-  // Mirror props in refs so the long-lived render loop sees fresh values.
+  const dragState = useRef<{ x: number; y: number; pointerId: number } | null>(null);
+
+  // Mirror props in refs so the long-lived render loop sees fresh values without
+  // having to be torn down and rebuilt on every prop change.
   const observerRef = useRef(observer);
   const viewRef = useRef(view);
   const timeRef = useRef(timeMs);
@@ -33,6 +31,7 @@ export function StarCanvas({ observer, view, timeMs, onDrag, onWheel }: Props) {
   viewRef.current = view;
   timeRef.current = timeMs;
 
+  // Boot wasm + start the render loop. Only ever runs once.
   useEffect(() => {
     let cancelled = false;
     let raf = 0;
@@ -48,8 +47,7 @@ export function StarCanvas({ observer, view, timeMs, onDrag, onWheel }: Props) {
         if (cancelled) return;
         const o = observerRef.current;
         const v = viewRef.current;
-        const jd = julianDateFromUnixSeconds(timeRef.current / 1000);
-        handle.set_observer(o.latitudeDeg, o.longitudeDeg, jd);
+        handle.set_observer(o.latitudeDeg, o.longitudeDeg, timeRef.current);
         handle.set_view(toRad(v.azimuthDeg), toRad(v.altitudeDeg), toRad(v.fovDeg));
         handle.render_frame();
         raf = requestAnimationFrame(tick);
@@ -63,6 +61,7 @@ export function StarCanvas({ observer, view, timeMs, onDrag, onWheel }: Props) {
     };
   }, []);
 
+  // Match canvas backing-store size to its CSS size at the device pixel ratio.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -80,9 +79,6 @@ export function StarCanvas({ observer, view, timeMs, onDrag, onWheel }: Props) {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-
-  // Pointer drag → orientation. Use refs so we don't re-bind on every render.
-  const dragState = useRef<{ x: number; y: number; pointerId: number } | null>(null);
 
   return (
     <canvas
@@ -106,8 +102,8 @@ export function StarCanvas({ observer, view, timeMs, onDrag, onWheel }: Props) {
         const dy = e.clientY - d.y;
         d.x = e.clientX;
         d.y = e.clientY;
-        // Convert pixel drag to degrees of rotation, scaled by current FOV so it
-        // feels consistent at any zoom level.
+        // Drag distance in degrees scales with the current FOV so the feel stays
+        // constant whether the user is zoomed wide or tight.
         const scale = view.fovDeg / canvasRef.current!.clientHeight;
         onDrag(-dx * scale, dy * scale);
       }}
@@ -119,8 +115,7 @@ export function StarCanvas({ observer, view, timeMs, onDrag, onWheel }: Props) {
       }}
       onWheel={(e) => {
         // Trackpad pinch / wheel: positive deltaY = zoom out.
-        const factor = Math.exp(e.deltaY * 0.001);
-        onWheel(factor);
+        onWheel(Math.exp(e.deltaY * 0.001));
       }}
     />
   );

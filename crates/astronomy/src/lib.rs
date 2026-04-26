@@ -6,8 +6,10 @@
 //! - Local frame is ENU (East, North, Up) at the observer.
 //! - Angles internally are radians; helpers also accept degrees / hours where noted.
 
-pub mod horizontal;
-pub mod time;
+mod horizontal;
+mod observer;
+mod time;
 
 pub use horizontal::{equatorial_to_horizontal, equatorial_to_horizontal_matrix, AltAz};
+pub use observer::Observer;
 pub use time::{gmst_radians, julian_date_from_unix_seconds, lmst_radians};

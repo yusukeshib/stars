@@ -19,21 +19,13 @@ pub fn gmst_radians(jd_ut: f64) -> f64 {
         67_310.548_41 + (876_600.0 * 3600.0 + 8_640_184.812_866) * t + 0.093_104 * t * t
             - 6.2e-6 * t * t * t;
     let seconds_in_day = 86_400.0;
-    let frac = (gmst_seconds.rem_euclid(seconds_in_day)) / seconds_in_day;
-    wrap_tau(frac * TAU)
+    let frac = gmst_seconds.rem_euclid(seconds_in_day) / seconds_in_day;
+    (frac * TAU).rem_euclid(TAU)
 }
 
 /// Local Mean Sidereal Time at the given longitude (east-positive radians).
 pub fn lmst_radians(jd_ut: f64, longitude_east_rad: f64) -> f64 {
-    wrap_tau(gmst_radians(jd_ut) + longitude_east_rad)
-}
-
-fn wrap_tau(x: f64) -> f64 {
-    let mut v = x.rem_euclid(TAU);
-    if v < 0.0 {
-        v += TAU;
-    }
-    v
+    (gmst_radians(jd_ut) + longitude_east_rad).rem_euclid(TAU)
 }
 
 #[cfg(test)]

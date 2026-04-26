@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use astronomy::julian_date_from_unix_seconds;
+use astronomy::{julian_date_from_unix_seconds, Observer};
 use catalog::load_from_file;
 use clap::Parser;
-use renderer::{magnitude_to_size, Camera, LocalView, Observer, Renderer, StarInstance};
+use renderer::{magnitude_to_render_params, Camera, LocalView, Renderer, StarInstance};
 
 /// Render the night sky as seen from a given observer to a PNG.
 #[derive(Parser, Debug)]
@@ -47,7 +47,7 @@ struct Args {
     output: PathBuf,
 
     /// Path to the HYG-format star catalog CSV.
-    #[arg(long, default_value = "crates/stars-catalog/data/hyg_v42.csv")]
+    #[arg(long, default_value = "crates/catalog/data/hyg_v42.csv")]
     catalog: PathBuf,
 }
 
@@ -80,18 +80,19 @@ fn main() -> Result<()> {
         fov_y_rad: (args.fov as f32).to_radians(),
     };
 
-    let stars = load_from_file(args.catalog.to_str().unwrap());
+    let stars = load_from_file(&args.catalog)
+        .with_context(|| format!("Reading catalog at {}", args.catalog.display()))?;
     log::info!("Loaded {} stars", stars.len());
 
     let instances: Vec<StarInstance> = stars
         .iter()
         .map(|s| {
-            let (size, brightness) = magnitude_to_size(s.magnitude);
+            let p = magnitude_to_render_params(s.magnitude);
             StarInstance {
                 position: s.position.into(),
-                size,
+                size: p.size_px,
                 color: s.color,
-                brightness,
+                brightness: p.brightness,
             }
         })
         .collect();
@@ -153,18 +154,17 @@ async fn render_to_pixels(
 
     let bytes_per_pixel: u32 = 4;
     let unpadded_bytes_per_row = width * bytes_per_pixel;
-    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
-    let buffer_size = (padded_bytes_per_row * height) as u64;
+    let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+        * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
 
     let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Readback Buffer"),
-        size: buffer_size,
+        size: (padded_bytes_per_row * height) as u64,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
 
-    let renderer = Renderer::new(&device, &queue, TEXTURE_FORMAT, stars);
+    let renderer = Renderer::new(&device, TEXTURE_FORMAT, stars);
     let camera = Camera::new(observer, view, width as f32 / height as f32);
     renderer.update_camera(&queue, &camera, width, height);
 

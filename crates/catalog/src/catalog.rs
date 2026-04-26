@@ -5,16 +5,12 @@ use crate::color::bv_to_rgb;
 use crate::coords::radec_to_cartesian;
 
 #[derive(Debug, Deserialize)]
-pub struct RawStar {
-    pub id: u32,
-    pub proper: Option<String>,
-    pub ra: f64,
-    pub dec: f64,
-    pub dist: Option<f64>,
-    pub mag: f64,
-    pub absmag: Option<f64>,
-    pub ci: Option<f64>,
-    pub spect: Option<String>,
+struct RawStar {
+    ra: f64,
+    dec: f64,
+    dist: Option<f64>,
+    mag: f64,
+    ci: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -25,7 +21,9 @@ pub struct Star {
 }
 
 const MAX_MAGNITUDE: f64 = 8.0;
-const MAX_DISTANCE: f64 = 100_000.0;
+/// Drop catalog rows further than this many parsecs (HYG `dist` column unit). Stars
+/// without a `dist` value are kept; this filter is mainly for far cluster outliers.
+const MAX_DISTANCE_PC: f64 = 100_000.0;
 
 pub fn load_from_csv(data: &str) -> Vec<Star> {
     let mut reader = csv::ReaderBuilder::new()
@@ -46,20 +44,16 @@ pub fn load_from_csv(data: &str) -> Vec<Star> {
         if raw.mag > MAX_MAGNITUDE {
             continue;
         }
-
         if let Some(dist) = raw.dist {
-            if dist >= MAX_DISTANCE {
+            if dist >= MAX_DISTANCE_PC {
                 continue;
             }
         }
 
-        let position = radec_to_cartesian(raw.ra, raw.dec);
-        let color = bv_to_rgb(raw.ci.unwrap_or(0.0) as f32);
-
         stars.push(Star {
-            position,
+            position: radec_to_cartesian(raw.ra, raw.dec),
             magnitude: raw.mag as f32,
-            color,
+            color: bv_to_rgb(raw.ci.unwrap_or(0.0) as f32),
         });
     }
 
@@ -74,33 +68,36 @@ pub fn load_embedded() -> Vec<Star> {
 }
 
 #[cfg(feature = "filesystem")]
-pub fn load_from_file(path: &str) -> Vec<Star> {
-    let data = std::fs::read_to_string(path).expect("Failed to read star catalog");
-    load_from_csv(&data)
+pub fn load_from_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<Star>> {
+    let data = std::fs::read_to_string(path.as_ref())?;
+    Ok(load_from_csv(&data))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const HEADER: &str = "id,hip,hd,hr,gl,bf,proper,ra,dec,dist,pmra,pmdec,rv,mag,absmag,spect,ci,x,y,z,vx,vy,vz,rarad,decrad,pmrarad,pmdecrad,bayer,flam,con,comp,comp_primary,base,lum,var,var_min,var_max";
+
     #[test]
-    fn test_load_catalog() {
-        let csv = r#"id,hip,hd,hr,gl,bf,proper,ra,dec,dist,pmra,pmdec,rv,mag,absmag,spect,ci,x,y,z,vx,vy,vz,rarad,decrad,pmrarad,pmdecrad,bayer,flam,con,comp,comp_primary,base,lum,var,var_min,var_max
-1,1,224700,,,,Sirius,6.752477,16.716116,2.637,0.0,0.0,0.0,-1.46,1.45,A1V,-0.01,0,0,0,0,0,0,0,0,0,0,,,Psc,1,1,,1.0,,,
-"#;
-        let stars = load_from_csv(csv);
+    fn loads_a_star() {
+        let csv = format!(
+            "{HEADER}\n1,1,224700,,,,Sirius,6.752477,16.716116,2.637,0.0,0.0,0.0,-1.46,1.45,A1V,-0.01,0,0,0,0,0,0,0,0,0,0,,,Psc,1,1,,1.0,,,\n"
+        );
+        let stars = load_from_csv(&csv);
         assert_eq!(stars.len(), 1);
         assert!((stars[0].magnitude - (-1.46)).abs() < 0.01);
         assert!(stars[0].position.length() > 0.99);
     }
 
     #[test]
-    fn test_magnitude_filter() {
-        let csv = r#"id,hip,hd,hr,gl,bf,proper,ra,dec,dist,pmra,pmdec,rv,mag,absmag,spect,ci,x,y,z,vx,vy,vz,rarad,decrad,pmrarad,pmdecrad,bayer,flam,con,comp,comp_primary,base,lum,var,var_min,var_max
-1,1,,,,,Star1,0.0,0.0,10.0,0.0,0.0,0.0,5.0,0.0,G2V,0.0,0,0,0,0,0,0,0,0,0,0,,,Psc,1,1,,1.0,,,
-2,2,,,,,Star2,0.0,0.0,10.0,0.0,0.0,0.0,9.0,0.0,G2V,0.0,0,0,0,0,0,0,0,0,0,0,,,Psc,1,1,,1.0,,,
-"#;
-        let stars = load_from_csv(csv);
-        assert_eq!(stars.len(), 1, "Should filter out stars with mag > 8.0");
+    fn filters_dim_stars() {
+        let csv = format!(
+            "{HEADER}\n\
+             1,1,,,,,Star1,0.0,0.0,10.0,0.0,0.0,0.0,5.0,0.0,G2V,0.0,0,0,0,0,0,0,0,0,0,0,,,Psc,1,1,,1.0,,,\n\
+             2,2,,,,,Star2,0.0,0.0,10.0,0.0,0.0,0.0,9.0,0.0,G2V,0.0,0,0,0,0,0,0,0,0,0,0,,,Psc,1,1,,1.0,,,\n"
+        );
+        let stars = load_from_csv(&csv);
+        assert_eq!(stars.len(), 1, "should filter mag > {MAX_MAGNITUDE}");
     }
 }

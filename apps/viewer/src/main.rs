@@ -3,10 +3,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use astronomy::julian_date_from_unix_seconds;
+use astronomy::{julian_date_from_unix_seconds, Observer};
 use catalog::load_from_file;
 use clap::Parser;
-use renderer::{magnitude_to_size, Camera, LocalView, Observer, Renderer, StarInstance};
+use renderer::{magnitude_to_render_params, Camera, LocalView, Renderer, StarInstance};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
@@ -31,7 +31,7 @@ struct Args {
     time: Option<String>,
 
     /// Path to the HYG-format star catalog CSV.
-    #[arg(long, default_value = "crates/stars-catalog/data/hyg_v42.csv")]
+    #[arg(long, default_value = "crates/catalog/data/hyg_v42.csv")]
     catalog: PathBuf,
 }
 
@@ -40,17 +40,18 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     let start_jd = parse_time_to_jd(args.time.as_deref())?;
-    let stars = load_from_file(args.catalog.to_str().unwrap());
+    let stars = load_from_file(&args.catalog)
+        .with_context(|| format!("Reading catalog at {}", args.catalog.display()))?;
     log::info!("Loaded {} stars", stars.len());
     let instances: Vec<StarInstance> = stars
         .iter()
         .map(|s| {
-            let (size, brightness) = magnitude_to_size(s.magnitude);
+            let p = magnitude_to_render_params(s.magnitude);
             StarInstance {
                 position: s.position.into(),
-                size,
+                size: p.size_px,
                 color: s.color,
-                brightness,
+                brightness: p.brightness,
             }
         })
         .collect();
@@ -92,15 +93,57 @@ struct App {
     stars: Vec<StarInstance>,
     lat: f64,
     lng: f64,
-    start_jd: f64,
-    /// Wall-clock instant corresponding to `start_jd`. Sky time = start_jd + (now - epoch) * speed.
-    epoch: Instant,
-    /// Multiplier on real-time elapsed seconds. 1.0 = real time, 60.0 = a minute per second.
-    time_speed: f64,
-    paused: bool,
-    paused_jd: f64,
+    sky_clock: SkyClock,
     mouse_pressed: bool,
     last_mouse: Option<(f64, f64)>,
+}
+
+/// Tracks the rendered moment in JD, advancing real time at a configurable speed.
+struct SkyClock {
+    /// JD that corresponds to `epoch`.
+    anchor_jd: f64,
+    /// Real-time instant the anchor was set.
+    epoch: Instant,
+    /// Multiplier on real-time elapsed seconds. 1.0 = real time, 60.0 = a minute per second.
+    speed: f64,
+    /// When paused, the JD frozen at the moment of pausing.
+    paused_at: Option<f64>,
+}
+
+impl SkyClock {
+    fn new(start_jd: f64) -> Self {
+        Self {
+            anchor_jd: start_jd,
+            epoch: Instant::now(),
+            speed: 1.0,
+            paused_at: None,
+        }
+    }
+
+    fn current_jd(&self) -> f64 {
+        if let Some(jd) = self.paused_at {
+            jd
+        } else {
+            self.anchor_jd + self.epoch.elapsed().as_secs_f64() * self.speed / 86_400.0
+        }
+    }
+
+    fn set_speed(&mut self, speed: f64) {
+        self.anchor_jd = self.current_jd();
+        self.epoch = Instant::now();
+        self.speed = speed;
+    }
+
+    fn toggle_pause(&mut self) {
+        match self.paused_at {
+            Some(jd) => {
+                self.anchor_jd = jd;
+                self.epoch = Instant::now();
+                self.paused_at = None;
+            }
+            None => self.paused_at = Some(self.current_jd()),
+        }
+    }
 }
 
 impl App {
@@ -111,41 +154,9 @@ impl App {
             stars,
             lat,
             lng,
-            start_jd,
-            epoch: Instant::now(),
-            time_speed: 1.0,
-            paused: false,
-            paused_jd: start_jd,
+            sky_clock: SkyClock::new(start_jd),
             mouse_pressed: false,
             last_mouse: None,
-        }
-    }
-
-    fn current_jd(&self) -> f64 {
-        if self.paused {
-            self.paused_jd
-        } else {
-            let elapsed_seconds = self.epoch.elapsed().as_secs_f64();
-            self.start_jd + (elapsed_seconds * self.time_speed) / 86_400.0
-        }
-    }
-
-    fn set_speed(&mut self, speed: f64) {
-        // Re-anchor so the visible time doesn't jump.
-        let now_jd = self.current_jd();
-        self.start_jd = now_jd;
-        self.epoch = Instant::now();
-        self.time_speed = speed;
-    }
-
-    fn toggle_pause(&mut self) {
-        if self.paused {
-            self.start_jd = self.paused_jd;
-            self.epoch = Instant::now();
-            self.paused = false;
-        } else {
-            self.paused_jd = self.current_jd();
-            self.paused = true;
         }
     }
 }
@@ -197,8 +208,8 @@ impl ApplicationHandler for App {
         };
         surface.configure(&device, &config);
 
-        let renderer = Renderer::new(&device, &queue, format, &self.stars);
-        let observer = Observer::from_degrees(self.lat, self.lng, self.current_jd());
+        let renderer = Renderer::new(&device, format, &self.stars);
+        let observer = Observer::from_degrees(self.lat, self.lng, self.sky_clock.current_jd());
         let view = LocalView {
             azimuth_rad: std::f32::consts::PI, // facing south
             altitude_rad: 30.0_f32.to_radians(),
@@ -223,7 +234,9 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
-        let jd = self.current_jd();
+        // Snapshot self-state needed inside the gpu match arms before borrowing
+        // self.gpu mutably (Rust can't see that lat/lng/sky_clock and gpu don't alias).
+        let jd = self.sky_clock.current_jd();
         let lat = self.lat;
         let lng = self.lng;
         let Some(gpu) = &mut self.gpu else { return };
@@ -278,11 +291,11 @@ impl ApplicationHandler for App {
                     },
                 ..
             } => match code {
-                KeyCode::Space => self.toggle_pause(),
-                KeyCode::Digit1 => self.set_speed(1.0),
-                KeyCode::Digit2 => self.set_speed(60.0),
-                KeyCode::Digit3 => self.set_speed(3600.0),
-                KeyCode::Digit4 => self.set_speed(86_400.0),
+                KeyCode::Space => self.sky_clock.toggle_pause(),
+                KeyCode::Digit1 => self.sky_clock.set_speed(1.0),
+                KeyCode::Digit2 => self.sky_clock.set_speed(60.0),
+                KeyCode::Digit3 => self.sky_clock.set_speed(3600.0),
+                KeyCode::Digit4 => self.sky_clock.set_speed(86_400.0),
                 KeyCode::Escape => event_loop.exit(),
                 _ => {}
             },

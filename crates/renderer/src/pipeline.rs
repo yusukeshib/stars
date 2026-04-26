@@ -1,7 +1,7 @@
 use crate::camera::CameraUniform;
 use crate::vertex::{QuadVertex, StarInstance};
 
-pub fn create_pipeline(
+pub(crate) fn create_pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
     camera_bind_group_layout: &wgpu::BindGroupLayout,
@@ -59,7 +59,7 @@ pub fn create_pipeline(
     })
 }
 
-pub fn create_camera_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+pub(crate) fn create_camera_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("Camera Bind Group Layout"),
         entries: &[wgpu::BindGroupLayoutEntry {

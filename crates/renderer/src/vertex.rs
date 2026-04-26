@@ -24,7 +24,7 @@ impl QuadVertex {
 
     pub const INDICES: &[u16] = &[0, 1, 2, 0, 2, 3];
 
-    pub fn layout() -> wgpu::VertexBufferLayout<'static> {
+    pub(crate) fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
@@ -47,7 +47,7 @@ pub struct StarInstance {
 }
 
 impl StarInstance {
-    pub fn layout() -> wgpu::VertexBufferLayout<'static> {
+    pub(crate) fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
@@ -77,20 +77,27 @@ impl StarInstance {
     }
 }
 
+/// Per-star rendering parameters derived from apparent magnitude.
+#[derive(Debug, Clone, Copy)]
+pub struct RenderParams {
+    /// Billboard side length, in screen-space pixels.
+    pub size_px: f32,
+    /// Multiplier on the shader's center intensity. >1 saturates additively.
+    pub brightness: f32,
+}
+
 /// Convert a star's apparent magnitude into renderer parameters.
 ///
-/// Returns `(size_px, brightness)`. Size scales sub-linearly with linear flux so
-/// even faint stars stay above one pixel; brightness scales linearly with flux
-/// (clamped) so the shader can attenuate the center intensity, giving 1st-mag
-/// stars a perceptibly brighter core than 5th-mag stars.
-pub fn magnitude_to_size(mag: f32) -> (f32, f32) {
+/// Size scales sub-linearly with linear flux so even faint stars stay above one
+/// pixel; brightness scales as flux^0.35 so 1st-mag stars have a clearly
+/// brighter core than 5th-mag without the eye-watering 1000× raw flux gap.
+pub fn magnitude_to_render_params(mag: f32) -> RenderParams {
     // Linear flux relative to magnitude 0: 2.5 mag dimmer = 10× less light.
     let flux = 10.0_f32.powf(-mag * 0.4);
-    // Bigger billboards so the Gaussian halo has room; min 2px keeps faint
-    // stars from disappearing into pixel snapping.
-    let size = (6.0 * flux.powf(0.4)).clamp(2.0, 22.0);
-    // Compressed peak intensity: a power < 1 tames the 1000× flux gap between
-    // mag 6 and mag −1 while still giving 1st-mag stars a clearly brighter core.
+    let size_px = (6.0 * flux.powf(0.4)).clamp(2.0, 22.0);
     let brightness = (flux.powf(0.35) * 1.4).clamp(0.35, 2.5);
-    (size, brightness)
+    RenderParams {
+        size_px,
+        brightness,
+    }
 }

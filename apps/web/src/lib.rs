@@ -1,11 +1,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use astronomy::{julian_date_from_unix_seconds, Observer};
+use catalog::load_embedded;
+use renderer::{magnitude_to_render_params, Camera, LocalView, Renderer, StarInstance};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-
-use catalog::load_embedded;
-use renderer::{magnitude_to_size, Camera, LocalView, Observer, Renderer, StarInstance};
 
 #[wasm_bindgen(start)]
 pub fn main() {
@@ -85,17 +85,17 @@ impl StarView {
         let instances: Vec<StarInstance> = stars
             .iter()
             .map(|s| {
-                let (size, brightness) = magnitude_to_size(s.magnitude);
+                let p = magnitude_to_render_params(s.magnitude);
                 StarInstance {
                     position: s.position.into(),
-                    size,
+                    size: p.size_px,
                     color: s.color,
-                    brightness,
+                    brightness: p.brightness,
                 }
             })
             .collect();
 
-        let renderer = Renderer::new(&device, &queue, format, &instances);
+        let renderer = Renderer::new(&device, format, &instances);
         let camera = Camera::new(
             // Defaults; JS will overwrite immediately.
             Observer::from_degrees(0.0, 0.0, 2_451_545.0),
@@ -115,14 +115,17 @@ impl StarView {
         })
     }
 
-    pub fn set_observer(&self, lat_deg: f64, lng_deg: f64, julian_date: f64) {
-        let mut s = self.state.borrow_mut();
-        s.camera.observer = Observer::from_degrees(lat_deg, lng_deg, julian_date);
+    /// Update the observer. `time_unix_ms` is a JS `Date.now()`-style millisecond
+    /// epoch; conversion to Julian Date happens here so the JS side doesn't need
+    /// to know the constant.
+    pub fn set_observer(&self, lat_deg: f64, lng_deg: f64, time_unix_ms: f64) {
+        let jd = julian_date_from_unix_seconds(time_unix_ms / 1000.0);
+        self.state.borrow_mut().camera.observer =
+            Observer::from_degrees(lat_deg, lng_deg, jd);
     }
 
     pub fn set_view(&self, azimuth_rad: f32, altitude_rad: f32, fov_y_rad: f32) {
-        let mut s = self.state.borrow_mut();
-        s.camera.view = LocalView {
+        self.state.borrow_mut().camera.view = LocalView {
             azimuth_rad,
             altitude_rad,
             fov_y_rad,
@@ -141,7 +144,7 @@ impl StarView {
     }
 
     /// Render a single frame using the current observer/view.
-    pub fn render_frame(&self) -> Result<(), JsValue> {
+    pub fn render_frame(&self) {
         let s = self.state.borrow();
         s.renderer
             .update_camera(&s.queue, &s.camera, s.config.width, s.config.height);
@@ -151,9 +154,9 @@ impl StarView {
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 s.surface.configure(&s.device, &s.config);
-                return Ok(());
+                return;
             }
-            _ => return Ok(()),
+            _ => return,
         };
         let view = surface_texture
             .texture
@@ -166,6 +169,5 @@ impl StarView {
         s.renderer.render(&mut encoder, &view);
         s.queue.submit(std::iter::once(encoder.finish()));
         surface_texture.present();
-        Ok(())
     }
 }

@@ -1,3 +1,4 @@
+use bytemuck::Zeroable;
 use wgpu::util::DeviceExt;
 
 use crate::camera::{Camera, CameraUniform};
@@ -15,12 +16,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(
-        device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-        stars: &[StarInstance],
-    ) -> Self {
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, stars: &[StarInstance]) -> Self {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Quad Vertex Buffer"),
             contents: bytemuck::cast_slice(QuadVertex::VERTICES),
@@ -103,13 +99,5 @@ impl Renderer {
         pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
         pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
         pass.draw_indexed(0..QuadVertex::INDICES.len() as u32, 0, 0..self.num_stars);
-    }
-}
-
-use bytemuck::Zeroable;
-
-impl CameraUniform {
-    fn zeroed() -> Self {
-        <Self as Zeroable>::zeroed()
     }
 }

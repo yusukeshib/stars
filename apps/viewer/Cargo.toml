@@ -8,7 +8,6 @@ renderer = { path = "../../crates/renderer" }
 catalog = { path = "../../crates/catalog", features = ["filesystem"] }
 astronomy = { path = "../../crates/astronomy" }
 wgpu = { workspace = true }
-glam = { workspace = true }
 log = { workspace = true }
 winit = "0.30"
 pollster = "0.4"

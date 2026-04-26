@@ -12,11 +12,9 @@ renderer = { path = "../../crates/renderer" }
 catalog = { path = "../../crates/catalog", features = ["filesystem"] }
 astronomy = { path = "../../crates/astronomy" }
 wgpu = { workspace = true }
-bytemuck = { workspace = true }
 pollster = "0.4"
 env_logger = "0.11"
 log = { workspace = true }
-glam = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
