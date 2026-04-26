@@ -90,7 +90,7 @@ fn main() -> Result<()> {
             let p = magnitude_to_render_params(s.magnitude);
             StarInstance {
                 position: s.position.into(),
-                size: p.size_px,
+                size: p.radius_px,
                 color: s.color,
                 brightness: p.brightness,
             }

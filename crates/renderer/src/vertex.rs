@@ -80,24 +80,26 @@ impl StarInstance {
 /// Per-star rendering parameters derived from apparent magnitude.
 #[derive(Debug, Clone, Copy)]
 pub struct RenderParams {
-    /// Billboard side length, in screen-space pixels.
-    pub size_px: f32,
+    /// Falloff radius of the star's billboard, in screen-space pixels. The
+    /// billboard quad spans ±radius_px around the star's projected center; the
+    /// shader's Gaussian core fades to zero near this edge.
+    pub radius_px: f32,
     /// Multiplier on the shader's center intensity. >1 saturates additively.
     pub brightness: f32,
 }
 
 /// Convert a star's apparent magnitude into renderer parameters.
 ///
-/// Size scales sub-linearly with linear flux so even faint stars stay above one
-/// pixel; brightness scales as flux^0.35 so 1st-mag stars have a clearly
+/// Radius scales sub-linearly with linear flux so even faint stars stay above
+/// one pixel; brightness scales as flux^0.35 so 1st-mag stars have a clearly
 /// brighter core than 5th-mag without the eye-watering 1000× raw flux gap.
 pub fn magnitude_to_render_params(mag: f32) -> RenderParams {
     // Linear flux relative to magnitude 0: 2.5 mag dimmer = 10× less light.
     let flux = 10.0_f32.powf(-mag * 0.4);
-    let size_px = (6.0 * flux.powf(0.4)).clamp(2.0, 22.0);
+    let radius_px = (6.0 * flux.powf(0.4)).clamp(2.0, 22.0);
     let brightness = (flux.powf(0.35) * 1.4).clamp(0.35, 2.5);
     RenderParams {
-        size_px,
+        radius_px,
         brightness,
     }
 }

@@ -30,6 +30,18 @@ struct Args {
     #[arg(long)]
     time: Option<String>,
 
+    /// Initial azimuth in degrees from North toward East.
+    #[arg(long, default_value_t = 180.0, allow_hyphen_values = true)]
+    azimuth: f64,
+
+    /// Initial altitude in degrees above the horizon.
+    #[arg(long, default_value_t = 30.0, allow_hyphen_values = true)]
+    altitude: f64,
+
+    /// Initial vertical field of view, degrees.
+    #[arg(long, default_value_t = 70.0)]
+    fov: f64,
+
     /// Path to the HYG-format star catalog CSV.
     #[arg(long, default_value = "crates/catalog/data/hyg_v42.csv")]
     catalog: PathBuf,
@@ -49,15 +61,21 @@ fn main() -> Result<()> {
             let p = magnitude_to_render_params(s.magnitude);
             StarInstance {
                 position: s.position.into(),
-                size: p.size_px,
+                size: p.radius_px,
                 color: s.color,
                 brightness: p.brightness,
             }
         })
         .collect();
 
+    let initial_view = LocalView {
+        azimuth_rad: (args.azimuth as f32).to_radians(),
+        altitude_rad: (args.altitude as f32).to_radians(),
+        fov_y_rad: (args.fov as f32).to_radians(),
+    };
+
     let event_loop = EventLoop::new()?;
-    let mut app = App::new(instances, args.lat, args.lng, start_jd);
+    let mut app = App::new(instances, args.lat, args.lng, start_jd, initial_view);
     event_loop.run_app(&mut app)?;
     Ok(())
 }
@@ -93,6 +111,7 @@ struct App {
     stars: Vec<StarInstance>,
     lat: f64,
     lng: f64,
+    initial_view: LocalView,
     sky_clock: SkyClock,
     mouse_pressed: bool,
     last_mouse: Option<(f64, f64)>,
@@ -147,13 +166,20 @@ impl SkyClock {
 }
 
 impl App {
-    fn new(stars: Vec<StarInstance>, lat: f64, lng: f64, start_jd: f64) -> Self {
+    fn new(
+        stars: Vec<StarInstance>,
+        lat: f64,
+        lng: f64,
+        start_jd: f64,
+        initial_view: LocalView,
+    ) -> Self {
         Self {
             gpu: None,
             window: None,
             stars,
             lat,
             lng,
+            initial_view,
             sky_clock: SkyClock::new(start_jd),
             mouse_pressed: false,
             last_mouse: None,
@@ -210,12 +236,11 @@ impl ApplicationHandler for App {
 
         let renderer = Renderer::new(&device, format, &self.stars);
         let observer = Observer::from_degrees(self.lat, self.lng, self.sky_clock.current_jd());
-        let view = LocalView {
-            azimuth_rad: std::f32::consts::PI, // facing south
-            altitude_rad: 30.0_f32.to_radians(),
-            fov_y_rad: 70.0_f32.to_radians(),
-        };
-        let camera = Camera::new(observer, view, size.width as f32 / size.height as f32);
+        let camera = Camera::new(
+            observer,
+            self.initial_view,
+            size.width as f32 / size.height as f32,
+        );
 
         self.gpu = Some(GpuState {
             surface,

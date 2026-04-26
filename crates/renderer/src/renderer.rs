@@ -5,6 +5,14 @@ use crate::camera::{Camera, CameraUniform};
 use crate::pipeline;
 use crate::vertex::{QuadVertex, StarInstance};
 
+/// Background color for the sky (very dark blue).
+const CLEAR_COLOR: wgpu::Color = wgpu::Color {
+    r: 0.01,
+    g: 0.01,
+    b: 0.02,
+    a: 1.0,
+};
+
 pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
@@ -77,12 +85,7 @@ impl Renderer {
                 view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.01,
-                        g: 0.01,
-                        b: 0.02,
-                        a: 1.0,
-                    }),
+                    load: wgpu::LoadOp::Clear(CLEAR_COLOR),
                     store: wgpu::StoreOp::Store,
                 },
                 depth_slice: None,

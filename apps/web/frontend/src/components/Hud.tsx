@@ -50,24 +50,32 @@ export function Hud({
     >
       <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 6 }}>OBSERVER</div>
       <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 8px" }}>
-        <label>Lat</label>
+        <label htmlFor="hud-lat">Lat</label>
         <input
+          id="hud-lat"
           type="number"
           step="0.01"
           value={observer.latitudeDeg}
-          onChange={(e) =>
-            onSetObserver({ ...observer, latitudeDeg: Number(e.target.value) })
-          }
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (e.target.value !== "" && Number.isFinite(v)) {
+              onSetObserver({ ...observer, latitudeDeg: v });
+            }
+          }}
           style={inputStyle}
         />
-        <label>Lng</label>
+        <label htmlFor="hud-lng">Lng</label>
         <input
+          id="hud-lng"
           type="number"
           step="0.01"
           value={observer.longitudeDeg}
-          onChange={(e) =>
-            onSetObserver({ ...observer, longitudeDeg: Number(e.target.value) })
-          }
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            if (e.target.value !== "" && Number.isFinite(v)) {
+              onSetObserver({ ...observer, longitudeDeg: v });
+            }
+          }}
           style={inputStyle}
         />
       </div>
@@ -131,8 +139,9 @@ const buttonStyle: React.CSSProperties = {
   font: "inherit",
 };
 
+const COMPASS_DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+
 function compass(az: number): string {
-  const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
-  const idx = Math.round(((az % 360) + 360) / 45) % 8;
-  return dirs[idx];
+  // Caller passes already-wrapped [0, 360) azimuth.
+  return COMPASS_DIRS[Math.round(az / 45) % 8];
 }

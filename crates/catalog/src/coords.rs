@@ -1,7 +1,11 @@
 use glam::Vec3;
 use std::f64::consts::PI;
 
-/// Convert right ascension (hours) and declination (degrees) to a unit-sphere Cartesian position.
+/// Convert right ascension and declination to a unit-sphere Cartesian position.
+///
+/// Mixed units match the HYG catalog's CSV format: RA in hours (0–24), Dec in
+/// degrees (−90–+90). The output is in the J2000 equatorial frame:
+/// `x = cos δ cos α`, `y = cos δ sin α`, `z = sin δ`.
 pub fn radec_to_cartesian(ra_hours: f64, dec_degrees: f64) -> Vec3 {
     let ra = ra_hours * (PI / 12.0);
     let dec = dec_degrees * (PI / 180.0);

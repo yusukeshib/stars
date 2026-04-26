@@ -103,35 +103,50 @@ impl Camera {
 mod tests {
     use super::*;
 
-    fn observer() -> Observer {
-        Observer::from_degrees(35.0, 139.0, 2_460_000.5)
+    fn observer_at(lat_deg: f64) -> Observer {
+        // Use a fixed JD; LST cancels out for the celestial pole test below.
+        Observer::from_degrees(lat_deg, 0.0, 2_460_000.5)
     }
 
     #[test]
-    fn view_matrix_projects_north_horizon_to_forward() {
-        // Camera looking north at horizon: a star sitting in the local +Y (north)
-        // direction (after equatorial→horizontal) should project to clip −Z.
+    fn celestial_pole_projects_above_camera_at_latitude() {
+        // The North Celestial Pole (equatorial vector (0,0,1)) sits in the local
+        // ENU frame at altitude = observer's latitude, due north. With the camera
+        // at azimuth=0, altitude=0 (horizon, looking north) it should project to
+        // view-space y > 0 (above center) and z < 0 (in front).
+        let lat_deg = 35.0_f64;
         let view = LocalView {
             azimuth_rad: 0.0,
             altitude_rad: 0.0,
             fov_y_rad: std::f32::consts::FRAC_PI_4,
         };
-        let cam = Camera::new(observer(), view, 16.0 / 9.0);
-        // The forward vector in local ENU is exactly the look-at target.
-        let m = cam.view_matrix();
-        // Stars at the equatorial direction that maps to local +Y should land on -Z in view.
-        let local_north = cam.equatorial_to_horizontal().transpose() * Vec3::Y.extend(0.0);
-        let v = m * local_north;
+        let cam = Camera::new(observer_at(lat_deg), view, 1.0);
+        let pole_eq = Vec3::new(0.0, 0.0, 1.0);
+
+        let view_pos = cam.view_matrix() * pole_eq.extend(0.0);
         assert!(
-            v.z < 0.0,
-            "north star should be in front of camera, got z={}",
-            v.z
+            view_pos.z < 0.0,
+            "pole should be in front, got z={}",
+            view_pos.z
+        );
+        assert!(
+            view_pos.y > 0.0,
+            "pole should be above center, got y={}",
+            view_pos.y
+        );
+
+        // The angle above the forward axis should equal the observer's latitude.
+        let angle_rad = (view_pos.y / -view_pos.z).atan() as f64;
+        assert!(
+            (angle_rad - lat_deg.to_radians()).abs() < 1e-4,
+            "expected pole at altitude={lat_deg}°, got {}°",
+            angle_rad.to_degrees()
         );
     }
 
     #[test]
     fn altitude_clamps() {
-        let mut cam = Camera::new(observer(), LocalView::default(), 1.0);
+        let mut cam = Camera::new(observer_at(0.0), LocalView::default(), 1.0);
         cam.rotate_view(0.0, 100.0);
         assert!(cam.view.altitude_rad <= ALT_LIMIT + 1e-6);
         cam.rotate_view(0.0, -200.0);
@@ -140,7 +155,7 @@ mod tests {
 
     #[test]
     fn azimuth_wraps_to_zero_two_pi() {
-        let mut cam = Camera::new(observer(), LocalView::default(), 1.0);
+        let mut cam = Camera::new(observer_at(0.0), LocalView::default(), 1.0);
         cam.rotate_view(-0.5, 0.0);
         assert!((0.0..std::f32::consts::TAU).contains(&cam.view.azimuth_rad));
     }
