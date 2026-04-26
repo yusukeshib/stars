@@ -3,12 +3,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
+use astronomy::julian_date_from_unix_seconds;
+use catalog::load_from_file;
 use clap::Parser;
-use stars_astronomy::julian_date_from_unix_seconds;
-use stars_catalog::catalog;
-use stars_core::camera::{Camera, LocalView, Observer};
-use stars_core::renderer::Renderer;
-use stars_core::vertex::{magnitude_to_size, StarInstance};
+use renderer::{magnitude_to_size, Camera, LocalView, Observer, Renderer, StarInstance};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
@@ -42,7 +40,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     let start_jd = parse_time_to_jd(args.time.as_deref())?;
-    let stars = catalog::load_from_file(args.catalog.to_str().unwrap());
+    let stars = load_from_file(args.catalog.to_str().unwrap());
     log::info!("Loaded {} stars", stars.len());
     let instances: Vec<StarInstance> = stars
         .iter()

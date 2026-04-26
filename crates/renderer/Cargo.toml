@@ -1,11 +1,11 @@
 [package]
-name = "stars-core"
+name = "renderer"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-stars-astronomy = { path = "../stars-astronomy" }
-stars-catalog = { path = "../stars-catalog" }
+astronomy = { path = "../astronomy" }
+catalog = { path = "../catalog" }
 wgpu = { workspace = true }
 bytemuck = { workspace = true }
 glam = { workspace = true }

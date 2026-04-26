@@ -1,12 +1,10 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use astronomy::julian_date_from_unix_seconds;
+use catalog::load_from_file;
 use clap::Parser;
-use stars_astronomy::julian_date_from_unix_seconds;
-use stars_catalog::catalog;
-use stars_core::camera::{Camera, LocalView, Observer};
-use stars_core::renderer::Renderer;
-use stars_core::vertex::{magnitude_to_size, StarInstance};
+use renderer::{magnitude_to_size, Camera, LocalView, Observer, Renderer, StarInstance};
 
 /// Render the night sky as seen from a given observer to a PNG.
 #[derive(Parser, Debug)]
@@ -82,7 +80,7 @@ fn main() -> Result<()> {
         fov_y_rad: (args.fov as f32).to_radians(),
     };
 
-    let stars = catalog::load_from_file(args.catalog.to_str().unwrap());
+    let stars = load_from_file(args.catalog.to_str().unwrap());
     log::info!("Loaded {} stars", stars.len());
 
     let instances: Vec<StarInstance> = stars

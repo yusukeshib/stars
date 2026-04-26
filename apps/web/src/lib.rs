@@ -4,10 +4,8 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use stars_catalog::catalog;
-use stars_core::camera::{Camera, LocalView, Observer};
-use stars_core::renderer::Renderer;
-use stars_core::vertex::{magnitude_to_size, StarInstance};
+use catalog::load_embedded;
+use renderer::{magnitude_to_size, Camera, LocalView, Observer, Renderer, StarInstance};
 
 #[wasm_bindgen(start)]
 pub fn main() {
@@ -82,7 +80,7 @@ impl StarView {
         surface.configure(&device, &config);
 
         log::info!("Loading star catalog...");
-        let stars = catalog::load_embedded();
+        let stars = load_embedded();
         log::info!("Loaded {} stars", stars.len());
         let instances: Vec<StarInstance> = stars
             .iter()

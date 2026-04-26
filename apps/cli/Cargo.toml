@@ -8,9 +8,9 @@ name = "stars"
 path = "src/main.rs"
 
 [dependencies]
-stars-core = { path = "../../crates/stars-core" }
-stars-catalog = { path = "../../crates/stars-catalog", features = ["filesystem"] }
-stars-astronomy = { path = "../../crates/stars-astronomy" }
+renderer = { path = "../../crates/renderer" }
+catalog = { path = "../../crates/catalog", features = ["filesystem"] }
+astronomy = { path = "../../crates/astronomy" }
 wgpu = { workspace = true }
 bytemuck = { workspace = true }
 pollster = "0.4"

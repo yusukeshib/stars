@@ -1,6 +1,6 @@
+use astronomy::{equatorial_to_horizontal_matrix, lmst_radians};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
-use stars_astronomy::{equatorial_to_horizontal_matrix, lmst_radians};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]

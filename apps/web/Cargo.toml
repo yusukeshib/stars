@@ -7,8 +7,8 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-stars-core = { path = "../../crates/stars-core" }
-stars-catalog = { path = "../../crates/stars-catalog", default-features = false, features = ["embedded"] }
+renderer = { path = "../../crates/renderer" }
+catalog = { path = "../../crates/catalog", default-features = false, features = ["embedded"] }
 wgpu = "29"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
