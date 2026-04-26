@@ -1,8 +1,9 @@
 .PHONY: native web web-build web-dev setup fmt clippy test ci clean
 
-# Native app
+# Native PNG renderer (override ARGS, e.g. `make native ARGS="--lat 35.68 --lng 139.69 -o /tmp/sky.png"`).
+ARGS ?= --lat 35.68 --lng 139.69 --azimuth 180 --altitude 30 -o stars.png
 native:
-	cargo run -p stars-native --release
+	cargo run -p stars-native --release -- $(ARGS)
 
 # Web app (build WASM + start dev server)
 web: web-build web-dev

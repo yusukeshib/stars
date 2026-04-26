@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/stars-astronomy",
     "crates/stars-catalog",
     "crates/stars-core",
     "apps/native",

@@ -6,9 +6,14 @@ edition = "2021"
 [dependencies]
 stars-core = { path = "../../crates/stars-core" }
 stars-catalog = { path = "../../crates/stars-catalog", features = ["filesystem"] }
+stars-astronomy = { path = "../../crates/stars-astronomy" }
 wgpu = { workspace = true }
-winit = "0.30"
+bytemuck = { workspace = true }
 pollster = "0.4"
 env_logger = "0.11"
 log = { workspace = true }
 glam = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+anyhow = "1"
