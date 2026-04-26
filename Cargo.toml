@@ -4,7 +4,8 @@ members = [
     "crates/stars-astronomy",
     "crates/stars-catalog",
     "crates/stars-core",
-    "apps/native",
+    "apps/cli",
+    "apps/viewer",
 ]
 # apps/web is excluded from the workspace because it only compiles for wasm32-unknown-unknown.
 # Build it with: wasm-pack build apps/web --target web --out-dir frontend/pkg

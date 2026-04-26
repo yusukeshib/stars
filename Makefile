@@ -1,9 +1,13 @@
-.PHONY: native web web-build web-dev setup fmt clippy test ci clean
+.PHONY: cli viewer web web-build web-dev setup fmt clippy test ci clean
 
-# Native PNG renderer (override ARGS, e.g. `make native ARGS="--lat 35.68 --lng 139.69 -o /tmp/sky.png"`).
+# PNG-output CLI (override ARGS, e.g. `make cli ARGS="--lat 35.68 --lng 139.69 -o /tmp/sky.png"`).
 ARGS ?= --lat 35.68 --lng 139.69 --azimuth 180 --altitude 30 -o stars.png
-native:
-	cargo run -p stars-native --release -- $(ARGS)
+cli:
+	cargo run -p stars-cli --release -- $(ARGS)
+
+# Interactive desktop viewer.
+viewer:
+	cargo run -p stars-viewer --release
 
 # Web app (build WASM + start dev server)
 web: web-build web-dev
