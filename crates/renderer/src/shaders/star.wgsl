@@ -12,22 +12,22 @@ struct VertexInput {
     @location(1) star_pos: vec3<f32>,    // per-instance world position
     @location(2) star_size: f32,         // per-instance pixel size
     @location(3) star_color: vec3<f32>,  // per-instance RGB color
+    @location(4) star_brightness: f32,   // per-instance peak intensity multiplier
 };
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec3<f32>,
+    @location(2) brightness: f32,
 };
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    // Project star position to clip space
     let clip = camera.view_proj * vec4<f32>(input.star_pos, 1.0);
 
-    // Offset in screen space for billboard quad
     let pixel_offset = input.quad_pos * input.star_size;
     let ndc_offset = pixel_offset / camera.viewport_size * 2.0;
 
@@ -40,15 +40,19 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
     out.uv = input.quad_pos;
     out.color = input.star_color;
+    out.brightness = input.star_brightness;
     return out;
 }
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let dist = length(input.uv);
-    let alpha = smoothstep(1.0, 0.2, dist);
+    // Gaussian-ish falloff: sharp bright core that fades into a soft halo,
+    // rather than a flat smoothstep disc.
+    let r2 = dot(input.uv, input.uv);
+    let core = exp(-r2 * 5.0);
+    let alpha = core * input.brightness;
 
-    if alpha < 0.01 {
+    if alpha < 0.004 {
         discard;
     }
 

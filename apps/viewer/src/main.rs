@@ -44,11 +44,14 @@ fn main() -> Result<()> {
     log::info!("Loaded {} stars", stars.len());
     let instances: Vec<StarInstance> = stars
         .iter()
-        .map(|s| StarInstance {
-            position: s.position.into(),
-            size: magnitude_to_size(s.magnitude),
-            color: s.color,
-            _pad: 0.0,
+        .map(|s| {
+            let (size, brightness) = magnitude_to_size(s.magnitude);
+            StarInstance {
+                position: s.position.into(),
+                size,
+                color: s.color,
+                brightness,
+            }
         })
         .collect();
 
