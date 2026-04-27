@@ -36,8 +36,8 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.13.1 --locked
 
-      - name: Install Binaryen
-        run: sudo apt-get update && sudo apt-get install -y binaryen
+      - name: Install wasm-opt
+        run: cargo install wasm-opt --version 0.116.1 --locked
 
       - name: Build WASM package
         run: wasm-pack build apps/web --target web --out-dir frontend/pkg
