@@ -1,4 +1,5 @@
 mod camera;
+mod compass;
 mod pipeline;
 mod renderer;
 mod vertex;

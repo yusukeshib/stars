@@ -73,6 +73,11 @@ impl Camera {
         Mat4::perspective_rh(self.view.fov_y_rad, self.aspect, 0.01, 10.0)
     }
 
+    /// Horizontal FOV implied by the vertical FOV and current aspect ratio.
+    pub fn fov_x_rad(&self) -> f32 {
+        2.0 * ((self.view.fov_y_rad * 0.5).tan() * self.aspect).atan()
+    }
+
     pub fn view_proj(&self) -> Mat4 {
         self.projection_matrix() * self.view_matrix()
     }
