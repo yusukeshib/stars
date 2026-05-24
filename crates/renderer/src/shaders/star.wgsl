@@ -55,10 +55,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // `vertex.rs`:
     //   sigma_quad = PSF_SIGMA_PX / radius_px = 1 / PSF_QUAD_HALF_WIDTH_SIGMAS
     //   coeff      = 1 / (2 * sigma_quad^2) = PSF_QUAD_HALF_WIDTH_SIGMAS^2 / 2
-    // For half-width = 4 sigma this is 8.0. A unit test in `vertex.rs`
+    // For half-width = 5 sigma this is 12.5. A unit test in `vertex.rs`
     // (`shader_coefficient_matches_psf_constants`) pins the relationship.
     let r2 = dot(input.uv, input.uv);
-    let psf = exp(-r2 * 8.0);
+    let psf = exp(-r2 * 12.5);
     let intensity = psf * input.brightness;
 
     // Naked-eye limiting magnitude (~6.0) falls out of this cutoff for the

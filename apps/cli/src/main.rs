@@ -9,6 +9,13 @@ use renderer::{
     StarInstance,
 };
 
+/// CLI default for the observer's limiting magnitude. Looser than the strict
+/// dark-adapted naked-eye 6.0 because indoor screens can't reproduce the
+/// dynamic range of a pristine night sky — a slightly more sensitive virtual
+/// observer compensates without breaking Pogson's law. Also lines up well
+/// with the HYG catalog's depth (~m 7.5).
+const DEFAULT_LIMITING_MAGNITUDE: f32 = 7.5;
+
 /// Render the night sky as seen from a given observer to a PNG.
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -75,6 +82,16 @@ struct Args {
     /// Opacity of overlay lines (0..=1).
     #[arg(long, default_value_t = 0.6)]
     overlay_opacity: f32,
+
+    /// Limiting apparent magnitude of the simulated observer. Stars fainter
+    /// than this fade through the shader's discard cutoff. Increasing this
+    /// uniformly scales every star's linear flux ("more sensitive observer"
+    /// / "longer exposure") without breaking Pogson's law.
+    ///
+    /// 6.0 = strict dark-adapted naked eye; 7.5 ≈ binocular visual limit and
+    /// is a good default for indoor screens.
+    #[arg(long, default_value_t = DEFAULT_LIMITING_MAGNITUDE)]
+    limiting_magnitude: f32,
 }
 
 /// Mirror of `OverlayKind` for clap. Kept here so the renderer crate stays
@@ -170,10 +187,11 @@ fn main() -> Result<()> {
         .with_context(|| format!("Reading catalog at {}", args.catalog.display()))?;
     log::info!("Loaded {} stars", stars.len());
 
+    let limiting_mag = args.limiting_magnitude;
     let instances: Vec<StarInstance> = stars
         .iter()
         .map(|s| {
-            let p = magnitude_to_render_params(s.magnitude);
+            let p = magnitude_to_render_params(s.magnitude, limiting_mag);
             StarInstance {
                 position: s.position.into(),
                 size: p.radius_px,
