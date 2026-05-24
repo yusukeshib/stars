@@ -66,12 +66,7 @@ Columns:
 | 1 | **Web HUD redesign** — gear button + modal settings panel | `apps/web/frontend` | ✅ done |
 | 1 | **localStorage persistence** — observer + view survive reloads | `apps/web/frontend` | ✅ done |
 | 1 | **Web overlay toggles** — mirror CLI flags inside the settings panel | `apps/web/frontend` | ⏳ next |
-| 1 | **Constellation lines** (IAU asterisms) | One file of (HIP, HIP) pairs | ⬜ |
-| 1 | **Constellation boundaries** (IAU 1930) | Modern conversion of the Delporte boundaries | ⬜ |
-| 1 | **Star labels** — proper names + Bayer / Flamsteed for top ~50 stars | Needs a font atlas | ⬜ |
 | 1 | **Galactic equator overlay** | Same line pipeline as ecliptic; uses the transform from Phase 1' | ⬜ |
-| 1 | **Anti-aliased / thickness-controllable lines** | Triangle-strip line rendering | ⬜ |
-| 1 | **N / E / S / W and degree labels** | Text rendering from font atlas | ⬜ |
 | 1' | **Photometric zeropoint** — `magnitude → illuminance (lux)` so the whole pipeline runs in physical units | Schaefer, B. E. 1990, PASP 102, 212 | ✅ done (`astronomy::photometry`) |
 | 1' | **Mesopic chromatic-fidelity weight** — log-linear blend over the 0.005–5 cd/m² mesopic range, applied per-star so only bright stars retain B-V colour | CIE 191:2010, *Recommended System for Mesopic Photometry Based on Visual Performance* | ✅ done (`astronomy::photometry`) |
 | 1' | **Purkinje-shifted scotopic desaturation** — faint stars collapse toward a rod-weighted (~507 nm peak) grey rather than a flat luma | CIE 1951 V'(λ); Bowmaker & Dartnall 1980, J. Physiol. 298, 501 | ✅ done (`astronomy::photometry`) |
@@ -116,8 +111,10 @@ Columns:
 ## Exit criteria
 
 - **Phase 1.** Default config (web, native viewer, CLI) shows horizon +
-  cardinal markers + constellation lines, with full overlay control
-  behind a single settings panel.
+  cardinal markers + an overlay system controllable from a single
+  settings panel, with the seven sky-reference circles (horizon,
+  cardinals, alt-az grid, equatorial grid, ecliptic, celestial equator,
+  meridian) plus the galactic equator selectable per host.
 - **Phase 1'.** Default-on rendering with a dark observer shows a visible
   Milky Way band, atmospheric reddening near the horizon, and a clear
   chromatic / achromatic split between bright and faint stars, with every
