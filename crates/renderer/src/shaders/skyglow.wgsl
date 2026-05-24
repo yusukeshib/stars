@@ -1,16 +1,15 @@
 // Diffuse night-sky surface brightness pass.
 //
-// Renders the integrated-starlight (+ diffuse galactic light) glow as a
+// Renders integrated starlight, diffuse galactic light, zodiacal light,
+// airglow, and an analytic interstellar-dust screen as a
 // fullscreen pass over the HDR scene buffer, evaluated per fragment from
 // the camera-ray direction. Subsequent star + overlay passes additively
 // overlay on top of this background.
 //
-// Model: an analytic fit to Leinert et al. 1998 §6's published 1-D
-// surface-brightness profiles in galactic coordinates. The model has three
-// components — isotropic floor, thick disk (broad in galactic latitude),
-// thin disk with longitude-dependent bulge enhancement — summed in linear
-// flux (S10) units. See `astronomy::skyglow::isl_mag_per_arcsec2` for the
-// canonical version and unit tests against the published reference points.
+// Model: the ISL/DGL fit from `astronomy::skyglow::isl_mag_per_arcsec2`,
+// plus Leinert-inspired zodiacal light, airglow, and an SFD98-style analytic
+// dust screen. Components are summed in linear flux (S10) units before
+// conversion to the renderer's physical HDR scale.
 //
 // References:
 //   * Leinert, Ch. et al. 1998, "The 1997 reference of diffuse night sky
@@ -66,6 +65,40 @@ const ARCSEC2_PER_SR: f32 = 4.2545e10;
 // the diffuse glow ends up visible against a genuinely-dark sky without
 // any constant boost being needed in this shader.
 const PERCEPTUAL_BOOST_MAGS: f32 = 0.0;
+
+fn s10_to_mag(s10: f32) -> f32 {
+    return S10_TO_MAG_ARCSEC2_OFFSET - 2.5 * log(max(s10, 1e-12)) / log(10.0);
+}
+
+fn mag_to_s10(mu: f32) -> f32 {
+    return exp(log(10.0) * ((S10_TO_MAG_ARCSEC2_OFFSET - mu) / 2.5));
+}
+
+fn zodiacal_light_s10(beta_rad: f32, sun_rel_lon_rad: f32) -> f32 {
+    _ = sun_rel_lon_rad;
+    // Leinert §5-inspired compact table fit. Until Phase 2 provides the real
+    // solar longitude, keep only the broad ecliptic dust band; a fake fixed
+    // gegenschein renders as an obvious white disk and is visually misleading.
+    let beta = abs(beta_rad * RAD_TO_DEG);
+    let plane = 55.0 * exp(-pow(beta / 14.0, 2.0));
+    return 18.0 + plane;
+}
+
+fn dust_transmission(l_rad: f32, b_rad: f32) -> f32 {
+    // Schlegel-Finkbeiner-Davis 1998-inspired analytic E(B−V) screen.
+    let l_deg0 = l_rad * RAD_TO_DEG;
+    let l_deg = select(l_deg0, l_deg0 - 360.0, l_deg0 > 180.0);
+    let b_abs = abs(b_rad * RAD_TO_DEG);
+    let ebv = 0.015 + 0.12 * exp(-(b_abs / 8.0)) + 0.08 * exp(-pow(l_deg / 45.0, 2.0)) * exp(-(b_abs / 5.0));
+    return exp(NEG_OH_FOUR_LN10 * 3.1 * ebv);
+}
+
+fn diffuse_sky_mag_per_arcsec2(l_rad: f32, b_rad: f32, beta_rad: f32, sun_rel_lon_rad: f32) -> f32 {
+    let isl = mag_to_s10(isl_mag_per_arcsec2(l_rad, b_rad)) * dust_transmission(l_rad, b_rad);
+    let zl = zodiacal_light_s10(beta_rad, sun_rel_lon_rad);
+    let airglow = 145.0;
+    return s10_to_mag(isl + zl + airglow);
+}
 
 fn isl_mag_per_arcsec2(l_rad: f32, b_rad: f32) -> f32 {
     let l_deg = l_rad * RAD_TO_DEG;
@@ -133,7 +166,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let zeropoint = camera.viewport_pixel_sr_zeropoint.w;
     let pixel_sr = camera.viewport_pixel_sr_zeropoint.z;
     let pixel_arcsec2 = pixel_sr * ARCSEC2_PER_SR;
-    let mu = isl_mag_per_arcsec2(l_rad, b_rad) - PERCEPTUAL_BOOST_MAGS;
+    // Approximate ecliptic latitude directly from J2000 equatorial y/z using
+    // ε=23.4392911°. The longitude value is reserved for Phase 2's real solar
+    // ephemeris; the current zodiacal component intentionally avoids drawing a
+    // fake fixed gegenschein blob.
+    let y_ecl = 0.917482062 * ray_dir.y + 0.397777156 * ray_dir.z;
+    let z_ecl = -0.397777156 * ray_dir.y + 0.917482062 * ray_dir.z;
+    let beta = asin(clamp(z_ecl, -1.0, 1.0));
+    let sun_rel_lon = 0.0;
+    let mu = diffuse_sky_mag_per_arcsec2(l_rad, b_rad, beta, sun_rel_lon) - PERCEPTUAL_BOOST_MAGS;
     let flux_per_arcsec2 = exp(NEG_OH_FOUR_LN10 * (mu - zeropoint));
     let flux_per_pixel = flux_per_arcsec2 * pixel_arcsec2;
 

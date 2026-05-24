@@ -20,6 +20,7 @@ export const OVERLAY_LAYERS = [
   "ecliptic",
   "celestial-equator",
   "meridian",
+  "galactic-equator",
 ] as const;
 export type OverlayLayer = (typeof OVERLAY_LAYERS)[number];
 
@@ -44,6 +45,7 @@ export const OVERLAY_LABELS: Record<OverlayLayer, string> = {
   ecliptic: "Ecliptic",
   "celestial-equator": "Celestial equator",
   meridian: "Local meridian",
+  "galactic-equator": "Galactic equator",
 };
 
 export const isOverlayLayer = (s: unknown): s is OverlayLayer =>

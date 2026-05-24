@@ -27,6 +27,7 @@ pub enum OverlayArg {
     Ecliptic,
     CelestialEquator,
     Meridian,
+    GalacticEquator,
 }
 
 impl std::fmt::Display for OverlayArg {
@@ -47,6 +48,7 @@ impl From<OverlayArg> for OverlayKind {
             OverlayArg::Ecliptic => OverlayKind::Ecliptic,
             OverlayArg::CelestialEquator => OverlayKind::CelestialEquator,
             OverlayArg::Meridian => OverlayKind::Meridian,
+            OverlayArg::GalacticEquator => OverlayKind::GalacticEquator,
         }
     }
 }
@@ -85,6 +87,7 @@ mod tests {
             OverlayArg::Ecliptic,
             OverlayArg::CelestialEquator,
             OverlayArg::Meridian,
+            OverlayArg::GalacticEquator,
         ] {
             let kind: OverlayKind = arg.into();
             let s = kind.as_kebab_str();

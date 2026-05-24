@@ -1,5 +1,5 @@
 //! Sky overlays: horizon, cardinal marks, alt-az grid, equatorial grid,
-//! ecliptic, celestial equator, local meridian.
+//! ecliptic, celestial equator, galactic equator, local meridian.
 //!
 //! Two coordinate frames are supported per-layer:
 //! - **Equatorial** (J2000): geometry rotates with the celestial sphere as time
@@ -29,6 +29,16 @@ use crate::camera::Camera;
 /// precession lands; see ROADMAP.
 const OBLIQUITY_RAD: f64 = 0.409_092_804_222_329_3;
 
+/// Rotation matrix rows from J2000 equatorial to IAU galactic coordinates.
+/// The galactic-equator overlay uses the transpose (galactic → equatorial),
+/// matching `astronomy::skyglow` and SOFA's `iauIcrs2g` constants.
+#[rustfmt::skip]
+const EQUATORIAL_TO_GALACTIC_ROWS: [[f64; 3]; 3] = [
+    [-0.054_875_560_416_215, -0.873_437_090_234_885, -0.483_835_015_548_713],
+    [ 0.494_109_427_875_584, -0.444_829_629_960_011,  0.746_982_244_497_219],
+    [-0.867_666_149_019_004, -0.198_076_373_431_201,  0.455_983_776_175_067],
+];
+
 /// Inclusive bounds clamped onto `OverlayConfig::grid_step_deg` before the
 /// geometry generators run. The lower bound is what stops the `while`-style
 /// generators from looping forever on a zero or negative step (a single bad
@@ -56,6 +66,8 @@ pub enum OverlayKind {
     CelestialEquator,
     /// Local meridian: great circle through north point, zenith, south point, nadir.
     Meridian,
+    /// Great circle at galactic latitude b = 0 (the Milky Way mid-plane).
+    GalacticEquator,
 }
 
 impl OverlayKind {
@@ -73,6 +85,7 @@ impl OverlayKind {
             OverlayKind::Ecliptic => "ecliptic",
             OverlayKind::CelestialEquator => "celestial-equator",
             OverlayKind::Meridian => "meridian",
+            OverlayKind::GalacticEquator => "galactic-equator",
         }
     }
 
@@ -87,6 +100,7 @@ impl OverlayKind {
             "ecliptic" => OverlayKind::Ecliptic,
             "celestial-equator" => OverlayKind::CelestialEquator,
             "meridian" => OverlayKind::Meridian,
+            "galactic-equator" => OverlayKind::GalacticEquator,
             _ => return None,
         })
     }
@@ -379,6 +393,11 @@ fn build_layer(
             meridian_local(256),
             [0.65, 0.65, 0.70],
         ),
+        OverlayKind::GalacticEquator => (
+            OverlayFrame::Equatorial,
+            galactic_equator_circle(256),
+            [0.55, 0.80, 1.00],
+        ),
     }
 }
 
@@ -543,7 +562,30 @@ fn ecliptic_circle(n: usize) -> Vec<OverlayVertex> {
     verts
 }
 
-/// Local meridian: great circle in the (N, Up) plane (East component = 0).
+/// Great circle at galactic latitude b = 0, transformed back into J2000
+/// equatorial coordinates with the transpose of the SOFA-compatible
+/// equatorial→galactic rotation.
+fn galactic_equator_circle(n: usize) -> Vec<OverlayVertex> {
+    let r = EQUATORIAL_TO_GALACTIC_ROWS;
+    let p = |l: f64| {
+        let (sl, cl) = l.sin_cos();
+        // v_eq = R^T · (cos l, sin l, 0)
+        [
+            (r[0][0] * cl + r[1][0] * sl) as f32,
+            (r[0][1] * cl + r[1][1] * sl) as f32,
+            (r[0][2] * cl + r[1][2] * sl) as f32,
+        ]
+    };
+    let mut verts = Vec::with_capacity(n * 2);
+    for i in 0..n {
+        let l0 = (i as f64) / (n as f64) * TAU;
+        let l1 = ((i + 1) as f64) / (n as f64) * TAU;
+        verts.push(OverlayVertex { position: p(l0) });
+        verts.push(OverlayVertex { position: p(l1) });
+    }
+    verts
+}
+
 fn meridian_local(n: usize) -> Vec<OverlayVertex> {
     let p = |t: f64| {
         let (s, c) = t.sin_cos();
@@ -634,6 +676,7 @@ mod tests {
             OverlayKind::Ecliptic,
             OverlayKind::CelestialEquator,
             OverlayKind::Meridian,
+            OverlayKind::GalacticEquator,
         ] {
             let s = kind.as_kebab_str();
             assert_eq!(

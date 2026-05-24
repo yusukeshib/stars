@@ -1,5 +1,5 @@
-// Tonemap pass — Reinhard 2002 §3.3 photographic operator with a key
-// derived from the Ferwerda 1996 / CIE 191:2010 mesopic adaptation regime.
+// Tonemap pass — Pattanaik/Ferwerda-inspired rod-cone adaptation feeding
+// Reinhard 2002 §3.3 photographic display mapping.
 //
 // The pipeline:
 //
@@ -90,7 +90,11 @@ const MESOPIC_UPPER_CD_M2: f32 = 5.0;
 // daytime scenes pick Zone V, dim moonlit scenes interpolate, and
 // genuinely-dark night scenes pick the low-key value below.
 const KEY_PHOTOPIC: f32 = 0.18;
-const KEY_SCOTOPIC: f32 = 0.032;
+const ADAMS_ZONE_V: f32 = 0.18;
+const PATTANAIK_SCOTOPIC_ZONE_STOPS: f32 = 2.5;
+const KEY_SCOTOPIC: f32 = ADAMS_ZONE_V / exp2(PATTANAIK_SCOTOPIC_ZONE_STOPS);
+const SCOTOPIC_LUMA: vec3<f32> = vec3<f32>(0.05, 0.78, 0.17);
+const PHOTOPIC_LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 
 // Display white-point in HDR-key-relative units. The Reinhard Eq. (4)
 // formula
@@ -151,10 +155,18 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let w_phot = mesopic_photopic_weight(la_cd_m2);
     let key = mix(KEY_SCOTOPIC, KEY_PHOTOPIC, w_phot);
 
+    // Pattanaik 1998 separates rod and cone responses: as local fragment
+    // luminance falls below the CIE mesopic range, chroma is replaced by a
+    // V'(λ)-weighted scotopic signal rather than tone-mapping RGB unchanged.
+    let l_frag_cd_m2 = hdr_flux_to_cd_m2(dot(hdr, PHOTOPIC_LUMA), zeropoint);
+    let w_cone = mesopic_photopic_weight(l_frag_cd_m2);
+    let rod_signal = dot(hdr, SCOTOPIC_LUMA);
+    let cone_preserved = mix(vec3<f32>(rod_signal), hdr, w_cone);
+
     // Step 4: Reinhard 2002 Eq. (4) extended operator per channel.
     //   scaled = (key / L_a) · L
     //   L'    = scaled · (1 + scaled / L_white²) / (1 + scaled)
-    let scaled = (key / max(la_flux, 1e-20)) * hdr;
+    let scaled = (key / max(la_flux, 1e-20)) * cone_preserved;
     let lw2 = L_WHITE * L_WHITE;
     let rgb = scaled * (vec3<f32>(1.0) + scaled / vec3<f32>(lw2)) / (vec3<f32>(1.0) + scaled);
 

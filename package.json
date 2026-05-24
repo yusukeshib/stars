@@ -1,0 +1,13 @@
+{
+  "name": "stars-workspace",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/web/frontend"
+  ],
+  "scripts": {
+    "dev": "cd apps/web/frontend && bun run dev",
+    "build": "cd apps/web/frontend && bun run build",
+    "preview": "cd apps/web/frontend && bun run preview"
+  }
+}

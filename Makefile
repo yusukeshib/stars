@@ -1,4 +1,4 @@
-.PHONY: cli viewer web web-build web-dev setup fmt clippy test ci clean
+.PHONY: cli viewer dev web web-build web-install web-dev setup fmt clippy test ci clean
 
 # PNG-output CLI (override ARGS, e.g. `make cli ARGS="--lat 35.68 --lng 139.69 -o /tmp/sky.png"`).
 ARGS ?= --lat 35.68 --lng 139.69 --azimuth 180 --altitude 30 -o stars.png
@@ -9,19 +9,23 @@ cli:
 viewer:
 	cargo run -p stars-viewer --release
 
-# Web app (build WASM + start dev server)
-web: web-build web-dev
+# Web app (build WASM + install workspace deps + start dev server)
+dev: web
+
+web: web-build web-install web-dev
 
 web-build:
 	wasm-pack build apps/web --target web --out-dir frontend/pkg
 
+web-install:
+	bun install
+
 web-dev:
-	cd apps/web/frontend && bun run dev
+	bun run dev
 
 # Download star catalog
-setup:
+setup: web-build web-install
 	./scripts/download-catalog.sh
-	cd apps/web/frontend && bun install
 
 # Lint & test
 fmt:

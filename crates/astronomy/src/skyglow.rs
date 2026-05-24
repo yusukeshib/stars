@@ -9,11 +9,15 @@
 //!   the galactic plane; **this is the dominant Milky Way ingredient.**
 //! * **Diffuse galactic light (DGL)** — interstellar dust scattering the
 //!   integrated starlight. Tracks ISL with ~20–40% relative amplitude.
-//! * Zodiacal light, airglow, integrated extragalactic light — smaller,
-//!   broader components; deferred to a follow-up PR.
+//! * **Zodiacal light** — sunlight scattered by interplanetary dust,
+//!   strongest near the ecliptic and antisolar gegenschein.
+//! * **Airglow** — a broadly isotropic atmospheric floor.
+//! * **Interstellar dust extinction** — a Schlegel-Finkbeiner-Davis-style
+//!   analytic dust screen that dims the far-side integrated starlight near
+//!   the galactic plane.
 //!
-//! This module implements an analytic V-band ISL+DGL model in galactic
-//! coordinates, fit to the published surface-brightness profiles in:
+//! This module implements an analytic V-band diffuse-sky model in galactic
+//! and ecliptic coordinates, fit to the published surface-brightness profiles in:
 //!
 //!   Leinert, Ch., Bowyer, S., Haikala, L. K., et al. 1998,
 //!   *The 1997 reference of diffuse night sky brightness*,
@@ -140,17 +144,53 @@ const SIGMA_L_BULGE_DEG: f64 = 60.0; // bulge Gaussian σ in galactic longitude
 /// `μ = 27.78 - 2.5·log10(F)` mag/arcsec².
 const S10_TO_MAG_ARCSEC2_OFFSET: f64 = 27.78;
 
-/// Approximate V-band integrated-starlight + diffuse-galactic-light
-/// surface brightness in mag/arcsec², at galactic coordinates `(l, b)`
-/// in radians.
+/// Approximate total V-band diffuse-sky surface brightness in mag/arcsec².
 ///
-/// Calibrated against Leinert et al. 1998 §6 reference points; the model
-/// reproduces the published 1-D profiles to within ~0.5 mag/arcsec²
-/// across the visible range. This is adequate for naked-eye Milky Way
-/// visualisation; it is **not** a substitute for the published tables in
-/// radiometric applications.
-///
-/// Smaller `μ` = brighter sky.
+/// `l_rad`/`b_rad` are galactic coordinates for ISL/DGL and dust; `ecliptic_lat_rad`
+/// and `sun_relative_lon_rad` drive the zodiacal-light component. Smaller `μ` =
+/// brighter sky. This is calibrated for naked-eye visualisation and remains an
+/// analytic approximation, not a replacement for the published 2-D tables.
+pub fn diffuse_sky_mag_per_arcsec2(
+    l_rad: f64,
+    b_rad: f64,
+    ecliptic_lat_rad: f64,
+    sun_relative_lon_rad: f64,
+) -> f64 {
+    let isl = mag_to_s10(isl_mag_per_arcsec2(l_rad, b_rad)) * dust_transmission(l_rad, b_rad);
+    let zl = zodiacal_light_s10(ecliptic_lat_rad, sun_relative_lon_rad);
+    let airglow = 145.0; // Leinert §7: dark-site visual airglow floor, order 100–200 S10(V).
+    s10_to_mag(isl + zl + airglow)
+}
+
+fn mag_to_s10(mu: f64) -> f64 {
+    10.0_f64.powf((S10_TO_MAG_ARCSEC2_OFFSET - mu) / 2.5)
+}
+
+fn s10_to_mag(s10: f64) -> f64 {
+    S10_TO_MAG_ARCSEC2_OFFSET - 2.5 * s10.max(1e-12).log10()
+}
+
+fn zodiacal_light_s10(ecliptic_lat_rad: f64, _sun_relative_lon_rad: f64) -> f64 {
+    // Compact analytic approximation to Leinert §5's zodiacal-light table.
+    // Until Phase 2 provides the real solar longitude, keep only the broad
+    // ecliptic dust band; a fake fixed gegenschein renders as an obvious white
+    // disk and is visually misleading.
+    let beta = ecliptic_lat_rad.abs().to_degrees();
+    let plane = 55.0 * (-(beta / 14.0).powi(2)).exp();
+    18.0 + plane
+}
+
+fn dust_transmission(l_rad: f64, b_rad: f64) -> f64 {
+    // SFD98-inspired analytic E(B−V) screen: dust concentrated in the plane,
+    // enhanced toward the inner Galaxy. A_V=3.1E(B−V), transmission=10^-0.4Av.
+    let l_deg = l_rad.to_degrees();
+    let l_centered = if l_deg > 180.0 { l_deg - 360.0 } else { l_deg };
+    let ebv = 0.015
+        + 0.12 * (-(b_rad.to_degrees().abs() / 8.0)).exp()
+        + 0.08 * (-(l_centered / 45.0).powi(2)).exp() * (-(b_rad.to_degrees().abs() / 5.0)).exp();
+    10.0_f64.powf(-0.4 * 3.1 * ebv)
+}
+
 pub fn isl_mag_per_arcsec2(l_rad: f64, b_rad: f64) -> f64 {
     let l_deg = l_rad.to_degrees();
     let b_deg = b_rad.to_degrees();
@@ -317,5 +357,22 @@ mod tests {
             mu_b30 > mu_b0 + 1.0,
             "disk should fade ≥ 1 mag from plane to b=30°: μ(0)={mu_b0}, μ(30°)={mu_b30}"
         );
+    }
+
+    #[test]
+    fn diffuse_sky_includes_zodiacal_and_airglow_floor() {
+        let high_lat = diffuse_sky_mag_per_arcsec2(deg(180.0), deg(80.0), deg(80.0), deg(90.0));
+        let ecliptic_plane = diffuse_sky_mag_per_arcsec2(deg(180.0), deg(80.0), 0.0, deg(90.0));
+        assert!(
+            ecliptic_plane < high_lat,
+            "zodiacal plane should be brighter: plane μ={ecliptic_plane}, high-lat μ={high_lat}"
+        );
+    }
+
+    #[test]
+    fn dust_screen_dims_galactic_plane_isl() {
+        let raw = isl_mag_per_arcsec2(0.0, 0.0);
+        let dimmed = s10_to_mag(mag_to_s10(raw) * dust_transmission(0.0, 0.0));
+        assert!(dimmed > raw, "dust should make ISL numerically fainter");
     }
 }
