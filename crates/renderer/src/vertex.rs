@@ -2,12 +2,12 @@ use bytemuck::{Pod, Zeroable};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct QuadVertex {
-    pub position: [f32; 2],
+pub(crate) struct QuadVertex {
+    position: [f32; 2],
 }
 
 impl QuadVertex {
-    pub const VERTICES: &[Self] = &[
+    pub(crate) const VERTICES: &[Self] = &[
         Self {
             position: [-1.0, -1.0],
         },
@@ -22,14 +22,16 @@ impl QuadVertex {
         },
     ];
 
-    pub const INDICES: &[u16] = &[0, 1, 2, 0, 2, 3];
+    pub(crate) const INDICES: &[u16] = &[0, 1, 2, 0, 2, 3];
+
+    const OFFSET_POSITION: u64 = std::mem::offset_of!(Self, position) as u64;
 
     pub(crate) fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[wgpu::VertexAttribute {
-                offset: 0,
+                offset: Self::OFFSET_POSITION,
                 shader_location: 0,
                 format: wgpu::VertexFormat::Float32x2,
             }],

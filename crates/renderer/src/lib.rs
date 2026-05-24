@@ -10,7 +10,6 @@ pub use camera::{Atmosphere, Camera, CameraUniform, LocalView};
 pub use overlay::{OverlayConfig, OverlayKind};
 pub use renderer::Renderer;
 pub use vertex::{
-    build_star_instance, limiting_magnitude_to_zeropoint, magnitude_to_render_params, QuadVertex,
-    RenderParams, StarInstance, NAKED_EYE_LIMITING_MAGNITUDE, SHADER_INTENSITY_CUTOFF,
-    STAR_QUAD_HALF_PX,
+    build_star_instance, limiting_magnitude_to_zeropoint, magnitude_to_render_params, RenderParams,
+    StarInstance, NAKED_EYE_LIMITING_MAGNITUDE, SHADER_INTENSITY_CUTOFF, STAR_QUAD_HALF_PX,
 };
