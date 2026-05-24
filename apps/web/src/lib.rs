@@ -4,8 +4,8 @@ use std::rc::Rc;
 use astronomy::{julian_date_from_unix_seconds, Observer};
 use catalog::load_embedded;
 use renderer::{
-    magnitude_to_render_params, Camera, LocalView, OverlayConfig, OverlayKind, Renderer,
-    StarInstance, NAKED_EYE_LIMITING_MAGNITUDE,
+    build_star_instance, Camera, LocalView, OverlayConfig, OverlayKind, Renderer, StarInstance,
+    NAKED_EYE_LIMITING_MAGNITUDE,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -104,15 +104,7 @@ impl StarView {
         log::info!("Loaded {} stars", stars.len());
         let instances: Vec<StarInstance> = stars
             .iter()
-            .map(|s| {
-                let p = magnitude_to_render_params(s.magnitude, LIMITING_MAGNITUDE);
-                StarInstance {
-                    position: s.position.into(),
-                    size: p.radius_px,
-                    color: s.color,
-                    brightness: p.brightness,
-                }
-            })
+            .map(|s| build_star_instance(s.position.into(), s.color, s.magnitude, LIMITING_MAGNITUDE))
             .collect();
 
         let renderer = Renderer::new(&device, format, &instances);
