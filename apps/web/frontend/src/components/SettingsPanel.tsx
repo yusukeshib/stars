@@ -1,11 +1,14 @@
-import type { Observer } from "../observer";
+import type { Observer, OverlayConfig } from "../observer";
+import { OverlayToggles } from "./OverlayToggles";
 
 type Props = {
   observer: Observer;
   timeMs: number;
+  overlays: OverlayConfig;
   onClose: () => void;
   onSetObserver: (next: Observer) => void;
   onSetTime: (timeMs: number) => void;
+  onSetOverlays: (next: OverlayConfig) => void;
   onUseGeolocation: () => void;
 };
 
@@ -19,9 +22,11 @@ function toLocalDatetimeInput(timeMs: number): string {
 export function SettingsPanel({
   observer,
   timeMs,
+  overlays,
   onClose,
   onSetObserver,
   onSetTime,
+  onSetOverlays,
   onUseGeolocation,
 }: Props) {
   return (
@@ -140,6 +145,10 @@ export function SettingsPanel({
           <p style={{ margin: "8px 0 0", fontSize: 11, opacity: 0.55 }}>
             Setting a time rebases the clock; it then ticks forward from there.
           </p>
+        </Section>
+
+        <Section label="OVERLAYS">
+          <OverlayToggles config={overlays} onChange={onSetOverlays} />
         </Section>
 
         <p style={{ margin: "16px 0 0", fontSize: 11, opacity: 0.45 }}>

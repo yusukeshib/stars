@@ -1,4 +1,9 @@
-import type { Observer, View } from "./observer";
+import {
+  isOverlayLayer,
+  type Observer,
+  type OverlayConfig,
+  type View,
+} from "./observer";
 
 const STORAGE_KEY = "stars:config";
 const CURRENT_VERSION = 1;
@@ -6,10 +11,16 @@ const CURRENT_VERSION = 1;
 /// Schema for everything that survives a page reload. Bump `version` when the
 /// shape changes in an incompatible way; `loadConfig` returns `null` for any
 /// version it doesn't recognize so callers fall back to defaults cleanly.
+///
+/// We've kept `version: 1` while adding new optional fields so older saves
+/// (lat/lng + view only) still hydrate. Individual fields go through their
+/// own type guard, so a corrupt entry only drops that one field rather than
+/// the whole config.
 export type PersistedConfig = {
   version: 1;
   observer: Observer;
   view: View;
+  overlays?: OverlayConfig;
 };
 
 export type PartialPersistedConfig = Partial<Omit<PersistedConfig, "version">>;
@@ -24,11 +35,17 @@ export function loadConfig(): PartialPersistedConfig | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object") return null;
-    const obj = parsed as { version?: unknown; observer?: unknown; view?: unknown };
+    const obj = parsed as {
+      version?: unknown;
+      observer?: unknown;
+      view?: unknown;
+      overlays?: unknown;
+    };
     if (obj.version !== CURRENT_VERSION) return null;
     const out: PartialPersistedConfig = {};
     if (isObserver(obj.observer)) out.observer = obj.observer;
     if (isView(obj.view)) out.view = obj.view;
+    if (isOverlayConfig(obj.overlays)) out.overlays = obj.overlays;
     return out;
   } catch {
     return null;
@@ -72,5 +89,19 @@ function isView(v: unknown): v is View {
     inRange(o.azimuthDeg, AZ_RANGE) &&
     inRange(o.altitudeDeg, ALT_RANGE) &&
     inRange(o.fovDeg, FOV_RANGE)
+  );
+}
+
+const GRID_STEP_RANGE: [number, number] = [1, 90];
+const OPACITY_RANGE: [number, number] = [0, 1];
+
+function isOverlayConfig(v: unknown): v is OverlayConfig {
+  if (!v || typeof v !== "object") return false;
+  const o = v as Partial<OverlayConfig>;
+  return (
+    Array.isArray(o.layers) &&
+    o.layers.every(isOverlayLayer) &&
+    inRange(o.gridStepDeg, GRID_STEP_RANGE) &&
+    inRange(o.opacity, OPACITY_RANGE)
   );
 }

@@ -3,7 +3,10 @@ use std::rc::Rc;
 
 use astronomy::{julian_date_from_unix_seconds, Observer};
 use catalog::load_embedded;
-use renderer::{magnitude_to_render_params, Camera, LocalView, Renderer, StarInstance};
+use renderer::{
+    magnitude_to_render_params, Camera, LocalView, OverlayConfig, OverlayKind, Renderer,
+    StarInstance,
+};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -122,6 +125,36 @@ impl StarView {
         let jd = julian_date_from_unix_seconds(time_unix_ms / 1000.0);
         self.state.borrow_mut().camera.observer =
             Observer::from_degrees(lat_deg, lng_deg, jd);
+    }
+
+    /// Update the active overlay layers. `layers` is a list of kebab-case names
+    /// that match the CLI's `--overlays` flag: "horizon", "cardinals",
+    /// "alt-az-grid", "equatorial-grid", "ecliptic", "celestial-equator",
+    /// "meridian". Unknown names are silently ignored so the JS layer can
+    /// evolve without breaking older builds.
+    pub fn set_overlays(&self, layers: Vec<String>, grid_step_deg: f64, opacity: f32) {
+        let kinds: Vec<OverlayKind> = layers
+            .iter()
+            .filter_map(|name| match name.as_str() {
+                "horizon" => Some(OverlayKind::Horizon),
+                "cardinals" => Some(OverlayKind::Cardinals),
+                "alt-az-grid" => Some(OverlayKind::AltAzGrid),
+                "equatorial-grid" => Some(OverlayKind::EquatorialGrid),
+                "ecliptic" => Some(OverlayKind::Ecliptic),
+                "celestial-equator" => Some(OverlayKind::CelestialEquator),
+                "meridian" => Some(OverlayKind::Meridian),
+                _ => None,
+            })
+            .collect();
+        let s = &mut *self.state.borrow_mut();
+        s.renderer.set_overlays(
+            &s.device,
+            &OverlayConfig {
+                layers: kinds,
+                grid_step_deg,
+                opacity: opacity.clamp(0.0, 1.0),
+            },
+        );
     }
 
     pub fn set_view(&self, azimuth_rad: f32, altitude_rad: f32, fov_y_rad: f32) {

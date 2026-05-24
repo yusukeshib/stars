@@ -7,7 +7,9 @@ import {
   clampAltitude,
   clampFov,
   wrapAzimuth,
+  DEFAULT_OVERLAY_CONFIG,
   type Observer,
+  type OverlayConfig,
   type View,
 } from "./observer";
 import { loadConfig, saveConfig } from "./storage";
@@ -31,18 +33,21 @@ const PERSISTED = loadConfig();
 export function App() {
   const [observer, setObserver] = useState<Observer>(PERSISTED?.observer ?? DEFAULT_OBSERVER);
   const [view, setView] = useState<View>(PERSISTED?.view ?? DEFAULT_VIEW);
+  const [overlays, setOverlays] = useState<OverlayConfig>(
+    PERSISTED?.overlays ?? DEFAULT_OVERLAY_CONFIG,
+  );
   const [timeMs, setTimeMs] = useState<number>(() => Date.now());
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Persist observer + view whenever they change. We debounce because the view
-  // updates on every mouse/touch frame during a drag, and localStorage.setItem
-  // is synchronous; without the debounce we'd write ~60 times a second.
-  // Time is intentionally not persisted: a stale timestamp on next load would
-  // silently mislead the user.
+  // Persist observer + view + overlays whenever they change. We debounce
+  // because the view updates on every mouse/touch frame during a drag, and
+  // localStorage.setItem is synchronous; without the debounce we'd write ~60
+  // times a second. Time is intentionally not persisted: a stale timestamp on
+  // next load would silently mislead the user.
   useEffect(() => {
-    const handle = setTimeout(() => saveConfig({ observer, view }), 250);
+    const handle = setTimeout(() => saveConfig({ observer, view, overlays }), 250);
     return () => clearTimeout(handle);
-  }, [observer, view]);
+  }, [observer, view, overlays]);
 
   // Clock always ticks. When the user picks a custom moment via the settings
   // panel we simply rebase `timeMs`; the same loop keeps advancing from there.
@@ -93,6 +98,7 @@ export function App() {
         observer={observer}
         view={view}
         timeMs={timeMs}
+        overlays={overlays}
         onDrag={(daz, dalt) =>
           setView((v) => ({
             ...v,
@@ -110,9 +116,11 @@ export function App() {
         <SettingsPanel
           observer={observer}
           timeMs={timeMs}
+          overlays={overlays}
           onClose={() => setSettingsOpen(false)}
           onSetObserver={setObserver}
           onSetTime={setTimeMs}
+          onSetOverlays={setOverlays}
           onUseGeolocation={useGeolocation}
         />
       )}
