@@ -4,25 +4,9 @@ use wgpu::util::DeviceExt;
 use crate::camera::{Camera, CameraUniform};
 use crate::overlay::{OverlayConfig, OverlayRenderer};
 use crate::pipeline;
+use crate::skyglow::Skyglow;
 use crate::tonemap::{Tonemap, HDR_FORMAT};
 use crate::vertex::{QuadVertex, StarInstance};
-
-/// Background "colour of empty sky" in linear-light units, written as the
-/// HDR pass's clear value before any stars or overlays are drawn.
-///
-/// In linear light a 1 cd/m² target is "1.0" by convention; the night-sky
-/// background here is set to ~10⁻² cd/m² which is roughly where airglow
-/// and faint integrated starlight sit at a dark site (Leinert et al. 1998
-/// puts the dark-sky zenith near 22 mag/arcsec², equivalent to a few times
-/// 10⁻⁴ cd/m²; the value chosen here is brighter so the sky has some
-/// visible "body" through the Reinhard tone curve until the physical
-/// Leinert background pass lands — see ROADMAP Phase 2.5).
-const HDR_CLEAR_COLOR: wgpu::Color = wgpu::Color {
-    r: 0.010,
-    g: 0.010,
-    b: 0.020,
-    a: 1.0,
-};
 
 pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
@@ -32,6 +16,8 @@ pub struct Renderer {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     num_stars: u32,
+    skyglow: Skyglow,
+    skyglow_enabled: bool,
     overlay: OverlayRenderer,
     tonemap: Tonemap,
 }
@@ -87,10 +73,11 @@ impl Renderer {
             }],
         });
 
-        // The star and overlay passes both render to the HDR scene buffer,
-        // so their pipelines are built against `HDR_FORMAT`, not the host's
-        // final swapchain format.
+        // The skyglow, star and overlay passes all render to the HDR scene
+        // buffer, so their pipelines are built against `HDR_FORMAT`, not
+        // the host's final swapchain format.
         let pipeline = pipeline::create_pipeline(device, HDR_FORMAT, &camera_bind_group_layout);
+        let skyglow = Skyglow::new(device, &camera_bind_group_layout);
         let overlay = OverlayRenderer::new(device, HDR_FORMAT);
         let tonemap = Tonemap::new(device, final_format, width, height);
 
@@ -102,9 +89,20 @@ impl Renderer {
             camera_buffer,
             camera_bind_group,
             num_stars: stars.len() as u32,
+            skyglow,
+            skyglow_enabled: true,
             overlay,
             tonemap,
         }
+    }
+
+    /// Enable or disable the diffuse skyglow pass. When disabled the HDR
+    /// scene buffer is cleared to black and the star + overlay passes
+    /// composite directly on top — useful for debugging or for views from
+    /// outside the Earth-atmosphere context (where the Milky Way's
+    /// integrated starlight model also stops making physical sense).
+    pub fn set_skyglow_enabled(&mut self, enabled: bool) {
+        self.skyglow_enabled = enabled;
     }
 
     /// Rebuild the overlay layers from `config`. Pass `OverlayConfig { layers: vec![], ..}`
@@ -128,15 +126,46 @@ impl Renderer {
 
     /// Render one frame.
     ///
-    /// Two passes:
-    ///   1. **Scene → HDR** — stars (additive) and overlays (premultiplied
-    ///      additive) accumulate into a private `Rgba16Float` texture, so
-    ///      faint contributions are preserved past the [0, 1] range a
-    ///      UNORM target would clip them to.
-    ///   2. **Tonemap → final** — a fullscreen pass samples the HDR
+    /// Pass order:
+    ///   1. **Skyglow → HDR** — a fullscreen pass writes the Leinert
+    ///      1998 integrated-starlight (+ DGL) surface-brightness model
+    ///      into the HDR scene buffer, attenuated by atmospheric
+    ///      extinction. This is the Milky Way *band* itself.
+    ///   2. **Stars + overlays → HDR** (additive) — stars and overlay
+    ///      lines load the skyglow background and add their contributions
+    ///      on top. Star peaks routinely run > 1.0 in HDR units.
+    ///   3. **Tonemap → final** — a fullscreen pass samples the HDR
     ///      texture and applies a luminance-preserving Reinhard operator,
     ///      writing the result to `view` (the host's swapchain texture).
     pub fn render(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
+        // Pass 1: skyglow fills the HDR buffer with the diffuse-sky
+        // baseline (clears to black, then writes the Leinert ISL+DGL
+        // model evaluated per fragment). When disabled the clear still
+        // happens — we just skip the draw call so the buffer stays black
+        // for the star + overlay passes.
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Skyglow HDR Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: self.tonemap.scene_view(),
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            if self.skyglow_enabled {
+                self.skyglow.draw(&mut pass, &self.camera_bind_group);
+            }
+        }
+
+        // Pass 2: stars + overlays load the skyglow background and add.
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Scene HDR Pass"),
@@ -144,7 +173,7 @@ impl Renderer {
                     view: self.tonemap.scene_view(),
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(HDR_CLEAR_COLOR),
+                        load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
@@ -169,6 +198,7 @@ impl Renderer {
             self.overlay.draw(&mut pass);
         }
 
+        // Pass 3: tonemap the assembled HDR scene to the swapchain.
         self.tonemap.draw(encoder, view);
     }
 }

@@ -1,7 +1,11 @@
 struct CameraUniform {
     view_proj: mat4x4<f32>,
-    viewport_size: vec2<f32>,
-    _pad0: vec2<f32>,
+    // Inverse of view_proj. Unused by the star pass (kept here so the
+    // struct layout matches the Rust-side `CameraUniform`); used by
+    // shaders/skyglow.wgsl to recover per-pixel ray directions.
+    inv_view_proj: mat4x4<f32>,
+    // [viewport_width, viewport_height, pixel_solid_angle_sr, magnitude_zeropoint].
+    viewport_pixel_sr_zeropoint: vec4<f32>,
     // Local zenith expressed in J2000 equatorial coordinates. Dotted with
     // the unit-vector star position yields sin(altitude) directly, so
     // per-star altitude is computed here on the GPU without uploading a
@@ -11,6 +15,10 @@ struct CameraUniform {
     // disables extinction.
     extinction_k_rgb: vec4<f32>,
 };
+
+fn viewport_size() -> vec2<f32> {
+    return camera.viewport_pixel_sr_zeropoint.xy;
+}
 
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
@@ -62,7 +70,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     let clip = camera.view_proj * vec4<f32>(input.star_pos, 1.0);
 
     let pixel_offset = input.quad_pos * input.star_size;
-    let ndc_offset = pixel_offset / camera.viewport_size * 2.0;
+    let ndc_offset = pixel_offset / viewport_size() * 2.0;
 
     out.clip_position = vec4<f32>(
         clip.x + ndc_offset.x * clip.w,

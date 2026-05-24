@@ -3,6 +3,8 @@ use astronomy::{equatorial_to_horizontal_matrix, lmst_radians, Observer};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
+use crate::vertex::{limiting_magnitude_to_zeropoint, NAKED_EYE_LIMITING_MAGNITUDE};
+
 /// GPU-side camera + atmosphere state. WGSL layout requires `vec3` fields to
 /// be 16-byte aligned, so the per-channel extinction coefficients and the
 /// equatorial "zenith" direction are stored as `vec4` with an unused `w`
@@ -12,8 +14,23 @@ use glam::{Mat4, Vec3};
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 pub struct CameraUniform {
     pub view_proj: [[f32; 4]; 4],
-    pub viewport_size: [f32; 2],
-    pub _pad0: [f32; 2],
+    /// Inverse of `view_proj`. Lets a fullscreen pass reconstruct the
+    /// world-space ray direction for each pixel from its clip-space
+    /// coordinate — used by the skyglow pass to sample the
+    /// surface-brightness model in galactic coordinates.
+    pub inv_view_proj: [[f32; 4]; 4],
+    /// `[viewport_width, viewport_height, pixel_solid_angle_sr, magnitude_zeropoint]`.
+    /// Packed into one `vec4` for WGSL 16-byte alignment.
+    ///
+    /// * `pixel_solid_angle_sr` lets a surface-brightness pass convert a
+    ///   per-arcsec² flux into the per-pixel HDR contribution the rest of
+    ///   the pipeline expects.
+    /// * `magnitude_zeropoint` is the apparent magnitude at which the
+    ///   renderer's brightness scale is 1.0 (see
+    ///   [`limiting_magnitude_to_zeropoint`] / `vertex::magnitude_to_render_params`).
+    ///   Sharing it lets the skyglow pass produce HDR values on the same
+    ///   scale as the star pass.
+    pub viewport_pixel_sr_zeropoint: [f32; 4],
     /// Observer's local "up" expressed in J2000 equatorial coordinates.
     /// The shader uses `sin(alt) = dot(star_pos, zenith_eq)` to derive
     /// per-star altitude without re-uploading the rotation matrix.
@@ -99,6 +116,14 @@ pub struct Camera {
     pub view: LocalView,
     pub aspect: f32,
     pub atmosphere: Atmosphere,
+    /// Faintest magnitude the simulated observer should be able to detect.
+    /// Anchors the linear-flux brightness scale used by both the star pass
+    /// and the skyglow surface-brightness pass; see
+    /// `vertex::magnitude_to_render_params` for the formula. Hosts that
+    /// want to render a more-or-less-sensitive observer should set this
+    /// alongside the field of the same name they pass to
+    /// `build_star_instance`.
+    pub limiting_magnitude: f32,
 }
 
 impl Camera {
@@ -108,6 +133,7 @@ impl Camera {
             view,
             aspect,
             atmosphere: Atmosphere::default(),
+            limiting_magnitude: NAKED_EYE_LIMITING_MAGNITUDE,
         }
     }
 
@@ -172,13 +198,31 @@ impl Camera {
         Vec3::new(m[0][2], m[1][2], m[2][2])
     }
 
+    /// Approximate solid angle subtended by one pixel of the framebuffer,
+    /// in steradians. Assumes a square pixel and small-angle behaviour at
+    /// the centre of the viewport (the value is constant across the frame
+    /// in this approximation, which is good enough for naked-eye-scale
+    /// FoVs; wide-FoV edge fall-off would need a per-fragment computation,
+    /// scoped for a future PR).
+    fn pixel_solid_angle_sr(&self, height_pixels: u32) -> f32 {
+        let pixel_size_rad = self.view.fov_y_rad / height_pixels.max(1) as f32;
+        pixel_size_rad * pixel_size_rad
+    }
+
     pub fn uniform(&self, width: u32, height: u32) -> CameraUniform {
         let zenith = self.zenith_in_equatorial();
         let k = self.atmosphere.extinction_k_rgb;
+        let view_proj = self.view_proj();
+        let inv_view_proj = view_proj.inverse();
         CameraUniform {
-            view_proj: self.view_proj().to_cols_array_2d(),
-            viewport_size: [width as f32, height as f32],
-            _pad0: [0.0; 2],
+            view_proj: view_proj.to_cols_array_2d(),
+            inv_view_proj: inv_view_proj.to_cols_array_2d(),
+            viewport_pixel_sr_zeropoint: [
+                width as f32,
+                height as f32,
+                self.pixel_solid_angle_sr(height),
+                limiting_magnitude_to_zeropoint(self.limiting_magnitude),
+            ],
             zenith_eq: [zenith.x, zenith.y, zenith.z, 0.0],
             extinction_k_rgb: [k[0], k[1], k[2], 0.0],
         }

@@ -64,7 +64,11 @@ pub(crate) fn create_camera_bind_group_layout(device: &wgpu::Device) -> wgpu::Bi
         label: Some("Camera Bind Group Layout"),
         entries: &[wgpu::BindGroupLayoutEntry {
             binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX,
+            // The star pass reads the camera uniform from its vertex
+            // shader; the skyglow fullscreen pass reads it from its
+            // fragment shader. Expose to both so the same bind group
+            // serves both pipelines.
+            visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: false,

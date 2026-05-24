@@ -108,12 +108,15 @@ impl StarView {
             .collect();
 
         let renderer = Renderer::new(&device, format, width, height, &instances);
-        let camera = Camera::new(
+        let mut camera = Camera::new(
             // Defaults; JS will overwrite immediately.
             Observer::from_degrees(0.0, 0.0, 2_451_545.0),
             LocalView::default(),
             width as f32 / height as f32,
         );
+        // Same brightness scale as the star pipeline so the skyglow pass
+        // composites correctly on top.
+        camera.limiting_magnitude = LIMITING_MAGNITUDE;
 
         Ok(StarView {
             state: Rc::new(RefCell::new(RenderState {
