@@ -34,10 +34,14 @@ export function App() {
   const [timeMs, setTimeMs] = useState<number>(() => Date.now());
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Persist observer + view whenever they change. Time is intentionally not
-  // persisted: a stale timestamp on next load would silently mislead the user.
+  // Persist observer + view whenever they change. We debounce because the view
+  // updates on every mouse/touch frame during a drag, and localStorage.setItem
+  // is synchronous; without the debounce we'd write ~60 times a second.
+  // Time is intentionally not persisted: a stale timestamp on next load would
+  // silently mislead the user.
   useEffect(() => {
-    saveConfig({ observer, view });
+    const handle = setTimeout(() => saveConfig({ observer, view }), 250);
+    return () => clearTimeout(handle);
   }, [observer, view]);
 
   // Clock always ticks. When the user picks a custom moment via the settings

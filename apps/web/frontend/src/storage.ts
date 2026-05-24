@@ -47,18 +47,30 @@ export function saveConfig(config: Omit<PersistedConfig, "version">): void {
   }
 }
 
+// Range gates protect against tampered / out-of-domain localStorage entries.
+// Values outside these ranges can't represent a real observer or view, so we
+// reject the whole field rather than silently clamping.
+const LAT_RANGE: [number, number] = [-90, 90];
+const LNG_RANGE: [number, number] = [-180, 180];
+const AZ_RANGE: [number, number] = [0, 360];
+const ALT_RANGE: [number, number] = [-90, 90];
+const FOV_RANGE: [number, number] = [1, 179];
+
+const inRange = (n: unknown, [lo, hi]: [number, number]): n is number =>
+  typeof n === "number" && Number.isFinite(n) && n >= lo && n <= hi;
+
 function isObserver(v: unknown): v is Observer {
   if (!v || typeof v !== "object") return false;
   const o = v as Partial<Observer>;
-  return Number.isFinite(o.latitudeDeg) && Number.isFinite(o.longitudeDeg);
+  return inRange(o.latitudeDeg, LAT_RANGE) && inRange(o.longitudeDeg, LNG_RANGE);
 }
 
 function isView(v: unknown): v is View {
   if (!v || typeof v !== "object") return false;
   const o = v as Partial<View>;
   return (
-    Number.isFinite(o.azimuthDeg) &&
-    Number.isFinite(o.altitudeDeg) &&
-    Number.isFinite(o.fovDeg)
+    inRange(o.azimuthDeg, AZ_RANGE) &&
+    inRange(o.altitudeDeg, ALT_RANGE) &&
+    inRange(o.fovDeg, FOV_RANGE)
   );
 }

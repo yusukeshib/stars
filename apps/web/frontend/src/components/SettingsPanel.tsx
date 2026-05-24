@@ -94,10 +94,12 @@ export function SettingsPanel({
               id="set-lat"
               type="number"
               step="0.01"
+              min={-90}
+              max={90}
               value={observer.latitudeDeg}
               onChange={(e) => {
                 const v = Number(e.target.value);
-                if (e.target.value !== "" && Number.isFinite(v)) {
+                if (e.target.value !== "" && Number.isFinite(v) && v >= -90 && v <= 90) {
                   onSetObserver({ ...observer, latitudeDeg: v });
                 }
               }}
@@ -108,10 +110,12 @@ export function SettingsPanel({
               id="set-lng"
               type="number"
               step="0.01"
+              min={-180}
+              max={180}
               value={observer.longitudeDeg}
               onChange={(e) => {
                 const v = Number(e.target.value);
-                if (e.target.value !== "" && Number.isFinite(v)) {
+                if (e.target.value !== "" && Number.isFinite(v) && v >= -180 && v <= 180) {
                   onSetObserver({ ...observer, longitudeDeg: v });
                 }
               }}
