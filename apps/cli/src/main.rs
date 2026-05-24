@@ -5,7 +5,8 @@ use astronomy::Observer;
 use catalog::load_from_file;
 use clap::Parser;
 use renderer::{
-    build_star_instance, Camera, LocalView, OverlayConfig, OverlayKind, Renderer, StarInstance,
+    build_star_instance, Atmosphere, Camera, LocalView, OverlayConfig, OverlayKind, Renderer,
+    StarInstance,
 };
 use stars_host_common::{parse_time_to_jd, OverlayArg};
 
@@ -92,6 +93,15 @@ struct Args {
     /// is a good default for indoor screens.
     #[arg(long, default_value_t = DEFAULT_LIMITING_MAGNITUDE)]
     limiting_magnitude: f32,
+
+    /// Disable atmospheric extinction (Schaefer 1993). With the default
+    /// (extinction on), stars near the horizon dim and redden according to
+    /// the Kasten-Young 1989 airmass and Hardie 1962 / Schaefer 1993
+    /// per-channel coefficients. This flag turns the atmosphere off, so
+    /// every star renders at its catalogue magnitude regardless of
+    /// altitude — useful for debugging or for views from outside Earth.
+    #[arg(long)]
+    no_extinction: bool,
 }
 
 fn overlay_config_from_args(args: &Args) -> OverlayConfig {
@@ -136,10 +146,16 @@ fn main() -> Result<()> {
         .collect();
 
     let overlays = overlay_config_from_args(&args);
+    let atmosphere = if args.no_extinction {
+        Atmosphere::OFF
+    } else {
+        Atmosphere::default()
+    };
 
     let pixels = pollster::block_on(render_to_pixels(
         observer,
         view,
+        atmosphere,
         args.width,
         args.height,
         &instances,
@@ -160,6 +176,7 @@ const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 async fn render_to_pixels(
     observer: Observer,
     view: LocalView,
+    atmosphere: Atmosphere,
     width: u32,
     height: u32,
     stars: &[StarInstance],
@@ -208,7 +225,8 @@ async fn render_to_pixels(
 
     let mut renderer = Renderer::new(&device, TEXTURE_FORMAT, width, height, stars);
     renderer.set_overlays(&device, overlays);
-    let camera = Camera::new(observer, view, width as f32 / height as f32);
+    let mut camera = Camera::new(observer, view, width as f32 / height as f32);
+    camera.atmosphere = atmosphere;
     renderer.update_camera(&queue, &camera, width, height);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {

@@ -1,13 +1,66 @@
+use astronomy::photometry::DEFAULT_EXTINCTION_K_RGB;
 use astronomy::{equatorial_to_horizontal_matrix, lmst_radians, Observer};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
+/// GPU-side camera + atmosphere state. WGSL layout requires `vec3` fields to
+/// be 16-byte aligned, so the per-channel extinction coefficients and the
+/// equatorial "zenith" direction are stored as `vec4` with an unused `w`
+/// component. This keeps the Rust struct byte-for-byte identical to the
+/// shader's view of it.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 pub struct CameraUniform {
     pub view_proj: [[f32; 4]; 4],
     pub viewport_size: [f32; 2],
-    pub _pad: [f32; 2],
+    pub _pad0: [f32; 2],
+    /// Observer's local "up" expressed in J2000 equatorial coordinates.
+    /// The shader uses `sin(alt) = dot(star_pos, zenith_eq)` to derive
+    /// per-star altitude without re-uploading the rotation matrix.
+    /// `w` is unused (alignment padding).
+    pub zenith_eq: [f32; 4],
+    /// Per-channel atmospheric extinction coefficients (mag per airmass).
+    /// Set to `[0, 0, 0, 0]` to disable extinction. `w` is unused.
+    pub extinction_k_rgb: [f32; 4],
+}
+
+/// Observer-local atmosphere state that the renderer applies to the star
+/// pipeline. Currently captures the per-channel extinction coefficients
+/// (Schaefer 1993). A future PR may grow this to include refraction,
+/// aerosol scattering, sky brightness, etc. — see ROADMAP Phase 2.5.
+#[derive(Debug, Clone, Copy)]
+pub struct Atmosphere {
+    /// Per-channel extinction coefficients `[k_R, k_G, k_B]` in magnitudes
+    /// per unit airmass. The shader applies
+    /// `extinction_factor = 10^(-0.4 · k · X)` independently to each RGB
+    /// channel, where `X` is the Kasten-Young 1989 airmass at the star's
+    /// altitude.
+    pub extinction_k_rgb: [f32; 3],
+}
+
+impl Atmosphere {
+    /// Clean sea-level dark site — the default model.
+    /// See [`astronomy::photometry::DEFAULT_EXTINCTION_K_RGB`].
+    pub const DEFAULT: Self = Self {
+        extinction_k_rgb: [
+            DEFAULT_EXTINCTION_K_RGB[0] as f32,
+            DEFAULT_EXTINCTION_K_RGB[1] as f32,
+            DEFAULT_EXTINCTION_K_RGB[2] as f32,
+        ],
+    };
+
+    /// No atmosphere — every star renders at its catalogue magnitude
+    /// regardless of altitude. Useful for debugging or for views from
+    /// outside the Earth's atmosphere.
+    pub const OFF: Self = Self {
+        extinction_k_rgb: [0.0, 0.0, 0.0],
+    };
+}
+
+impl Default for Atmosphere {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 /// Camera orientation expressed in the observer's local horizontal frame.
@@ -45,6 +98,7 @@ pub struct Camera {
     pub observer: Observer,
     pub view: LocalView,
     pub aspect: f32,
+    pub atmosphere: Atmosphere,
 }
 
 impl Camera {
@@ -53,6 +107,7 @@ impl Camera {
             observer,
             view,
             aspect,
+            atmosphere: Atmosphere::default(),
         }
     }
 
@@ -99,11 +154,33 @@ impl Camera {
         self.projection_matrix() * self.view_matrix_local()
     }
 
+    /// Local zenith direction expressed in J2000 equatorial coordinates.
+    ///
+    /// The local up vector is `(0, 0, 1)` in ENU; the transpose of the
+    /// equatorial→ENU matrix maps it back to equatorial. We expose this so
+    /// the shader can compute each star's altitude on the GPU without
+    /// re-deriving the matrix per-instance.
+    fn zenith_in_equatorial(&self) -> Vec3 {
+        // ENU→Eq is the inverse of Eq→ENU. The matrix is orthonormal so
+        // the inverse is the transpose. Multiplying the transpose by
+        // (0, 0, 1) yields the third *column* of the transpose, which is
+        // the third *row* of the original Eq→ENU matrix — i.e. the "Up"
+        // basis vector expressed in equatorial coords.
+        let eq_to_enu = self.equatorial_to_horizontal();
+        let m = eq_to_enu.to_cols_array_2d();
+        // Third row of `m`: take z-component of each column basis vector.
+        Vec3::new(m[0][2], m[1][2], m[2][2])
+    }
+
     pub fn uniform(&self, width: u32, height: u32) -> CameraUniform {
+        let zenith = self.zenith_in_equatorial();
+        let k = self.atmosphere.extinction_k_rgb;
         CameraUniform {
             view_proj: self.view_proj().to_cols_array_2d(),
             viewport_size: [width as f32, height as f32],
-            _pad: [0.0; 2],
+            _pad0: [0.0; 2],
+            zenith_eq: [zenith.x, zenith.y, zenith.z, 0.0],
+            extinction_k_rgb: [k[0], k[1], k[2], 0.0],
         }
     }
 
@@ -173,6 +250,47 @@ mod tests {
         assert!(cam.view.altitude_rad <= ALT_LIMIT + 1e-6);
         cam.rotate_view(0.0, -200.0);
         assert!(cam.view.altitude_rad >= -ALT_LIMIT - 1e-6);
+    }
+
+    /// The third row of the equatorial→ENU matrix — which `zenith_in_equatorial`
+    /// returns — must be the local "Up" basis vector expressed in equatorial
+    /// coordinates. At the North Pole the local Up coincides with the
+    /// equatorial +z; at the Equator looking along LST=0 the local Up sits in
+    /// the equatorial xy plane. Pin both so a refactor of `equatorial_to_horizontal_matrix`
+    /// can't silently break the shader-side altitude derivation.
+    #[test]
+    fn zenith_in_equatorial_matches_observer_latitude() {
+        // North pole: local up = equatorial +z.
+        let cam_pole = Camera::new(observer_at(90.0), LocalView::default(), 1.0);
+        let z_pole = cam_pole.zenith_in_equatorial();
+        assert!((z_pole.x).abs() < 1e-4);
+        assert!((z_pole.y).abs() < 1e-4);
+        assert!((z_pole.z - 1.0).abs() < 1e-4);
+
+        // Equator: local up lies in the equatorial xy plane (z = 0).
+        let cam_eq = Camera::new(observer_at(0.0), LocalView::default(), 1.0);
+        let z_eq = cam_eq.zenith_in_equatorial();
+        assert!(
+            z_eq.z.abs() < 1e-4,
+            "equator zenith should have eq-z = 0, got {z_eq:?}"
+        );
+        // Length must be ~1 (orthonormal rotation).
+        assert!(
+            (z_eq.length() - 1.0).abs() < 1e-4,
+            "zenith vector not unit length: {z_eq:?}"
+        );
+    }
+
+    /// Default `Atmosphere` carries the Hardie 1962 sea-level coefficients;
+    /// `Atmosphere::OFF` zeros them out. Pin both so changes in defaults are
+    /// loud.
+    #[test]
+    fn atmosphere_defaults_and_off_are_pinned() {
+        let d = Atmosphere::default();
+        assert_eq!(d.extinction_k_rgb, [0.10, 0.16, 0.30]);
+        assert!(d.extinction_k_rgb[0] < d.extinction_k_rgb[2]);
+        let off = Atmosphere::OFF;
+        assert_eq!(off.extinction_k_rgb, [0.0, 0.0, 0.0]);
     }
 
     #[test]
