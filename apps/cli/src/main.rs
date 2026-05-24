@@ -5,8 +5,7 @@ use astronomy::Observer;
 use catalog::load_from_file;
 use clap::Parser;
 use renderer::{
-    magnitude_to_render_params, Camera, LocalView, OverlayConfig, OverlayKind, Renderer,
-    StarInstance,
+    build_star_instance, Camera, LocalView, OverlayConfig, OverlayKind, Renderer, StarInstance,
 };
 use stars_host_common::{parse_time_to_jd, OverlayArg};
 
@@ -133,15 +132,7 @@ fn main() -> Result<()> {
     let limiting_mag = args.limiting_magnitude;
     let instances: Vec<StarInstance> = stars
         .iter()
-        .map(|s| {
-            let p = magnitude_to_render_params(s.magnitude, limiting_mag);
-            StarInstance {
-                position: s.position.into(),
-                size: p.radius_px,
-                color: s.color,
-                brightness: p.brightness,
-            }
-        })
+        .map(|s| build_star_instance(s.position.into(), s.color, s.magnitude, limiting_mag))
         .collect();
 
     let overlays = overlay_config_from_args(&args);

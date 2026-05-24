@@ -8,6 +8,7 @@
 
 mod horizontal;
 mod observer;
+pub mod photometry;
 mod time;
 
 pub use horizontal::{equatorial_to_horizontal, equatorial_to_horizontal_matrix, AltAz};

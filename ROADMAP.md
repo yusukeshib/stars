@@ -75,6 +75,49 @@ targets are < 1″ in unit tests.
 
 ---
 
+## Phase 2.5 — "Physically-based visual pipeline"
+
+> Goal: what's on screen is what a dark-adapted human would actually see
+> from the configured observer + time + atmosphere, with every step of the
+> visual chain anchored to a published standard or peer-reviewed paper —
+> no artistic tuning, no decorative textures. The Milky Way appears because
+> the diffuse galactic light is *included as a physical quantity*, not
+> painted in. Bright stars look coloured and faint stars look grey because
+> the rod/cone model says so. Stars near the horizon redden because the
+> atmosphere is in the chain.
+
+This phase sits between Phase 1 (overlays — "what am I looking at") and
+Phase 2 (positional precision — "is it in the right place"), because
+perceptual realism is a prerequisite for the project to *visually* match
+the night sky users know.
+
+| Item | Reference | Status |
+|---|---|---|
+| **Photometric zeropoint** — `magnitude → illuminance (lux)` so the whole pipeline runs in physical units | Schaefer, B. E. 1990, PASP 102, 212 | ✅ done (`astronomy::photometry`) |
+| **Mesopic chromatic-fidelity weight** — log-linear blend over the 0.005–5 cd/m² mesopic range, applied per-star so only bright stars retain B-V colour | CIE 191:2010 *Recommended System for Mesopic Photometry Based on Visual Performance* | ✅ done (`astronomy::photometry`) |
+| **Purkinje-shifted scotopic desaturation** — faint stars collapse toward a rod-weighted (~507 nm peak) grey rather than a flat luma | CIE 1951 V'(λ); Bowmaker & Dartnall 1980, J. Physiol. 298, 501 | ✅ done (`astronomy::photometry`) |
+| **HDR render target** (`Rgba16Float`) — replace the 8-bit sRGB attachment so faint-star contributions accumulate instead of being crushed by the discard cutoff | — | ⬜ |
+| **Eye PSF / glare** — replace the bare Gaussian sprite with the 4-component human PSF (corneal halo, ciliary corona, lenticular halo, core), so bright stars get physically correct extent and faint stars combine via the wings | Spencer, Shirley, Zimmerman & Greenberg 1995, *Physically-based glare effects for digital images*, SIGGRAPH '95; Ritschel et al. 2009, *Temporal Glare*, Eurographics | ⬜ |
+| **Atmospheric extinction** — per-airmass dimming + reddening from altitude angle (already computed for the horizontal frame in Phase 1) | Schaefer 1993, *Astronomy and the limits of vision*, Vistas in Astronomy 36, 311; Young 1994 (low-altitude airmass) | ⬜ |
+| **Diffuse sky background** — Milky Way + zodiacal light + airglow as a measured surface-brightness map indexed by galactic / ecliptic coords, drawn before the star pass in cd/m² | Leinert et al. 1998, *The 1997 reference of diffuse night sky brightness*, A&AS 127, 1; Schlegel, Finkbeiner & Davis 1998 dust map (for extinction modulation) | ⬜ |
+| **Sky tone reproduction** — map the assembled HDR scene to the display through a rod+cone TVI / mesopic-aware operator instead of a naive clamp | Ferwerda, Pattanaik, Shirley & Greenberg 1996, *A Model of Visual Adaptation for Realistic Image Synthesis*, SIGGRAPH '96; Pattanaik et al. 1998, SIGGRAPH '98; Durand & Dorsey 2002, SIGGRAPH '02 | ⬜ |
+| **Catalogue colour pipeline upgrade** — B−V → T_eff (Ballesteros 2012) → blackbody spectrum → CIE 1931 XYZ → sRGB, so the photopic input to the mesopic blend is itself physically calibrated | Ballesteros, F. J. 2012, EPL 97, 34008 | ⬜ |
+
+**Exit criteria for Phase 2.5.** Default-on rendering with a dark observer
+shows a visible Milky Way band, atmospheric reddening near the horizon, and
+a clear chromatic / achromatic split between bright and faint stars, with
+every numerical choice traceable to one of the references above via a doc
+comment.
+
+Why this slot in the roadmap: the goal of the project is that what shows on
+screen is *defensible* — both in position (Phase 2) and in appearance
+(Phase 2.5). Going to Phase 3 without 2.5 means publishing an engine that's
+numerically careful about positions but visually misleading about what a
+rural sky looks like. The two pieces are independent and can ship in either
+order.
+
+---
+
 ## Phase 3 — "Research / education platform"
 
 > Goal: stars can sit in a notebook, a paper, or a syllabus. Reproducibility

@@ -185,6 +185,46 @@ pub fn magnitude_to_render_params(mag: f32, limiting_magnitude: f32) -> RenderPa
     }
 }
 
+/// Build a `StarInstance` ready to upload to the GPU from a star's catalogue
+/// data, applying the perceptual corrections established in the photometric
+/// pipeline (`astronomy::photometry`):
+///
+/// * **Brightness** follows Pogson's law via [`magnitude_to_render_params`],
+///   anchored so a star at exactly `limiting_magnitude` lands on the shader's
+///   discard cutoff (see that function's docs).
+/// * **Colour** is the catalogue's photopic sRGB triple, blended toward the
+///   Purkinje-shifted scotopic grey by the CIE 191:2010 mesopic chromatic
+///   weight for *this star's* equivalent luminance. Bright stars (Vega,
+///   Sirius) keep their full B-V colour; faint stars desaturate toward
+///   neutral, reproducing the well-known observation that *only the brightest
+///   stars look coloured to a dark-adapted human observer*.
+///
+/// This is the single entry point every host app (CLI, native viewer, web)
+/// should use to turn catalogue rows into renderer instances, so the
+/// perceptual model stays in one place.
+///
+/// # References
+///
+/// * Schaefer, B. E. 1990, *Telescopic limiting magnitudes*, PASP 102, 212.
+/// * CIE 191:2010, *Recommended System for Mesopic Photometry Based on
+///   Visual Performance*.
+pub fn build_star_instance(
+    position: [f32; 3],
+    photopic_color: [f32; 3],
+    magnitude: f32,
+    limiting_magnitude: f32,
+) -> StarInstance {
+    let params = magnitude_to_render_params(magnitude, limiting_magnitude);
+    let w = astronomy::photometry::chromatic_weight_for_magnitude(magnitude as f64) as f32;
+    let perceived_color = astronomy::photometry::apply_mesopic_desaturation(photopic_color, w);
+    StarInstance {
+        position,
+        size: params.radius_px,
+        color: perceived_color,
+        brightness: params.brightness,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,6 +286,43 @@ mod tests {
                 "limiting_mag={lim} peaks at {peak}, expected {SHADER_INTENSITY_CUTOFF}"
             );
         }
+    }
+
+    /// A magnitude-0 star (Vega-class) keeps its full photopic colour after
+    /// the mesopic blend; a magnitude-6 star (naked-eye limit) is
+    /// noticeably desaturated. This pins the perceptual side of
+    /// `build_star_instance` so a refactor of the photometry module can't
+    /// silently change how stars look.
+    #[test]
+    fn build_star_instance_applies_mesopic_desaturation() {
+        let red = [1.0_f32, 0.3, 0.1];
+        let lim = NAKED_EYE_LIMITING_MAGNITUDE;
+
+        let bright = build_star_instance([1.0, 0.0, 0.0], red, 0.0, lim);
+        // Bright star: photopic, colour preserved within float error.
+        for (got, want) in bright.color.iter().zip(red.iter()) {
+            assert!(
+                (got - want).abs() < 1e-5,
+                "bright star should keep its colour, got {:?}, want {:?}",
+                bright.color,
+                red
+            );
+        }
+
+        let faint = build_star_instance([1.0, 0.0, 0.0], red, 6.0, lim);
+        // Faint star: mid-mesopic, channels pulled toward the scotopic grey
+        // of the input. The red channel must drop (rods don't see red);
+        // the blue channel must rise (rod sensitivity peak near 507 nm).
+        assert!(
+            faint.color[0] < red[0] - 0.1,
+            "faint red channel did not desaturate: {:?}",
+            faint.color
+        );
+        assert!(
+            faint.color[2] > red[2] + 0.02,
+            "faint blue channel did not pick up rod response: {:?}",
+            faint.color
+        );
     }
 
     /// The PSF quad (sized in `PSF_QUAD_HALF_WIDTH_SIGMAS` units of sigma)
