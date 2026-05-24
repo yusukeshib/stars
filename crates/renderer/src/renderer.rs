@@ -2,6 +2,7 @@ use bytemuck::Zeroable;
 use wgpu::util::DeviceExt;
 
 use crate::camera::{Camera, CameraUniform};
+use crate::overlay::{OverlayConfig, OverlayRenderer};
 use crate::pipeline;
 use crate::vertex::{QuadVertex, StarInstance};
 
@@ -21,6 +22,7 @@ pub struct Renderer {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     num_stars: u32,
+    overlay: OverlayRenderer,
 }
 
 impl Renderer {
@@ -61,6 +63,7 @@ impl Renderer {
         });
 
         let pipeline = pipeline::create_pipeline(device, format, &camera_bind_group_layout);
+        let overlay = OverlayRenderer::new(device, format);
 
         Self {
             pipeline,
@@ -70,12 +73,20 @@ impl Renderer {
             camera_buffer,
             camera_bind_group,
             num_stars: stars.len() as u32,
+            overlay,
         }
+    }
+
+    /// Rebuild the overlay layers from `config`. Pass `OverlayConfig { layers: vec![], ..}`
+    /// (or simply don't call this) to draw stars only.
+    pub fn set_overlays(&mut self, device: &wgpu::Device, config: &OverlayConfig) {
+        self.overlay.set_config(device, config);
     }
 
     pub fn update_camera(&self, queue: &wgpu::Queue, camera: &Camera, width: u32, height: u32) {
         let uniform = camera.uniform(width, height);
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
+        self.overlay.update_camera(queue, camera);
     }
 
     pub fn render(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
@@ -102,5 +113,8 @@ impl Renderer {
         pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
         pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
         pass.draw_indexed(0..QuadVertex::INDICES.len() as u32, 0, 0..self.num_stars);
+
+        // Overlays draw on top of stars in the same pass.
+        self.overlay.draw(&mut pass);
     }
 }
