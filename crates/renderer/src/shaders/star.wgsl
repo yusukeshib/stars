@@ -1,11 +1,43 @@
 struct CameraUniform {
     view_proj: mat4x4<f32>,
     viewport_size: vec2<f32>,
-    _pad: vec2<f32>,
+    _pad0: vec2<f32>,
+    // Local zenith expressed in J2000 equatorial coordinates. Dotted with
+    // the unit-vector star position yields sin(altitude) directly, so
+    // per-star altitude is computed here on the GPU without uploading a
+    // separate rotation matrix.
+    zenith_eq: vec4<f32>,
+    // Per-channel extinction coefficients (mag per airmass). All zero
+    // disables extinction.
+    extinction_k_rgb: vec4<f32>,
 };
 
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
+
+// Kasten & Young 1989 airmass (relative slant-path length through the
+// atmosphere). See `astronomy::photometry::airmass_kasten_young` for the
+// reference and tolerances; this is a literal WGSL port.
+fn airmass_kasten_young(altitude_rad: f32) -> f32 {
+    let alt_deg = altitude_rad * (180.0 / 3.14159265359);
+    return 1.0 / (sin(altitude_rad) + 0.50572 * pow(alt_deg + 6.07995, -1.6364));
+}
+
+// Per-channel atmospheric attenuation factor at altitude `alt_rad` given
+// extinction coefficients `k_rgb` (mag per airmass). Schaefer 1993 Eq. (1):
+//   Δm = k(λ) · X   ⇒   flux_out / flux_in = 10^(-0.4 · k · X)
+// Stars below the horizon return zero so they don't leak through the rest
+// of the pipeline (the camera frustum already clips most of them, but this
+// is the explicit physical statement).
+fn atmospheric_attenuation(altitude_rad: f32, k_rgb: vec3<f32>) -> vec3<f32> {
+    if altitude_rad <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let x = airmass_kasten_young(altitude_rad);
+    // 10^(-0.4 · k · X) = exp(-0.4 · ln10 · k · X). ln10 ≈ 2.302585.
+    let neg_oh_four_ln10 = -0.9210340371976184;
+    return exp(neg_oh_four_ln10 * k_rgb * x);
+}
 
 struct VertexInput {
     @location(0) quad_pos: vec2<f32>,    // per-vertex quad corner
@@ -39,8 +71,21 @@ fn vs_main(input: VertexInput) -> VertexOutput {
         clip.w,
     );
 
+    // Atmospheric extinction: per-channel attenuation based on this star's
+    // altitude in the observer's local horizontal frame. Skipped when the
+    // host disables atmosphere (k_rgb = 0) so the multiplication is a
+    // no-op identity rather than a hidden "horizon = invisible" rule.
+    let k_rgb = camera.extinction_k_rgb.xyz;
+    let atmosphere_active = k_rgb.x + k_rgb.y + k_rgb.z > 0.0;
+    var attenuated_color = input.star_color;
+    if atmosphere_active {
+        let sin_alt = clamp(dot(input.star_pos, camera.zenith_eq.xyz), -1.0, 1.0);
+        let alt_rad = asin(sin_alt);
+        attenuated_color = input.star_color * atmospheric_attenuation(alt_rad, k_rgb);
+    }
+
     out.uv = input.quad_pos;
-    out.color = input.star_color;
+    out.color = attenuated_color;
     out.brightness = input.star_brightness;
     out.sprite_half_px = input.star_size;
     return out;
