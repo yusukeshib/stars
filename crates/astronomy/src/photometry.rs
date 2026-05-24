@@ -178,6 +178,89 @@ pub fn apply_mesopic_desaturation(rgb: [f32; 3], chromatic_weight: f32) -> [f32;
 }
 
 // =============================================================================
+// Ferwerda 1996 visual-adaptation TVI functions.
+// =============================================================================
+//
+// Ferwerda, J. A., Pattanaik, S. N., Shirley, P., & Greenberg, D. P. 1996,
+// *A Model of Visual Adaptation for Realistic Image Synthesis*, SIGGRAPH '96.
+//
+// The TVI (threshold-versus-intensity) function gives the minimum
+// detectable luminance increment a human observer can perceive against a
+// uniform background at adaptation luminance `L_a`. Cones (photopic) and
+// rods (scotopic) have different TVI curves; both are piecewise functions
+// of `log10(L_a)` derived from the classical Blackwell 1946 / Hecht 1934
+// psychophysics data.
+//
+// In a tone-reproduction pipeline the TVI ratio `T(L_display) / T(L_scene)`
+// is the *scale factor* that must be applied to scene luminance so a
+// just-detectable difference in the scene remains just-detectable on the
+// display. That is what lets a dark-adapted night-sky scene render with
+// the Milky Way visible against the sky background, rather than being
+// crushed to black by a naive luminance-preserving operator.
+
+/// Cone (photopic) TVI — Ferwerda 1996 Eq. (1).
+///
+/// Input is `log10(adapting luminance / (cd/m²))`; output is
+/// `log10(threshold luminance / (cd/m²))`.
+///
+/// Piecewise:
+/// * `log L_a ≤ -2.6`  →  `log T_p = -0.72` (dark-detection plateau)
+/// * `log L_a ≥ 1.9`   →  `log T_p = log L_a - 1.255` (Weber's-law regime)
+/// * in between: smooth transition, Ferwerda Eq. (1).
+pub fn cone_tvi_log10(log_la: f64) -> f64 {
+    if log_la <= -2.6 {
+        -0.72
+    } else if log_la >= 1.9 {
+        log_la - 1.255
+    } else {
+        let inner = 0.249 * log_la + 0.65;
+        inner.powf(2.7) - 0.72
+    }
+}
+
+/// Rod (scotopic) TVI — Ferwerda 1996 Eq. (2).
+///
+/// Input is `log10(adapting luminance / (cd/m²))`; output is
+/// `log10(threshold luminance / (cd/m²))`.
+///
+/// Piecewise:
+/// * `log L_a ≤ -3.94` →  `log T_s = -2.86` (absolute-threshold plateau)
+/// * `log L_a ≥ -1.44` →  `log T_s = log L_a - 0.395` (rod saturation
+///   upper end, beyond which rods bleach)
+/// * in between: smooth transition, Ferwerda Eq. (2).
+pub fn rod_tvi_log10(log_la: f64) -> f64 {
+    if log_la <= -3.94 {
+        -2.86
+    } else if log_la >= -1.44 {
+        log_la - 0.395
+    } else {
+        let inner = 0.405 * log_la + 1.6;
+        inner.powf(2.18) - 2.86
+    }
+}
+
+/// Convert a linear-flux value on the renderer's magnitude-zeropoint scale
+/// to an absolute luminance in cd/m².
+///
+/// The renderer's brightness scale is anchored so that 1.0 corresponds to
+/// a point source of apparent magnitude `zeropoint`. Combining the
+/// Schaefer 1990 zeropoint (illuminance per magnitude) with the canonical
+/// eye-PSF solid angle gives the luminance one such source produces
+/// across the PSF:
+///
+/// ```text
+///     L [cd/m²] = flux · 10^(-0.4 · (zeropoint + 13.99)) / Ω_PSF
+/// ```
+///
+/// where `Ω_PSF = 8.46e-8 sr` (1 arcmin²). Required by [`cone_tvi_log10`]
+/// and [`rod_tvi_log10`], which take absolute cd/m².
+pub fn hdr_flux_to_luminance_cd_m2(flux: f64, zeropoint: f64) -> f64 {
+    let zeropoint_illuminance_lux = 10.0_f64.powf(-0.4 * (zeropoint + 13.99));
+    let zeropoint_luminance_cd_m2 = zeropoint_illuminance_lux / EYE_PSF_SOLID_ANGLE_SR;
+    flux * zeropoint_luminance_cd_m2
+}
+
+// =============================================================================
 // Atmospheric extinction (Schaefer 1993; Kasten & Young 1989; Hardie 1962).
 // =============================================================================
 
@@ -488,6 +571,94 @@ mod tests {
         for (i, &k) in DEFAULT_EXTINCTION_K_RGB.iter().enumerate() {
             assert!((dm[i] - k).abs() < 1e-9);
         }
+    }
+
+    /// Cone TVI plateau (Ferwerda Eq. 1, dim end): the photopic threshold
+    /// stops decreasing below ~`log L_a = -2.6`, fixed at `log T_p = -0.72`.
+    /// Pin both the value and the plateau behaviour.
+    #[test]
+    fn cone_tvi_dim_plateau() {
+        assert!((cone_tvi_log10(-3.0) - (-0.72)).abs() < 1e-12);
+        assert!((cone_tvi_log10(-5.0) - (-0.72)).abs() < 1e-12);
+        // Just inside the plateau — still pinned at the plateau value.
+        assert!((cone_tvi_log10(-2.6) - (-0.72)).abs() < 1e-12);
+    }
+
+    /// Cone TVI Weber regime (Ferwerda Eq. 1, bright end): for
+    /// `log L_a ≥ 1.9` the threshold tracks adaptation as
+    /// `log T_p = log L_a - 1.255` (Weber's law with constant 10^-1.255
+    /// ≈ 0.056).
+    #[test]
+    fn cone_tvi_weber_regime() {
+        for la in [2.0_f64, 3.0, 5.0] {
+            let expected = la - 1.255;
+            assert!(
+                (cone_tvi_log10(la) - expected).abs() < 1e-12,
+                "cone_tvi(log L_a={la}) = {}, expected {expected}",
+                cone_tvi_log10(la)
+            );
+        }
+    }
+
+    /// Cone TVI is monotonically non-decreasing in log adaptation
+    /// luminance: brighter adaptation ⇒ higher (or equal) detection
+    /// threshold. The piecewise formula must not introduce a dip.
+    #[test]
+    fn cone_tvi_monotone() {
+        let samples: Vec<f64> = (-50..50).map(|i| f64::from(i) / 10.0).collect();
+        let mut prev = cone_tvi_log10(samples[0]);
+        for &la in &samples[1..] {
+            let t = cone_tvi_log10(la);
+            assert!(
+                t >= prev - 1e-12,
+                "cone TVI not monotone: T({la}) = {t} < T(prev) = {prev}"
+            );
+            prev = t;
+        }
+    }
+
+    /// Rod TVI plateau / saturation: dim plateau at `log T_s = -2.86`,
+    /// upper-end linear regime `log T_s = log L_a - 0.395`.
+    #[test]
+    fn rod_tvi_plateau_and_saturation() {
+        // Dark plateau.
+        assert!((rod_tvi_log10(-5.0) - (-2.86)).abs() < 1e-12);
+        assert!((rod_tvi_log10(-3.94) - (-2.86)).abs() < 1e-12);
+        // Saturation regime.
+        for la in [-1.0_f64, 0.0, 1.0] {
+            let expected = la - 0.395;
+            assert!((rod_tvi_log10(la) - expected).abs() < 1e-12);
+        }
+    }
+
+    /// Rod TVI must also be monotone in log adaptation luminance.
+    #[test]
+    fn rod_tvi_monotone() {
+        let samples: Vec<f64> = (-50..50).map(|i| f64::from(i) / 10.0).collect();
+        let mut prev = rod_tvi_log10(samples[0]);
+        for &la in &samples[1..] {
+            let t = rod_tvi_log10(la);
+            assert!(
+                t >= prev - 1e-12,
+                "rod TVI not monotone: T({la}) = {t} < T(prev) = {prev}"
+            );
+            prev = t;
+        }
+    }
+
+    /// Sanity-check the HDR-flux → cd/m² conversion against Schaefer 1990:
+    /// a magnitude-0 point source produces 2.54e-6 lux of illuminance
+    /// at the eye; spread over the 1-arcmin² PSF that's ≈30 cd/m² of
+    /// equivalent luminance. The renderer's `flux = 1` at
+    /// `zeropoint = 0` must reproduce that number.
+    #[test]
+    fn hdr_flux_to_luminance_matches_schaefer_zeropoint() {
+        let l = hdr_flux_to_luminance_cd_m2(1.0, 0.0);
+        // 2.54e-6 lux / 8.46e-8 sr ≈ 30 cd/m².
+        assert!(
+            (l - 30.0).abs() < 1.0,
+            "mag-0 luminance = {l} cd/m², expected ≈ 30"
+        );
     }
 
     /// At airmass 2 (altitude ≈30°) the blue channel must dim by 0.6 mag
