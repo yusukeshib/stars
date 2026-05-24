@@ -61,25 +61,34 @@ impl Camera {
         Vec3::new(sa * cp, ca * cp, sp)
     }
 
-    pub fn view_matrix(&self) -> Mat4 {
+    /// View matrix in the observer's local ENU frame (no equatorial→horizontal rotation).
+    /// Use this for geometry that is naturally expressed in local coordinates
+    /// (horizon line, alt-az grid, cardinal direction markers).
+    pub fn view_matrix_local(&self) -> Mat4 {
         // look_at_rh derives screen-right from (forward × up); using local zenith as
         // "up" keeps the horizon level on screen. Altitude is clamped elsewhere to
         // avoid gimbal lock when looking straight up/down.
-        let view_in_local = Mat4::look_at_rh(Vec3::ZERO, self.forward_local(), Vec3::Z);
-        view_in_local * self.equatorial_to_horizontal()
+        Mat4::look_at_rh(Vec3::ZERO, self.forward_local(), Vec3::Z)
+    }
+
+    /// View matrix in J2000 equatorial coordinates (includes the equatorial→horizontal
+    /// rotation). Use this for star positions, RA/Dec grids, ecliptic, celestial equator.
+    pub fn view_matrix(&self) -> Mat4 {
+        self.view_matrix_local() * self.equatorial_to_horizontal()
     }
 
     pub fn projection_matrix(&self) -> Mat4 {
         Mat4::perspective_rh(self.view.fov_y_rad, self.aspect, 0.01, 10.0)
     }
 
-    /// Horizontal FOV implied by the vertical FOV and current aspect ratio.
-    pub fn fov_x_rad(&self) -> f32 {
-        2.0 * ((self.view.fov_y_rad * 0.5).tan() * self.aspect).atan()
-    }
-
+    /// View-projection for J2000 equatorial-frame geometry. Alias kept for backward compat.
     pub fn view_proj(&self) -> Mat4 {
         self.projection_matrix() * self.view_matrix()
+    }
+
+    /// View-projection for local ENU-frame geometry.
+    pub fn view_proj_local(&self) -> Mat4 {
+        self.projection_matrix() * self.view_matrix_local()
     }
 
     pub fn uniform(&self, width: u32, height: u32) -> CameraUniform {

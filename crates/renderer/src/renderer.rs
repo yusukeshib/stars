@@ -2,7 +2,7 @@ use bytemuck::Zeroable;
 use wgpu::util::DeviceExt;
 
 use crate::camera::{Camera, CameraUniform};
-use crate::compass::CompassRenderer;
+use crate::overlay::{OverlayConfig, OverlayRenderer};
 use crate::pipeline;
 use crate::vertex::{QuadVertex, StarInstance};
 
@@ -22,7 +22,7 @@ pub struct Renderer {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     num_stars: u32,
-    compass: CompassRenderer,
+    overlay: OverlayRenderer,
 }
 
 impl Renderer {
@@ -63,7 +63,7 @@ impl Renderer {
         });
 
         let pipeline = pipeline::create_pipeline(device, format, &camera_bind_group_layout);
-        let compass = CompassRenderer::new(device, format);
+        let overlay = OverlayRenderer::new(device, format);
 
         Self {
             pipeline,
@@ -73,49 +73,48 @@ impl Renderer {
             camera_buffer,
             camera_bind_group,
             num_stars: stars.len() as u32,
-            compass,
+            overlay,
         }
+    }
+
+    /// Rebuild the overlay layers from `config`. Pass `OverlayConfig { layers: vec![], ..}`
+    /// (or simply don't call this) to draw stars only.
+    pub fn set_overlays(&mut self, device: &wgpu::Device, config: &OverlayConfig) {
+        self.overlay.set_config(device, config);
     }
 
     pub fn update_camera(&self, queue: &wgpu::Queue, camera: &Camera, width: u32, height: u32) {
         let uniform = camera.uniform(width, height);
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
-        self.compass.update(
-            queue,
-            width,
-            height,
-            camera.view.azimuth_rad,
-            camera.fov_x_rad(),
-        );
+        self.overlay.update_camera(queue, camera);
     }
 
     pub fn render(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Star Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(CLEAR_COLOR),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Star Render Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(CLEAR_COLOR),
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
 
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            pass.draw_indexed(0..QuadVertex::INDICES.len() as u32, 0, 0..self.num_stars);
-        }
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &self.camera_bind_group, &[]);
+        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+        pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        pass.draw_indexed(0..QuadVertex::INDICES.len() as u32, 0, 0..self.num_stars);
 
-        self.compass.render(encoder, view);
+        // Overlays draw on top of stars in the same pass.
+        self.overlay.draw(&mut pass);
     }
 }

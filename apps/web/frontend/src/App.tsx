@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { StarCanvas } from "./components/StarCanvas";
-import { Hud } from "./components/Hud";
+import { StatusBar } from "./components/StatusBar";
+import { GearButton } from "./components/GearButton";
+import { SettingsPanel } from "./components/SettingsPanel";
 import {
   clampAltitude,
   clampFov,
@@ -8,6 +10,7 @@ import {
   type Observer,
   type View,
 } from "./observer";
+import { loadConfig, saveConfig } from "./storage";
 
 const DEFAULT_OBSERVER: Observer = {
   latitudeDeg: 35.68, // Tokyo as a sensible default
@@ -20,16 +23,31 @@ const DEFAULT_VIEW: View = {
   fovDeg: 70,
 };
 
-export function App() {
-  const [observer, setObserver] = useState<Observer>(DEFAULT_OBSERVER);
-  const [view, setView] = useState<View>(DEFAULT_VIEW);
-  const [paused, setPaused] = useState(false);
-  const [timeMs, setTimeMs] = useState<number>(() => Date.now());
+// Read once at module load. Used both for initial state and to decide whether
+// to auto-prompt for geolocation (we skip it if the user already has a stored
+// location, so we don't overwrite their explicit choice).
+const PERSISTED = loadConfig();
 
-  // Tick the clock when not paused.
+export function App() {
+  const [observer, setObserver] = useState<Observer>(PERSISTED?.observer ?? DEFAULT_OBSERVER);
+  const [view, setView] = useState<View>(PERSISTED?.view ?? DEFAULT_VIEW);
+  const [timeMs, setTimeMs] = useState<number>(() => Date.now());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Persist observer + view whenever they change. We debounce because the view
+  // updates on every mouse/touch frame during a drag, and localStorage.setItem
+  // is synchronous; without the debounce we'd write ~60 times a second.
+  // Time is intentionally not persisted: a stale timestamp on next load would
+  // silently mislead the user.
+  useEffect(() => {
+    const handle = setTimeout(() => saveConfig({ observer, view }), 250);
+    return () => clearTimeout(handle);
+  }, [observer, view]);
+
+  // Clock always ticks. When the user picks a custom moment via the settings
+  // panel we simply rebase `timeMs`; the same loop keeps advancing from there.
   const lastTickRef = useRef<number>(performance.now());
   useEffect(() => {
-    if (paused) return;
     let raf = 0;
     const step = (now: number) => {
       const elapsed = now - lastTickRef.current;
@@ -40,10 +58,12 @@ export function App() {
     lastTickRef.current = performance.now();
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [paused]);
+  }, []);
 
-  // Try geolocation on mount; silently ignore if denied.
+  // Auto-geolocation only fires for first-time visitors. If the user has a
+  // persisted observer we respect their explicit choice and stay quiet.
   useEffect(() => {
+    if (PERSISTED?.observer) return;
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -56,6 +76,16 @@ export function App() {
       { timeout: 5000 },
     );
   }, []);
+
+  const useGeolocation = () => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition((pos) => {
+      setObserver({
+        latitudeDeg: pos.coords.latitude,
+        longitudeDeg: pos.coords.longitude,
+      });
+    });
+  };
 
   return (
     <>
@@ -74,31 +104,18 @@ export function App() {
           setView((v) => ({ ...v, fovDeg: clampFov(v.fovDeg * factor) }))
         }
       />
-      <Hud
-        observer={observer}
-        view={view}
-        timeMs={timeMs}
-        paused={paused}
-        onSetObserver={setObserver}
-        onSetTime={(ms) => {
-          setTimeMs(ms);
-          setPaused(true);
-        }}
-        onSetPaused={setPaused}
-        onUseGeolocation={() => {
-          if (!navigator.geolocation) return;
-          navigator.geolocation.getCurrentPosition((pos) => {
-            setObserver({
-              latitudeDeg: pos.coords.latitude,
-              longitudeDeg: pos.coords.longitude,
-            });
-          });
-        }}
-        onResetTime={() => {
-          setTimeMs(Date.now());
-          setPaused(false);
-        }}
-      />
+      <StatusBar observer={observer} view={view} timeMs={timeMs} />
+      <GearButton onClick={() => setSettingsOpen(true)} />
+      {settingsOpen && (
+        <SettingsPanel
+          observer={observer}
+          timeMs={timeMs}
+          onClose={() => setSettingsOpen(false)}
+          onSetObserver={setObserver}
+          onSetTime={setTimeMs}
+          onUseGeolocation={useGeolocation}
+        />
+      )}
     </>
   );
 }

@@ -1,0 +1,143 @@
+# Roadmap
+
+The aim is for `stars` to be useful both as a casual night-sky viewer and as a
+piece of software that astronomers, educators, and researchers can defend
+using. Two axes drive the work:
+
+1. **Pedagogy** — let users *see* the relationship between coordinate systems
+   (equatorial, horizontal, ecliptic, galactic), reference circles, and time.
+2. **Precision** — match the IAU's published standards for the conversions we
+   perform, so positions on screen are defensible to arcsecond level and the
+   choice of model is explicit.
+
+The phases below are written so each one is independently shippable: anyone
+can stop at the end of a phase and have a coherent product. Estimates assume
+weekend-evening pace by one contributor.
+
+---
+
+## Phase 1 — "Educational planetarium" *(in progress)*
+
+> Goal: a stargazer can identify what they're looking at and which way is
+> which, on web, desktop, and from a one-shot CLI render.
+
+| Item | Status |
+|---|---|
+| Sky overlays library (`crates/renderer/src/overlay.rs`) | ✅ done |
+| Layers: horizon, cardinals, alt-az grid, equatorial grid, ecliptic, celestial equator, meridian | ✅ done |
+| CLI flags (`--overlays`, `--no-overlays`, `--grid-step-deg`, `--overlay-opacity`) | ✅ done |
+| Desktop viewer flags (parity with CLI) | ✅ done |
+| Web HUD redesign (gear button + modal settings panel) | ✅ done |
+| localStorage persistence of observer + view | ✅ done |
+| Web overlay toggles (mirror CLI flags inside the settings panel) | ⏳ next |
+| Constellation lines (IAU asterisms) | ⬜ |
+| Constellation boundaries (IAU 1930) | ⬜ |
+| Star proper names + Bayer / Flamsteed labels for top ~50 stars | ⬜ |
+| Galactic equator overlay (l, b) | ⬜ |
+| Anti-aliased / thickness-controllable lines (triangle-strip line rendering) | ⬜ |
+| N / E / S / W and degree labels rendered as text (font atlas) | ⬜ |
+
+**Exit criteria for Phase 1.** Default config (web, native viewer, CLI) shows
+horizon + cardinal markers + constellation lines, with full overlay control
+behind a single settings panel.
+
+---
+
+## Phase 2 — "Observation planning tool"
+
+> Goal: an amateur astronomer can trust the times and positions enough to plan
+> a session: when does Vega rise, where will the moon be at 22:00, what's the
+> sun-altitude through twilight.
+
+| Item | Notes |
+|---|---|
+| **Time systems** — separate UTC, UT1, TT, TAI; expose TDB for ephemerides | Underpins everything below; pulls in a leap-second table |
+| **Precession** — IAU 2006 (P03) | Star positions of date instead of J2000 |
+| **Nutation** — IAU 2000A or 2000B | ~9″ accuracy |
+| **Annual aberration** | Up to 20″ |
+| **Stellar proper motion** | HYG already carries `pmra` / `pmdec`; apply them when epoch ≠ catalog epoch |
+| **Atmospheric refraction** | Up to 34′ at the horizon; flag it in UI when on |
+| **Sun, Moon** | VSOP87 or ELP2000 |
+| **Planets (Mercury → Neptune)** | VSOP87 truncated, ~1″ on a century |
+| **Moon phase + Earth-shadow** | Visual aid; trivial once Moon ephemeris lands |
+| **Rise / transit / set tables** | Per object, per evening |
+| **Twilight indicators** | Civil / nautical / astronomical bands on the time slider |
+| **Session URL** | Encode (lat, lng, jd, az, alt, fov, overlays, planets) as one URL |
+
+A new `astronomy::corrections` module collects the IAU-2006-compliant
+transforms, kept Earth-rotation-only on the bottom (no relativistic / TDB-TT
+chain unless explicitly needed).
+
+**Exit criteria for Phase 2.** A documented switch table on `Observer` says
+which corrections are active; default-on subset matches what Stellarium calls
+"general" precision; differences against JPL Horizons for a fixed set of
+targets are < 1″ in unit tests.
+
+---
+
+## Phase 3 — "Research / education platform"
+
+> Goal: stars can sit in a notebook, a paper, or a syllabus. Reproducibility
+> and citability are first-class.
+
+| Item | Notes |
+|---|---|
+| **Hipparcos / Tycho-2 / Gaia DR3 ingest** | Replace HYG-only path with a pluggable catalog backend; keep HYG for the embedded WASM build |
+| **Identifier preservation** | Hipparcos / HD / TYC / Gaia source_id passed through the renderer for hover / click-to-copy |
+| **SIMBAD / VizieR deep links** | Hover a star → external link with the right query |
+| **DE440 / VSOP87 ephemeris** | Move from "good enough for amateurs" (Phase 2) to publication-quality |
+| **Python bindings (PyO3)** | `astronomy` and `catalog` callable from Jupyter; one-line "what was the sky over Tokyo at 2024-04-08T15:00Z?" recipe |
+| **Headless server mode** | HTTP service that returns PNGs (already 90% there in `apps/cli`; needs a thin server wrapper) |
+| **Sharable JSON sessions** | Schema-versioned config: observer + time + overlays + active corrections + catalog snapshot |
+| **`CITATION.cff` + Zenodo DOI** | Citable per-release artifact |
+| **Standards-compliance doc** | One markdown page listing every IAU resolution / SOFA routine the code implements, with the version |
+
+**Exit criteria for Phase 3.** Someone can `pip install` or `cargo add` the
+relevant pieces, render the same sky from a notebook and the web UI, get the
+same numbers as JPL Horizons within stated tolerances, and cite the project
+in a paper.
+
+---
+
+## Phase 4 — Niche, but high-value once everything above lands
+
+| Item | Notes |
+|---|---|
+| **Full-sky projections** (Mollweide, Aitoff, Hammer) | Toggle from camera; required to show galactic / extragalactic structure |
+| **Out-of-Earth viewpoint** | Camera not centered on Earth; render the Milky Way disc from above, visualize 3D parallax |
+| **Deep-sky overlay** (Messier, NGC) | Light catalogs first; full NGC/IC is large |
+| **Variable star light curves** | Pull AAVSO; show on the side panel for a hovered variable |
+| **Sound + screen-reader accessibility** | Az/Alt audio cues; ARIA labels on every control |
+| **Telescope eyepiece simulation** | Plate scale, true field of view, given an OTA + eyepiece pair |
+
+---
+
+## How to contribute against this plan
+
+- Phase milestones live as GitHub issues tagged `phase-1` / `phase-2` / etc.
+- Each row in the tables above maps to one or two issues; pick one and open a PR.
+- New native hosts (mobile, embedded) follow [`USAGE.md`](USAGE.md), no
+  exceptions; if the recipe stops fitting, update `USAGE.md` in the same PR.
+- Any change to `astronomy` that affects numerical output must come with a
+  unit test that pins the value (we're aiming for "trustworthy" — silent
+  numerical drift is the failure mode to avoid).
+
+---
+
+## Why these phases in this order
+
+Phase 1 buys **user experience**. Without overlays nobody can tell what
+they're looking at, and a few lines per frame is the cheapest thing in the
+pipeline.
+
+Phase 2 buys **trust**. Without precession alone, star positions drift
+~50″/year — within a decade the labels are visibly wrong. Refraction and
+proper motion close the loop for naked-eye observers.
+
+Phase 3 buys **reach**. The Rust + wgpu + WASM combo applied to IAU-grade
+astronomy is genuinely under-served: it lets the same engine power a
+notebook plot, a web app, a CLI render, and a citation in a paper. That is
+the part of this roadmap that turns the project from "another star app" into
+"a thing other people build on."
+
+Phase 4 is dessert.

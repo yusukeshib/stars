@@ -5,8 +5,11 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use astronomy::{julian_date_from_unix_seconds, Observer};
 use catalog::load_from_file;
-use clap::Parser;
-use renderer::{magnitude_to_render_params, Camera, LocalView, Renderer, StarInstance};
+use clap::{Parser, ValueEnum};
+use renderer::{
+    magnitude_to_render_params, Camera, LocalView, OverlayConfig, OverlayKind, Renderer,
+    StarInstance,
+};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
@@ -45,6 +48,66 @@ struct Args {
     /// Path to the HYG-format star catalog CSV.
     #[arg(long, default_value = "crates/catalog/data/hyg_v42.csv")]
     catalog: PathBuf,
+
+    /// Overlay layers to draw. Comma-separated; pass --no-overlays to disable all.
+    #[arg(
+        long,
+        value_delimiter = ',',
+        default_values_t = vec![OverlayArg::Horizon, OverlayArg::Cardinals],
+    )]
+    overlays: Vec<OverlayArg>,
+
+    /// Disable all overlays (overrides --overlays).
+    #[arg(long)]
+    no_overlays: bool,
+
+    /// Spacing between alt-az / RA-Dec grid lines, in degrees.
+    #[arg(long, default_value_t = 15.0)]
+    grid_step_deg: f64,
+
+    /// Opacity of overlay lines (0..=1).
+    #[arg(long, default_value_t = 0.6)]
+    overlay_opacity: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
+enum OverlayArg {
+    Horizon,
+    Cardinals,
+    AltAzGrid,
+    EquatorialGrid,
+    Ecliptic,
+    CelestialEquator,
+    Meridian,
+}
+
+impl std::fmt::Display for OverlayArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            OverlayArg::Horizon => "horizon",
+            OverlayArg::Cardinals => "cardinals",
+            OverlayArg::AltAzGrid => "alt-az-grid",
+            OverlayArg::EquatorialGrid => "equatorial-grid",
+            OverlayArg::Ecliptic => "ecliptic",
+            OverlayArg::CelestialEquator => "celestial-equator",
+            OverlayArg::Meridian => "meridian",
+        };
+        f.write_str(s)
+    }
+}
+
+impl From<OverlayArg> for OverlayKind {
+    fn from(o: OverlayArg) -> Self {
+        match o {
+            OverlayArg::Horizon => OverlayKind::Horizon,
+            OverlayArg::Cardinals => OverlayKind::Cardinals,
+            OverlayArg::AltAzGrid => OverlayKind::AltAzGrid,
+            OverlayArg::EquatorialGrid => OverlayKind::EquatorialGrid,
+            OverlayArg::Ecliptic => OverlayKind::Ecliptic,
+            OverlayArg::CelestialEquator => OverlayKind::CelestialEquator,
+            OverlayArg::Meridian => OverlayKind::Meridian,
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -74,8 +137,29 @@ fn main() -> Result<()> {
         fov_y_rad: (args.fov as f32).to_radians(),
     };
 
+    let overlays = OverlayConfig {
+        layers: if args.no_overlays {
+            Vec::new()
+        } else {
+            args.overlays
+                .iter()
+                .copied()
+                .map(OverlayKind::from)
+                .collect()
+        },
+        grid_step_deg: args.grid_step_deg,
+        opacity: args.overlay_opacity.clamp(0.0, 1.0),
+    };
+
     let event_loop = EventLoop::new()?;
-    let mut app = App::new(instances, args.lat, args.lng, start_jd, initial_view);
+    let mut app = App::new(
+        instances,
+        args.lat,
+        args.lng,
+        start_jd,
+        initial_view,
+        overlays,
+    );
     event_loop.run_app(&mut app)?;
     Ok(())
 }
@@ -112,6 +196,7 @@ struct App {
     lat: f64,
     lng: f64,
     initial_view: LocalView,
+    overlays: OverlayConfig,
     sky_clock: SkyClock,
     mouse_pressed: bool,
     last_mouse: Option<(f64, f64)>,
@@ -172,6 +257,7 @@ impl App {
         lng: f64,
         start_jd: f64,
         initial_view: LocalView,
+        overlays: OverlayConfig,
     ) -> Self {
         Self {
             gpu: None,
@@ -180,6 +266,7 @@ impl App {
             lat,
             lng,
             initial_view,
+            overlays,
             sky_clock: SkyClock::new(start_jd),
             mouse_pressed: false,
             last_mouse: None,
@@ -234,7 +321,8 @@ impl ApplicationHandler for App {
         };
         surface.configure(&device, &config);
 
-        let renderer = Renderer::new(&device, format, &self.stars);
+        let mut renderer = Renderer::new(&device, format, &self.stars);
+        renderer.set_overlays(&device, &self.overlays);
         let observer = Observer::from_degrees(self.lat, self.lng, self.sky_clock.current_jd());
         let camera = Camera::new(
             observer,

@@ -3,8 +3,11 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use astronomy::{julian_date_from_unix_seconds, Observer};
 use catalog::load_from_file;
-use clap::Parser;
-use renderer::{magnitude_to_render_params, Camera, LocalView, Renderer, StarInstance};
+use clap::{Parser, ValueEnum};
+use renderer::{
+    magnitude_to_render_params, Camera, LocalView, OverlayConfig, OverlayKind, Renderer,
+    StarInstance,
+};
 
 /// Render the night sky as seen from a given observer to a PNG.
 #[derive(Parser, Debug)]
@@ -49,6 +52,89 @@ struct Args {
     /// Path to the HYG-format star catalog CSV.
     #[arg(long, default_value = "crates/catalog/data/hyg_v42.csv")]
     catalog: PathBuf,
+
+    /// Overlay layers to draw. Comma-separated list, or pass --no-overlays to disable all.
+    ///
+    /// Possible values: horizon, cardinals, alt-az-grid, equatorial-grid,
+    /// ecliptic, celestial-equator, meridian.
+    #[arg(
+        long,
+        value_delimiter = ',',
+        default_values_t = vec![OverlayArg::Horizon, OverlayArg::Cardinals],
+    )]
+    overlays: Vec<OverlayArg>,
+
+    /// Disable all overlays (overrides --overlays).
+    #[arg(long)]
+    no_overlays: bool,
+
+    /// Spacing between alt-az / RA-Dec grid lines, in degrees.
+    #[arg(long, default_value_t = 15.0)]
+    grid_step_deg: f64,
+
+    /// Opacity of overlay lines (0..=1).
+    #[arg(long, default_value_t = 0.6)]
+    overlay_opacity: f32,
+}
+
+/// Mirror of `OverlayKind` for clap. Kept here so the renderer crate stays
+/// free of the clap dependency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
+enum OverlayArg {
+    Horizon,
+    Cardinals,
+    AltAzGrid,
+    EquatorialGrid,
+    Ecliptic,
+    CelestialEquator,
+    Meridian,
+}
+
+impl std::fmt::Display for OverlayArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Match the kebab-case names clap auto-derives from the ValueEnum variants.
+        let s = match self {
+            OverlayArg::Horizon => "horizon",
+            OverlayArg::Cardinals => "cardinals",
+            OverlayArg::AltAzGrid => "alt-az-grid",
+            OverlayArg::EquatorialGrid => "equatorial-grid",
+            OverlayArg::Ecliptic => "ecliptic",
+            OverlayArg::CelestialEquator => "celestial-equator",
+            OverlayArg::Meridian => "meridian",
+        };
+        f.write_str(s)
+    }
+}
+
+impl From<OverlayArg> for OverlayKind {
+    fn from(o: OverlayArg) -> Self {
+        match o {
+            OverlayArg::Horizon => OverlayKind::Horizon,
+            OverlayArg::Cardinals => OverlayKind::Cardinals,
+            OverlayArg::AltAzGrid => OverlayKind::AltAzGrid,
+            OverlayArg::EquatorialGrid => OverlayKind::EquatorialGrid,
+            OverlayArg::Ecliptic => OverlayKind::Ecliptic,
+            OverlayArg::CelestialEquator => OverlayKind::CelestialEquator,
+            OverlayArg::Meridian => OverlayKind::Meridian,
+        }
+    }
+}
+
+fn overlay_config_from_args(args: &Args) -> OverlayConfig {
+    let layers = if args.no_overlays {
+        Vec::new()
+    } else {
+        args.overlays
+            .iter()
+            .copied()
+            .map(OverlayKind::from)
+            .collect()
+    };
+    OverlayConfig {
+        layers,
+        grid_step_deg: args.grid_step_deg,
+        opacity: args.overlay_opacity.clamp(0.0, 1.0),
+    }
 }
 
 fn parse_time_to_jd(time: Option<&str>) -> Result<f64> {
@@ -97,12 +183,15 @@ fn main() -> Result<()> {
         })
         .collect();
 
+    let overlays = overlay_config_from_args(&args);
+
     let pixels = pollster::block_on(render_to_pixels(
         observer,
         view,
         args.width,
         args.height,
         &instances,
+        &overlays,
     ))?;
 
     let img = image::RgbaImage::from_raw(args.width, args.height, pixels)
@@ -122,6 +211,7 @@ async fn render_to_pixels(
     width: u32,
     height: u32,
     stars: &[StarInstance],
+    overlays: &OverlayConfig,
 ) -> Result<Vec<u8>> {
     let instance = wgpu::Instance::default();
     let adapter = instance
@@ -164,7 +254,8 @@ async fn render_to_pixels(
         mapped_at_creation: false,
     });
 
-    let renderer = Renderer::new(&device, TEXTURE_FORMAT, stars);
+    let mut renderer = Renderer::new(&device, TEXTURE_FORMAT, stars);
+    renderer.set_overlays(&device, overlays);
     let camera = Camera::new(observer, view, width as f32 / height as f32);
     renderer.update_camera(&queue, &camera, width, height);
 
