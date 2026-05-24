@@ -73,12 +73,16 @@ impl Renderer {
             }],
         });
 
-        // The skyglow, star and overlay passes all render to the HDR scene
-        // buffer, so their pipelines are built against `HDR_FORMAT`, not
-        // the host's final swapchain format.
+        // The skyglow and star passes render to the HDR scene buffer,
+        // so their pipelines are built against `HDR_FORMAT`. Overlays
+        // are *UI*, not physical light — they bypass the HDR scene + the
+        // adaptive tonemap and composite directly onto the post-tonemap
+        // swapchain so their opacity slider behaves as users expect
+        // (alpha blending in LDR space, not radiance accumulation in
+        // HDR that the scene's auto-exposure subsequently squashes).
         let pipeline = pipeline::create_pipeline(device, HDR_FORMAT, &camera_bind_group_layout);
         let skyglow = Skyglow::new(device, &camera_bind_group_layout);
-        let overlay = OverlayRenderer::new(device, HDR_FORMAT);
+        let overlay = OverlayRenderer::new(device, final_format);
         // Tonemap pass borrows the camera buffer directly (it samples
         // `magnitude_zeropoint` for the HDR-flux→cd/m² conversion that
         // drives the mesopic regime split).
@@ -131,16 +135,22 @@ impl Renderer {
     /// Render one frame.
     ///
     /// Pass order:
-    ///   1. **Skyglow → HDR** — a fullscreen pass writes the Leinert
-    ///      1998 integrated-starlight (+ DGL) surface-brightness model
-    ///      into the HDR scene buffer, attenuated by atmospheric
+    ///   1. **Skyglow → HDR** — the Leinert 1998 integrated-starlight
+    ///      (+ DGL) surface-brightness model, attenuated by atmospheric
     ///      extinction. This is the Milky Way *band* itself.
-    ///   2. **Stars + overlays → HDR** (additive) — stars and overlay
-    ///      lines load the skyglow background and add their contributions
-    ///      on top. Star peaks routinely run > 1.0 in HDR units.
-    ///   3. **Tonemap → final** — a fullscreen pass samples the HDR
-    ///      texture and applies a luminance-preserving Reinhard operator,
-    ///      writing the result to `view` (the host's swapchain texture).
+    ///   2. **Stars → HDR** (additive) — star point sources load the
+    ///      skyglow background and add their contributions. Star peaks
+    ///      routinely run > 1.0 in HDR units.
+    ///   3. **Tonemap → swapchain** — reads the HDR scene + the 1×1
+    ///      adaptation luminance, picks a CIE-191:2010 mesopic key,
+    ///      applies the Reinhard 2002 §3.3 keyed operator. Writes the
+    ///      LDR result to `view`.
+    ///   4. **Overlays → swapchain** — LDR alpha-blended UI lines
+    ///      (horizon, cardinals, grids, ecliptic, ...) drawn on top of
+    ///      the tonemapped scene. Bypassing the HDR/tonemap chain is
+    ///      what makes the `--overlay-opacity` slider behave intuitively
+    ///      — overlays are UI, not physical radiance, and shouldn't
+    ///      auto-expose with the sky.
     pub fn render(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
         // Pass 1: skyglow fills the HDR buffer with the diffuse-sky
         // baseline (clears to black, then writes the Leinert ISL+DGL
@@ -194,15 +204,32 @@ impl Renderer {
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             pass.draw_indexed(0..QuadVertex::INDICES.len() as u32, 0, 0..self.num_stars);
-
-            // Overlays draw on top of stars in the same HDR pass — they
-            // tonemap together with the scene, which keeps their
-            // brightness perceptually consistent with the stars they
-            // overlay.
-            self.overlay.draw(&mut pass);
         }
 
         // Pass 3: tonemap the assembled HDR scene to the swapchain.
         self.tonemap.draw(encoder, view);
+
+        // Pass 4: overlays composite onto the already-tonemapped output.
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Overlay LDR Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        // Load whatever the tonemap pass just wrote and
+                        // alpha-blend the UI lines on top.
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            self.overlay.draw(&mut pass);
+        }
     }
 }
