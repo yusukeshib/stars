@@ -47,28 +47,36 @@ pub struct StarInstance {
 }
 
 impl StarInstance {
+    // Field offsets are computed from the actual `#[repr(C)]` layout so a
+    // reordering, padding insertion, or type change of any field is caught at
+    // compile time instead of silently producing garbage on the GPU.
+    const OFFSET_POSITION: u64 = std::mem::offset_of!(Self, position) as u64;
+    const OFFSET_SIZE: u64 = std::mem::offset_of!(Self, size) as u64;
+    const OFFSET_COLOR: u64 = std::mem::offset_of!(Self, color) as u64;
+    const OFFSET_BRIGHTNESS: u64 = std::mem::offset_of!(Self, brightness) as u64;
+
     pub(crate) fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &[
                 wgpu::VertexAttribute {
-                    offset: 0,
+                    offset: Self::OFFSET_POSITION,
                     shader_location: 1,
                     format: wgpu::VertexFormat::Float32x3,
                 },
                 wgpu::VertexAttribute {
-                    offset: 12,
+                    offset: Self::OFFSET_SIZE,
                     shader_location: 2,
                     format: wgpu::VertexFormat::Float32,
                 },
                 wgpu::VertexAttribute {
-                    offset: 16,
+                    offset: Self::OFFSET_COLOR,
                     shader_location: 3,
                     format: wgpu::VertexFormat::Float32x3,
                 },
                 wgpu::VertexAttribute {
-                    offset: 28,
+                    offset: Self::OFFSET_BRIGHTNESS,
                     shader_location: 4,
                     format: wgpu::VertexFormat::Float32,
                 },

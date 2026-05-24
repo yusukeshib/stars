@@ -3,13 +3,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use astronomy::{julian_date_from_unix_seconds, Observer};
+use astronomy::Observer;
 use catalog::load_from_file;
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use renderer::{
     magnitude_to_render_params, Camera, LocalView, OverlayConfig, OverlayKind, Renderer,
     StarInstance, NAKED_EYE_LIMITING_MAGNITUDE,
 };
+use stars_host_common::{parse_time_to_jd, OverlayArg};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
@@ -70,46 +71,6 @@ struct Args {
     overlay_opacity: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
-enum OverlayArg {
-    Horizon,
-    Cardinals,
-    AltAzGrid,
-    EquatorialGrid,
-    Ecliptic,
-    CelestialEquator,
-    Meridian,
-}
-
-impl std::fmt::Display for OverlayArg {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            OverlayArg::Horizon => "horizon",
-            OverlayArg::Cardinals => "cardinals",
-            OverlayArg::AltAzGrid => "alt-az-grid",
-            OverlayArg::EquatorialGrid => "equatorial-grid",
-            OverlayArg::Ecliptic => "ecliptic",
-            OverlayArg::CelestialEquator => "celestial-equator",
-            OverlayArg::Meridian => "meridian",
-        };
-        f.write_str(s)
-    }
-}
-
-impl From<OverlayArg> for OverlayKind {
-    fn from(o: OverlayArg) -> Self {
-        match o {
-            OverlayArg::Horizon => OverlayKind::Horizon,
-            OverlayArg::Cardinals => OverlayKind::Cardinals,
-            OverlayArg::AltAzGrid => OverlayKind::AltAzGrid,
-            OverlayArg::EquatorialGrid => OverlayKind::EquatorialGrid,
-            OverlayArg::Ecliptic => OverlayKind::Ecliptic,
-            OverlayArg::CelestialEquator => OverlayKind::CelestialEquator,
-            OverlayArg::Meridian => OverlayKind::Meridian,
-        }
-    }
-}
-
 fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();
@@ -165,21 +126,6 @@ fn main() -> Result<()> {
     );
     event_loop.run_app(&mut app)?;
     Ok(())
-}
-
-fn parse_time_to_jd(time: Option<&str>) -> Result<f64> {
-    let unix_seconds = match time {
-        Some(s) => {
-            let dt = chrono::DateTime::parse_from_rfc3339(s)
-                .with_context(|| format!("Invalid RFC3339 time: {s}"))?;
-            dt.timestamp() as f64 + dt.timestamp_subsec_nanos() as f64 * 1e-9
-        }
-        None => {
-            let now = chrono::Utc::now();
-            now.timestamp() as f64 + now.timestamp_subsec_nanos() as f64 * 1e-9
-        }
-    };
-    Ok(julian_date_from_unix_seconds(unix_seconds))
 }
 
 struct GpuState {
@@ -435,7 +381,13 @@ impl ApplicationHandler for App {
                         gpu.surface.configure(&gpu.device, &gpu.config);
                         return;
                     }
-                    _ => return,
+                    // A future wgpu release may introduce new variants. Skip
+                    // the frame but make the skip visible — silently dropping
+                    // frames here masked a real OS-level surface failure once.
+                    other => {
+                        log::warn!("unexpected surface state: {other:?}; skipping frame");
+                        return;
+                    }
                 };
 
                 let view = surface_texture

@@ -1,7 +1,18 @@
-/// Convert B-V color index to an approximate RGB color.
+/// Convert B−V color index to an approximate sRGB triple.
 ///
-/// Uses a piecewise linear approximation of the blackbody color sequence.
-/// B-V ranges roughly from -0.4 (hot blue) to 2.0 (cool red).
+/// Uses a piecewise polynomial fit to the blackbody color sequence — fast,
+/// dependency-free, and good enough for naked-eye visualization where the
+/// dominant perceptual cue is hue, not radiometric accuracy. B−V ranges
+/// roughly from −0.4 (hot blue, e.g. O/B stars) to 2.0 (cool red, M giants).
+///
+/// This is **not** a physically calibrated transform. For a citable color
+/// pipeline, the right approach is Ballesteros (2012) — derive an effective
+/// temperature `T_eff` from B−V via
+///   `T ≈ 4600 · (1/(0.92(B−V)+1.7) + 1/(0.92(B−V)+0.62))` K
+/// then run a blackbody spectrum at `T` through CIE 1931 color matching
+/// functions and map XYZ → sRGB. The current approximation tracks that
+/// pipeline qualitatively but is not interchangeable with it; ROADMAP Phase 3
+/// is the right time to swap implementations.
 pub fn bv_to_rgb(bv: f32) -> [f32; 3] {
     let bv = bv.clamp(-0.4, 2.0);
 

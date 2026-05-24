@@ -2,7 +2,7 @@ use glam::Vec3;
 use serde::Deserialize;
 
 use crate::color::bv_to_rgb;
-use crate::coords::radec_to_cartesian;
+use crate::coords::radec_hours_deg_to_cartesian;
 
 #[derive(Debug, Deserialize)]
 struct RawStar {
@@ -21,8 +21,14 @@ pub struct Star {
 }
 
 const MAX_MAGNITUDE: f64 = 8.0;
-/// Drop catalog rows further than this many parsecs (HYG `dist` column unit). Stars
-/// without a `dist` value are kept; this filter is mainly for far cluster outliers.
+/// HYG fills its `dist` (parsecs) column with the sentinel value `100000` for
+/// rows where the parallax is missing, negative, or numerically meaningless.
+/// We drop those rows: their on-sky position may still be fine, but using
+/// them in distance-aware filtering or future 3D rendering would propagate
+/// the sentinel as a real distance. Rows with no `dist` at all are kept
+/// (HYG leaves the cell empty in that case). 100 kpc is far beyond the
+/// stellar Milky Way disc (≈30 kpc), so no real star is filtered out by
+/// this threshold.
 const MAX_DISTANCE_PC: f64 = 100_000.0;
 
 pub fn load_from_csv(data: &str) -> Vec<Star> {
@@ -51,7 +57,7 @@ pub fn load_from_csv(data: &str) -> Vec<Star> {
         }
 
         stars.push(Star {
-            position: radec_to_cartesian(raw.ra, raw.dec),
+            position: radec_hours_deg_to_cartesian(raw.ra, raw.dec),
             magnitude: raw.mag as f32,
             color: bv_to_rgb(raw.ci.unwrap_or(0.0) as f32),
         });
