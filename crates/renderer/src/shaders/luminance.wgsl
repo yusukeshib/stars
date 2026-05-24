@@ -44,12 +44,51 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
 // stride catches roughly the same star density.
 const GRID: i32 = 32;
 
-// Small offset added inside the log so completely-black pixels (the HDR
-// clear, below-horizon directions) contribute a sensible -∞ floor instead
-// of -∞ poisoning the average. 1e-7 is roughly 6 magnitudes below the
-// faintest contribution we expect from a star catalogue + skyglow model,
-// so it acts as the "noise floor" without biasing the mean.
-const LUMA_EPS: f32 = 1e-7;
+// Both ends of the per-pixel luminance distribution are rejected from
+// the adaptation-luminance average. The remaining "middle" of the
+// distribution — the dark-sky background and diffuse skyglow — is what
+// a dark-adapted eye actually adapts to (Ferwerda 1996 §3 makes this
+// implicit; in practice the eye's adaptation pool is the broad spatial
+// average of the visual field, not its individual peaks).
+//
+// `MIN_SCENE_LUMA` rejects "missing data":
+//   the skyglow pass writes exactly zero to the HDR buffer for
+//   below-horizon directions (the Earth occludes them) and the star
+//   pass leaves them untouched. Those pixels are not dim scene; they
+//   are *absent* scene, and including them as `log(0 + ε)` with a
+//   tiny ε would let a frame full of "Earth" drag the log-average
+//   down by many decades. The visible bug was a horizon-grazing view
+//   washing to bright grey because the tonemap over-corrected.
+//
+//   The faintest scene pixel the renderer produces is the galactic-pole
+//   ISL floor at the largest plausible pixel solid angle: ≈ 10^-4 in
+//   HDR flux units. Threshold a couple of decades below that so a real
+//   dim-sky pixel is never falsely rejected.
+//
+// `MAX_SCENE_LUMA` rejects point-source peaks:
+//   bright stars and their PSF cores spike orders of magnitude above
+//   the surrounding sky and would otherwise drag the geometric mean
+//   up dramatically when a Sirius-class star happens to land in the
+//   sample grid — making the apparent brightness of every star vary
+//   with which other stars happen to be in frame. A real eye does not
+//   adapt to individual point sources (the temporal-integration
+//   window is too short and the angular extent too small); clipping
+//   above the brightest plausible *sky* value isolates the adaptation
+//   estimate to the diffuse component.
+//
+//   Pick 10^-2: the Milky Way's brightest pixels are ≈10^-3 after
+//   skyglow + atmospheric extinction, so this leaves headroom for the
+//   diffuse light while still excluding star cores and their inner
+//   halos.
+const MIN_SCENE_LUMA: f32 = 1e-6;
+const MAX_SCENE_LUMA: f32 = 1e-2;
+
+// Fallback log-luminance written when every sample falls outside the
+// [MIN, MAX] window (e.g. camera pointing entirely at the occluded
+// ground, or a degenerate test scene). Matches `log(1e-4)`, the
+// canonical galactic-pole sky brightness, so the tonemap behaves as if
+// the scene were a dark sky rather than producing NaN.
+const FALLBACK_LOG_LUMA: f32 = -9.21;
 
 @fragment
 fn fs_main() -> @location(0) f32 {
@@ -69,12 +108,19 @@ fn fs_main() -> @location(0) f32 {
             let y = min(i32(v * f32(h)), h - 1);
             let rgb = textureLoad(hdr_texture, vec2<i32>(x, y), 0).rgb;
             let luma = dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
-            log_sum = log_sum + log(luma + LUMA_EPS);
-            count = count + 1;
+            if luma > MIN_SCENE_LUMA && luma < MAX_SCENE_LUMA {
+                log_sum = log_sum + log(luma);
+                count = count + 1;
+            }
         }
     }
 
     // Write the log-average. Tonemap pass exponentiates to recover the
-    // geometric-mean luminance L_a.
+    // geometric-mean luminance L_a. If no samples passed the threshold
+    // (camera fully below the horizon or otherwise degenerate), fall
+    // back to a sensible dark-sky default rather than dividing by zero.
+    if count == 0 {
+        return FALLBACK_LOG_LUMA;
+    }
     return log_sum / f32(count);
 }
