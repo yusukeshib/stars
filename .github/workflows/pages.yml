@@ -37,8 +37,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/web -> target
-          # Share cache with the `wasm` job in ci.yml so deploys start warm.
-          shared-key: wasm
+          # Distinct from ci.yml's wasm key: this builds the `release` profile
+          # via `wasm-pack build`, whose artifacts live in a different deps/
+          # tree than ci.yml's dev-profile `cargo check`, so sharing a key
+          # would only inflate the cache with no compile-time reuse.
+          shared-key: wasm-release
           # This job runs only on main, so saving is always desired.
           save-if: 'true'
 
