@@ -6,15 +6,27 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel superseded runs on the same ref (e.g. when a PR is pushed repeatedly).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
+  # Faster, smaller builds in CI: no incremental, trimmed debug info, robust networking.
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  RUSTUP_MAX_RETRIES: 10
+  RUST_BACKTRACE: short
 
 jobs:
   fmt:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -24,30 +36,48 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Only the main branch writes the cache; PRs read from it for fast warm starts
+          # without thrashing the cache budget with branch-specific entries.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # Stable, job-distinct key so cache survives job renames and so the
+          # parallel `test` job doesn't collide on save.
+          shared-key: clippy
       - run: cargo clippy --all-targets -- -D warnings
 
   test:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: test
+      - run: cargo test --no-fail-fast
 
   wasm:
     name: WASM Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check -p stars-web --target wasm32-unknown-unknown
+        with:
+          # apps/web is a separate workspace (excluded from the root one), so we
+          # point rust-cache at its own target/ directory.
+          workspaces: apps/web -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # Dev-profile `cargo check` artifacts. Distinct from pages.yml's
+          # release-profile cache to avoid mixing incompatible deps/ trees.
+          shared-key: wasm-check
+      - run: cargo check --target wasm32-unknown-unknown
         working-directory: apps/web
