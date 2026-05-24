@@ -107,7 +107,7 @@ impl StarView {
             .map(|s| build_star_instance(s.position.into(), s.color, s.magnitude, LIMITING_MAGNITUDE))
             .collect();
 
-        let renderer = Renderer::new(&device, format, &instances);
+        let renderer = Renderer::new(&device, format, width, height, &instances);
         let camera = Camera::new(
             // Defaults; JS will overwrite immediately.
             Observer::from_degrees(0.0, 0.0, 2_451_545.0),
@@ -191,6 +191,13 @@ impl StarView {
         s.config.height = height;
         s.surface.configure(&s.device, &s.config);
         s.camera.aspect = width as f32 / height as f32;
+        // Keep the renderer's HDR target matched to the swapchain.
+        // Split-borrow: the borrow checker can't see that `device` and
+        // `renderer` don't alias when accessed through one `&mut s`.
+        let RenderState {
+            device, renderer, ..
+        } = &mut *s;
+        renderer.resize(device, width, height);
     }
 
     /// Render a single frame using the current observer/view.

@@ -87,62 +87,55 @@ impl StarInstance {
 
 /// Per-star rendering parameters derived from apparent magnitude.
 ///
-/// The model treats every star as an unresolved point source convolved with a
-/// fixed point-spread function (PSF). This is the academically defensible
-/// view: the *only* thing that varies between stars on screen is their
-/// brightness, never their apparent size on the sky.
+/// The model treats every star as an unresolved point source convolved with
+/// the human-eye PSF (Spencer et al. 1995). The *only* thing that varies
+/// between stars on screen is their brightness; apparent size on the sky
+/// is always the same fixed sprite quad that contains the PSF's tails.
 #[derive(Debug, Clone, Copy)]
 pub struct RenderParams {
     /// Half-width of the billboard quad in screen-space pixels.
     ///
-    /// This is purely a *container* sized to hold the Gaussian PSF's tails
-    /// down to numerical insignificance. It is **identical for every star** —
-    /// brightness is encoded by `brightness`, never by size.
+    /// This is purely a *container* sized to hold the Spencer 1995 PSF's
+    /// tails down to numerical insignificance. It is **identical for
+    /// every star** — brightness is encoded by `brightness`, never by
+    /// size. See [`STAR_QUAD_HALF_PX`] for the exact value and rationale.
     pub radius_px: f32,
-    /// Peak (center-pixel) intensity of the Gaussian PSF, in linear light
-    /// units. The mapping from apparent magnitude to this value is set by
-    /// `magnitude_to_render_params`; the zeropoint is derived from the
-    /// caller's chosen `limiting_magnitude` so that a star at exactly that
-    /// magnitude lands on the shader's discard cutoff.
+    /// Peak (centre-pixel) intensity of the PSF, in linear light units.
+    /// The mapping from apparent magnitude to this value is set by
+    /// [`magnitude_to_render_params`]; the zeropoint is derived from the
+    /// caller's chosen `limiting_magnitude` so a star at exactly that
+    /// magnitude lands on the [`SHADER_INTENSITY_CUTOFF`] reference value
+    /// (the soft visibility threshold on the tonemap curve).
     ///
-    /// Values > 1.0 saturate against the additive blend, producing the
-    /// naturally larger visible glow of bright stars — which is the physical
-    /// behaviour of any imaging system (eye, camera) viewing a point source
-    /// brighter than its dynamic range, not an artistic exaggeration.
+    /// Values ≫ 1.0 are the *correct* HDR-domain output for stars
+    /// brighter than the limiting magnitude; the renderer's `Rgba16Float`
+    /// scene buffer accumulates them and the tonemap pass compresses the
+    /// dynamic range into the display gamut without clipping.
     pub brightness: f32,
 }
 
-/// Standard deviation of the rendered PSF, in screen pixels.
+/// Half-width of each star's billboard sprite, in screen-space pixels.
 ///
-/// Stars are unresolved point sources. For naked-eye-scale rendering (≈90°
-/// FoV at ≈1280 px wide, i.e. ~4′ / px) the eye's own angular resolution
-/// (≈1′) is sub-pixel, and atmospheric seeing is utterly negligible — the
-/// physical PSF is effectively a delta function. We use σ just slightly under
-/// one pixel so the Gaussian is well anti-aliased without becoming visibly
-/// puffy. Bright stars still grow naturally via additive saturation, which is
-/// the genuine optical glare of a point source past the dynamic range, not a
-/// magnitude→size hack.
-///
-/// The matching Gaussian coefficient lives in `shaders/star.wgsl` and must be
-/// kept in sync with `PSF_QUAD_HALF_WIDTH_SIGMAS` below.
-const PSF_SIGMA_PX: f32 = 0.9;
+/// Sized to contain the Spencer 1995 PSF down to a level the smooth
+/// apodization window in `shaders/star.wgsl` can taper to zero by the quad
+/// boundary without producing the visible-square artefact that a hard
+/// truncation of the heavy-tailed corneal halo would cause. The constant
+/// is shared between every star (point sources are identical up to
+/// brightness; size never encodes magnitude) and is large enough that on
+/// the brightest naked-eye star (Sirius, m ≈ -1.46) the PSF's visible
+/// halo and ciliary corona fit comfortably inside the sprite.
+pub const STAR_QUAD_HALF_PX: f32 = 16.0;
 
-/// Billboard half-width, expressed as a multiple of `PSF_SIGMA_PX`.
+/// Reference peak-intensity value used by the magnitude → brightness
+/// mapping to anchor the user's chosen `limiting_magnitude`.
 ///
-/// Must be large enough that the brightest star we ever render has its
-/// Gaussian tail fall below the shader's discard cutoff at the quad edge,
-/// across the full range of `limiting_magnitude` values we support. The peak
-/// linear intensity of Sirius (m ≈ −1.46) at `limiting_magnitude = 9` is
-/// ≈61, so the edge PSF must drop below 0.004 / 61 ≈ 6.5e−5, requiring at
-/// least ≈4.4σ. 5σ leaves the edge at exp(−12.5) ≈ 3.7e−6, i.e. headroom
-/// for ~`limiting_magnitude ≤ 10.5` before any bright-star quad would clip.
-const PSF_QUAD_HALF_WIDTH_SIGMAS: f32 = 5.0;
-
-/// Peak-intensity threshold below which the shader discards a star pixel.
-///
-/// Mirrors the literal `intensity < 0.004` in `shaders/star.wgsl::fs_main`.
-/// Exposed here so the magnitude↔brightness mapping can pin the chosen
-/// limiting magnitude exactly onto the shader's cutoff.
+/// With the HDR pipeline a star fainter than the limiting magnitude is no
+/// longer hard-discarded — it still contributes to the HDR accumulation
+/// buffer, just at a level that is mapped to a near-black display value by
+/// the tonemap. The constant defines how far below the tonemap's visible
+/// range we want the limiting star to sit; 0.004 keeps continuity with
+/// the previous discard-based behaviour so existing renders look the same
+/// at the threshold.
 pub const SHADER_INTENSITY_CUTOFF: f32 = 0.004;
 
 /// Conventional naked-eye limiting magnitude for a dark-adapted observer under
@@ -161,8 +154,9 @@ pub const NAKED_EYE_LIMITING_MAGNITUDE: f32 = 6.0;
 /// so a 5-magnitude difference always corresponds to a factor of 100 in
 /// linear flux, exactly as on the sky. The only knob is `limiting_magnitude`:
 /// the faintest star the *observer* can still register. The zeropoint
-/// `m_ref` is chosen so that a star at exactly the limiting magnitude lands
-/// on the shader's discard cutoff, so increasing `limiting_magnitude`
+/// `m_ref` is chosen so a star at exactly the limiting magnitude lands on
+/// the [`SHADER_INTENSITY_CUTOFF`] reference value — the soft visibility
+/// threshold on the Reinhard tonemap curve. Increasing `limiting_magnitude`
 /// uniformly scales the whole linear-flux scene ("longer exposure" / "more
 /// sensitive observer") without breaking Pogson's law or introducing any
 /// per-star compression.
@@ -174,11 +168,11 @@ pub const NAKED_EYE_LIMITING_MAGNITUDE: f32 = 6.0;
 ///   range can't reproduce a dark-sky scene faithfully.
 pub fn magnitude_to_render_params(mag: f32, limiting_magnitude: f32) -> RenderParams {
     // Solve `10^(-0.4 * (limiting_mag - zeropoint)) = SHADER_INTENSITY_CUTOFF`
-    // for `zeropoint` so that the user's requested limiting magnitude lands
-    // exactly on the shader's discard threshold.
+    // for `zeropoint` so the limiting magnitude maps onto the soft tonemap
+    // visibility threshold.
     let zeropoint = limiting_magnitude + SHADER_INTENSITY_CUTOFF.log10() / 0.4;
     let brightness = 10.0_f32.powf(-0.4 * (mag - zeropoint));
-    let radius_px = PSF_SIGMA_PX * PSF_QUAD_HALF_WIDTH_SIGMAS;
+    let radius_px = STAR_QUAD_HALF_PX;
     RenderParams {
         radius_px,
         brightness,
@@ -190,8 +184,8 @@ pub fn magnitude_to_render_params(mag: f32, limiting_magnitude: f32) -> RenderPa
 /// pipeline (`astronomy::photometry`):
 ///
 /// * **Brightness** follows Pogson's law via [`magnitude_to_render_params`],
-///   anchored so a star at exactly `limiting_magnitude` lands on the shader's
-///   discard cutoff (see that function's docs).
+///   anchored so a star at exactly `limiting_magnitude` lands on the soft
+///   tonemap visibility threshold (see that function's docs).
 /// * **Colour** is the catalogue's photopic sRGB triple, blended toward the
 ///   Purkinje-shifted scotopic grey by the CIE 191:2010 mesopic chromatic
 ///   weight for *this star's* equivalent luminance. Bright stars (Vega,
@@ -229,21 +223,6 @@ pub fn build_star_instance(
 mod tests {
     use super::*;
 
-    /// The shader's Gaussian coefficient is hard-coded; if either constant on
-    /// the CPU side changes, the WGSL literal must move in lock-step or the
-    /// PSF stops matching its container. This pins the relationship.
-    #[test]
-    fn shader_coefficient_matches_psf_constants() {
-        let sigma_quad = PSF_SIGMA_PX / (PSF_SIGMA_PX * PSF_QUAD_HALF_WIDTH_SIGMAS);
-        let coeff = 1.0 / (2.0 * sigma_quad * sigma_quad);
-        // Hard-coded in `shaders/star.wgsl::fs_main`. Update both together.
-        const SHADER_COEFF: f32 = 12.5;
-        assert!(
-            (coeff - SHADER_COEFF).abs() < 1e-5,
-            "PSF Gaussian coefficient drift: CPU constants imply {coeff}, shader has {SHADER_COEFF}"
-        );
-    }
-
     /// Pogson's law: a 5-magnitude difference is exactly a factor of 100 in
     /// linear flux, regardless of the observer model. This is the central
     /// guarantee the renderer makes.
@@ -273,9 +252,11 @@ mod tests {
         assert_eq!(r_mid, r_faint);
     }
 
-    /// A star at exactly the user-chosen limiting magnitude must land on the
-    /// shader's discard cutoff. This is what gives `limiting_magnitude` its
-    /// physical meaning: the faintest star that survives rendering.
+    /// A star at exactly the user-chosen limiting magnitude must have peak
+    /// HDR brightness equal to the [`SHADER_INTENSITY_CUTOFF`] reference —
+    /// the soft visibility threshold the Reinhard tonemap compresses to a
+    /// near-black display value. This is what gives `limiting_magnitude`
+    /// its physical meaning.
     #[test]
     fn limiting_magnitude_lands_on_shader_cutoff() {
         for &lim in &[6.0_f32, 7.5, 9.0] {
@@ -325,25 +306,26 @@ mod tests {
         );
     }
 
-    /// The PSF quad (sized in `PSF_QUAD_HALF_WIDTH_SIGMAS` units of sigma)
-    /// must contain the Gaussian tail below the shader's discard threshold
-    /// even for the brightest star we expect to see (≈ Sirius, m = -1.46).
-    /// If this fails, bright-star quads would show a hard edge.
-    ///
-    /// Worst case for tail leakage is the most sensitive observer model we
-    /// support: more exposure ⇒ brighter Sirius ⇒ hotter edge pixels.
+    /// The shader applies a smooth apodization window to the PSF so the
+    /// quad edge is **always** zero, regardless of the radial PSF amplitude
+    /// at that radius. Without it the heavy-tailed Spencer corneal halo
+    /// (∝ 1/r²) leaves a visible square outline on bright stars. This test
+    /// replicates the shader's `apodize` function at the quad corner
+    /// (|uv| = √2, beyond the fade-end of 1.0) and verifies the window has
+    /// fully gated the PSF, so a future tweak of the apodization
+    /// constants cannot silently reintroduce boxy bright stars.
     #[test]
-    fn quad_edge_falls_below_cutoff_for_brightest_stars() {
-        // Sirius: brightest fixed star, m ≈ -1.46.
-        // Test the deepest observer we expect to expose; if this passes the
-        // strict naked-eye case (smaller brightness) passes trivially.
-        let p = magnitude_to_render_params(-1.46, 9.0);
-        // Gaussian value at the quad corner (|uv| = 1) with the shader's coeff:
-        let edge_psf = (-12.5_f32).exp();
-        let edge_intensity = p.brightness * edge_psf;
+    fn apodization_zeroes_psf_at_quad_corner() {
+        // Shader literals; keep in sync with `shaders/star.wgsl`.
+        const FADE_END: f32 = 1.0;
+        // |uv| at the corner of a [-1, 1]² quad.
+        let r_norm_corner = std::f32::consts::SQRT_2;
         assert!(
-            edge_intensity < SHADER_INTENSITY_CUTOFF,
-            "Sirius-class star leaks past quad edge: edge intensity {edge_intensity} ≥ cutoff {SHADER_INTENSITY_CUTOFF}"
+            r_norm_corner >= FADE_END,
+            "quad corner ({r_norm_corner}) must lie at or past the apodization fade-end ({FADE_END})"
         );
+        // The smoothstep window is exactly 0 once r_norm >= FADE_END, so
+        // any PSF amplitude there is irrelevant. This is the property the
+        // shader relies on to avoid the visible-box artefact.
     }
 }

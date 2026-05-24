@@ -262,7 +262,7 @@ impl ApplicationHandler for App {
         };
         surface.configure(&device, &config);
 
-        let mut renderer = Renderer::new(&device, format, &self.stars);
+        let mut renderer = Renderer::new(&device, format, size.width, size.height, &self.stars);
         renderer.set_overlays(&device, &self.overlays);
         let observer = Observer::from_degrees(self.lat, self.lng, self.sky_clock.current_jd());
         let camera = Camera::new(
@@ -304,6 +304,9 @@ impl ApplicationHandler for App {
                 gpu.config.height = new_size.height;
                 gpu.surface.configure(&gpu.device, &gpu.config);
                 gpu.camera.aspect = new_size.width as f32 / new_size.height as f32;
+                // Keep the renderer's HDR target matched to the swapchain.
+                gpu.renderer
+                    .resize(&gpu.device, new_size.width, new_size.height);
             }
 
             WindowEvent::MouseInput {

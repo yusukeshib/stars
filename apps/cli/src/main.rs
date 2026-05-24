@@ -206,7 +206,7 @@ async fn render_to_pixels(
         mapped_at_creation: false,
     });
 
-    let mut renderer = Renderer::new(&device, TEXTURE_FORMAT, stars);
+    let mut renderer = Renderer::new(&device, TEXTURE_FORMAT, width, height, stars);
     renderer.set_overlays(&device, overlays);
     let camera = Camera::new(observer, view, width as f32 / height as f32);
     renderer.update_camera(&queue, &camera, width, height);
