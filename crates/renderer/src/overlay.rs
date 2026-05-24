@@ -21,6 +21,14 @@ use crate::camera::Camera;
 /// Obliquity of the ecliptic at J2000.0 (IAU 2006), in radians.
 const OBLIQUITY_RAD: f64 = 0.409_092_804_222_329_3;
 
+/// Inclusive bounds clamped onto `OverlayConfig::grid_step_deg` before the
+/// geometry generators run. The lower bound is what stops the `while`-style
+/// generators from looping forever on a zero or negative step (a single bad
+/// call from the WASM bindings would otherwise freeze the browser tab); the
+/// upper bound is just "larger than 90° produces no parallels at all".
+const GRID_STEP_MIN_DEG: f64 = 1.0;
+const GRID_STEP_MAX_DEG: f64 = 90.0;
+
 /// Which overlay layers to draw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OverlayKind {
@@ -188,10 +196,26 @@ impl OverlayRenderer {
     /// Rebuild every layer from `config`. Cheap to call (geometry generation is
     /// a few thousand verts of trig); intended to be called whenever the user
     /// toggles overlays or changes the step / opacity.
+    ///
+    /// Duplicate layer entries are coalesced and `grid_step_deg` is clamped to
+    /// a sane range so a pathological caller (e.g. the WASM bindings handed a
+    /// tampered config) can't infinite-loop the geometry generators or build a
+    /// gigabyte vertex buffer.
     pub fn set_config(&mut self, device: &wgpu::Device, config: &OverlayConfig) {
         self.layers.clear();
+        let step_deg = config
+            .grid_step_deg
+            .clamp(GRID_STEP_MIN_DEG, GRID_STEP_MAX_DEG);
+        // Linear scan because the variant set is tiny (≤7 entries today); avoids
+        // taking a hash dependency for a deduplication that runs at most once
+        // per overlay-config change.
+        let mut seen: Vec<OverlayKind> = Vec::with_capacity(config.layers.len());
         for kind in &config.layers {
-            let (frame, verts, rgb) = build_layer(*kind, config.grid_step_deg);
+            if seen.contains(kind) {
+                continue;
+            }
+            seen.push(*kind);
+            let (frame, verts, rgb) = build_layer(*kind, step_deg);
             if verts.is_empty() {
                 continue;
             }
@@ -554,5 +578,33 @@ mod tests {
         let c = OverlayConfig::default();
         assert!(c.layers.contains(&OverlayKind::Horizon));
         assert!(c.layers.contains(&OverlayKind::Cardinals));
+    }
+
+    #[test]
+    fn alt_az_grid_terminates_at_min_step() {
+        // The generator uses `step += step` to advance the parallels and
+        // meridians. A zero/negative step would loop forever, which is the
+        // bug the GRID_STEP_MIN_DEG clamp in `set_config` guards against.
+        // This test asserts the generator itself behaves at the lower bound
+        // (so the clamp is the only safety we need to rely on).
+        let v = alt_az_grid(GRID_STEP_MIN_DEG);
+        assert!(!v.is_empty());
+        assert_eq!(v.len() % 2, 0);
+    }
+
+    #[test]
+    fn equatorial_grid_terminates_at_min_step() {
+        let v = equatorial_grid(GRID_STEP_MIN_DEG);
+        assert!(!v.is_empty());
+        assert_eq!(v.len() % 2, 0);
+    }
+
+    #[test]
+    fn equatorial_grid_at_max_step_is_minimal() {
+        // At step = 90°, there are no non-equator parallels and only 4 hour
+        // circles. Mostly a smoke test that the upper-clamp value doesn't
+        // produce a degenerate buffer.
+        let v = equatorial_grid(GRID_STEP_MAX_DEG);
+        assert_eq!(v.len() % 2, 0);
     }
 }

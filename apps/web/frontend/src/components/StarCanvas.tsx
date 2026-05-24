@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react";
-import { toRad, type Observer, type View } from "../observer";
+import { toRad, type Observer, type OverlayConfig, type View } from "../observer";
 
 type StarViewHandle = {
   set_observer: (lat: number, lng: number, timeUnixMs: number) => void;
   set_view: (az: number, alt: number, fov: number) => void;
+  set_overlays: (layers: string[], gridStepDeg: number, opacity: number) => void;
   resize: (w: number, h: number) => void;
   render_frame: () => void;
 };
@@ -13,11 +14,12 @@ type Props = {
   view: View;
   /** Unix milliseconds for the rendered moment. */
   timeMs: number;
+  overlays: OverlayConfig;
   onDrag: (deltaAzDeg: number, deltaAltDeg: number) => void;
   onWheel: (zoomFactor: number) => void;
 };
 
-export function StarCanvas({ observer, view, timeMs, onDrag, onWheel }: Props) {
+export function StarCanvas({ observer, view, timeMs, overlays, onDrag, onWheel }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const handleRef = useRef<StarViewHandle | null>(null);
   const dragState = useRef<{ x: number; y: number; pointerId: number } | null>(null);
@@ -27,9 +29,21 @@ export function StarCanvas({ observer, view, timeMs, onDrag, onWheel }: Props) {
   const observerRef = useRef(observer);
   const viewRef = useRef(view);
   const timeRef = useRef(timeMs);
+  const overlaysRef = useRef(overlays);
   observerRef.current = observer;
   viewRef.current = view;
   timeRef.current = timeMs;
+  overlaysRef.current = overlays;
+
+  // Push overlays to wasm whenever the config changes. Geometry is rebuilt on
+  // the GPU side, so we don't want to do it every frame -- a useEffect keyed
+  // on the config is the right granularity. The ref above protects against the
+  // race where the user toggles overlays before wasm finishes booting: the
+  // boot effect reads the latest value from the ref, and this effect re-fires
+  // on any subsequent change.
+  useEffect(() => {
+    handleRef.current?.set_overlays(overlays.layers, overlays.gridStepDeg, overlays.opacity);
+  }, [overlays]);
 
   // Boot wasm + start the render loop. Only ever runs once.
   useEffect(() => {
@@ -42,6 +56,10 @@ export function StarCanvas({ observer, view, timeMs, onDrag, onWheel }: Props) {
       if (cancelled) return;
       const handle = (await wasm.StarView.create("star-canvas")) as StarViewHandle;
       handleRef.current = handle;
+      // Apply whatever overlay state is current right now -- could be the
+      // initial defaults or something the user toggled during the wasm boot.
+      const ov = overlaysRef.current;
+      handle.set_overlays(ov.layers, ov.gridStepDeg, ov.opacity);
 
       const tick = () => {
         if (cancelled) return;
