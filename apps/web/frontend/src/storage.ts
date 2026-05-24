@@ -1,4 +1,6 @@
 import {
+  MAX_FOV_DEG,
+  MIN_FOV_DEG,
   isOverlayLayer,
   type Observer,
   type OverlayConfig,
@@ -71,7 +73,7 @@ const LAT_RANGE: [number, number] = [-90, 90];
 const LNG_RANGE: [number, number] = [-180, 180];
 const AZ_RANGE: [number, number] = [0, 360];
 const ALT_RANGE: [number, number] = [-90, 90];
-const FOV_RANGE: [number, number] = [1, 179];
+const FOV_RANGE: [number, number] = [MIN_FOV_DEG, MAX_FOV_DEG];
 
 const inRange = (n: unknown, [lo, hi]: [number, number]): n is number =>
   typeof n === "number" && Number.isFinite(n) && n >= lo && n <= hi;

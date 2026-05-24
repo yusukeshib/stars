@@ -38,6 +38,7 @@ export function App() {
   );
   const [timeMs, setTimeMs] = useState<number>(() => Date.now());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const lastTickRef = useRef<number>(performance.now());
 
   // Persist observer + view + overlays whenever they change. We debounce
   // because the view updates on every mouse/touch frame during a drag, and
@@ -51,7 +52,6 @@ export function App() {
 
   // Clock always ticks. When the user picks a custom moment via the settings
   // panel we simply rebase `timeMs`; the same loop keeps advancing from there.
-  const lastTickRef = useRef<number>(performance.now());
   useEffect(() => {
     let raf = 0;
     const step = (now: number) => {
