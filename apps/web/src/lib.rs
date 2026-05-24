@@ -132,6 +132,12 @@ impl StarView {
     /// "alt-az-grid", "equatorial-grid", "ecliptic", "celestial-equator",
     /// "meridian". Unknown names are silently ignored so the JS layer can
     /// evolve without breaking older builds.
+    ///
+    /// `grid_step_deg` and `opacity` are passed through to the renderer, which
+    /// applies its own clamps; finite values outside the renderer's accepted
+    /// range are silently coerced. Non-finite values would propagate into the
+    /// geometry generators and produce NaN vertices, so we replace them with
+    /// the renderer's defaults here.
     pub fn set_overlays(&self, layers: Vec<String>, grid_step_deg: f64, opacity: f32) {
         let kinds: Vec<OverlayKind> = layers
             .iter()
@@ -146,13 +152,19 @@ impl StarView {
                 _ => None,
             })
             .collect();
+        let grid_step_deg = if grid_step_deg.is_finite() {
+            grid_step_deg
+        } else {
+            15.0
+        };
+        let opacity = if opacity.is_finite() { opacity } else { 0.6 };
         let s = &mut *self.state.borrow_mut();
         s.renderer.set_overlays(
             &s.device,
             &OverlayConfig {
                 layers: kinds,
                 grid_step_deg,
-                opacity: opacity.clamp(0.0, 1.0),
+                opacity,
             },
         );
     }
