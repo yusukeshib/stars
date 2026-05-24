@@ -44,7 +44,7 @@ pub struct CameraUniform {
 /// Observer-local atmosphere state that the renderer applies to the star
 /// pipeline. Currently captures the per-channel extinction coefficients
 /// (Schaefer 1993). A future PR may grow this to include refraction,
-/// aerosol scattering, sky brightness, etc. — see ROADMAP Phase 2.5.
+/// aerosol scattering, sky brightness, etc. — see ROADMAP Phase 1'.
 #[derive(Debug, Clone, Copy)]
 pub struct Atmosphere {
     /// Per-channel extinction coefficients `[k_R, k_G, k_B]` in magnitudes

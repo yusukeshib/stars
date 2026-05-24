@@ -23,7 +23,7 @@
 //! TVI functions are implemented in `astronomy::photometry`; they motivate
 //! the photopic-vs-scotopic key split here, but the *per-fragment* rod/cone
 //! pathway separation (V'(λ)-weighted scotopic chroma) is scoped for the
-//! Pattanaik 1998 multiscale upgrade in ROADMAP Phase 2.5.
+//! Pattanaik 1998 multiscale upgrade in ROADMAP Phase 1'.
 
 /// Format of the intermediate scene buffer.
 ///
