@@ -69,7 +69,19 @@ impl StarView {
             .map_err(|e| JsValue::from_str(&format!("Device error: {e}")))?;
 
         let surface_caps = surface.get_capabilities(&adapter);
-        let format = surface_caps.formats[0];
+        // Prefer an sRGB surface so the hardware applies the linear→sRGB EOTF
+        // on present. The star shader emits linear radiance (Pogson's law, see
+        // `vertex::magnitude_to_render_params`); writing that straight into a
+        // non-sRGB framebuffer crushes mid/faint magnitudes to near-black on
+        // the display. Selecting an sRGB format is the correct, lossless way
+        // to get perceptually right brightness without altering the physics.
+        let format = surface_caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(surface_caps.formats[0]);
+        log::info!("Surface format: {format:?} (sRGB: {})", format.is_srgb());
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
