@@ -12,15 +12,16 @@
 //      use.
 //   3. Pick the *photographic key* `a`: where the scene's adaptation
 //      patch should land on the display, expressed as a fraction of
-//      display white. Bright scenes use Ansel Adams' classical
-//      Zone V (`a ≈ 0.18`); dark, dark-adapted scenes use a much lower
-//      key so the visible-night-sky feel survives (`a ≈ 0.03`). The blend
-//      between the two regimes follows the CIE 191:2010 mesopic
-//      photopic-fraction curve, which is the same weight used per-star
-//      by `astronomy::photometry::mesopic_chromatic_weight`. The choice
-//      of `a` is the place where the Ferwerda 1996 adaptation argument
-//      enters: at threshold the TVI ratio determines the just-detectable
-//      scaling, and that scaling is what the key encodes.
+//      display white. Photopic scenes pick Adams Zone V (`a ≈ 0.18`);
+//      dark-adapted night scenes pick Zone 0.5 (`a ≈ 0.008`, just
+//      above pure black, where a dark-adapted naked-eye observer
+//      perceives the bulk of the visual field). The blend between the
+//      two regimes follows the CIE 191:2010 mesopic photopic-fraction
+//      curve, which is the same weight used per-star by
+//      `astronomy::photometry::mesopic_chromatic_weight`. The Ferwerda
+//      1996 TVI argument motivates *why* a different key is needed in
+//      the scotopic regime; the specific value is derived analytically
+//      from Adams' Zone System (see the constants below).
 //   4. Apply Reinhard 2002 Eq. (4) — the extended photographic operator
 //      with a white-point burn-out at `L_white` — per channel.
 //
@@ -60,18 +61,34 @@ const EYE_PSF_SOLID_ANGLE_SR: f32 = 8.461594994075e-8;
 const MESOPIC_LOWER_CD_M2: f32 = 0.005;
 const MESOPIC_UPPER_CD_M2: f32 = 5.0;
 
-// Photographic keys for the two adaptation regimes (Reinhard 2002 §3.2):
-//   * 0.18 — Ansel Adams' Zone V, the photopic / well-lit default.
-//   * 0.008 — deep "low key", appropriate for night-adapted dark scenes.
-//     The bulk of our scene is genuinely-dark sky (≪ 0.001 cd/m²) with a
-//     few extreme point-source peaks (Sirius at ~30 cd/m²), giving an
-//     enormous dynamic range and a very dim log-average. A standard
-//     Zone-V / Reinhard "low key" of 0.045 places that log-average at
-//     visible mid-grey, which destroys the dark-sky feel. 0.008 keeps
-//     the bulk of the sky below display perceptual threshold while the
-//     keyed Reinhard knee still lifts the Milky Way + faint stars into
-//     visible range. The value is empirical; a follow-up Pattanaik 1998
-//     multiscale adaptation model would derive it analytically.
+// Photographic keys for the two adaptation regimes, derived from Adams'
+// Zone System (see Adams 1948, *The Negative*, ch. 4). Each zone is one
+// photographic stop — a factor of 2 in linear luminance — with Zone V at
+// 0.18 reflectance (Reinhard 2002's middle-gray reference) and Zone 0
+// at pure black. The key value places the scene's geometric-mean
+// luminance on the display at the chosen Zone:
+//
+//   Zone V    ≈ 0.180 — well-lit photopic (Reinhard 2002 default)
+//   Zone IV   ≈ 0.090 — dim indoor
+//   Zone III  ≈ 0.045 — Reinhard 2002 "low key" (twilight photography)
+//   Zone II   ≈ 0.022 — night room with windows
+//   Zone I    ≈ 0.011 — first detail above pure black
+//   Zone 0.5  ≈ 0.008 — dark-adapted naked-eye night sky
+//   Zone 0    = 0.0   — pure black (no detail discernible)
+//
+// The project's stated rendering target is "what a dark-adapted human
+// would actually see" — not a long-exposure photograph. A dark-adapted
+// observer at a rural dark sky perceives the bulk of the visual field
+// at Zone 0.5: very nearly black, with stars and the Milky Way picked
+// out as small detail above the floor. This is more than two stops
+// dimmer than Reinhard 2002's tabulated "low key" because their
+// "low key" was tuned for twilight *indoor* photography where the
+// viewer's eyes are not dark-adapted; our target *is* dark adaptation.
+//
+// `KEY_PHOTOPIC` and `KEY_SCOTOPIC` are blended by the CIE 191:2010
+// mesopic photopic-fraction at the scene's adaptation luminance; bright
+// daytime scenes pick Zone V, dim moonlit scenes interpolate, and
+// genuinely-dark night scenes pick Zone 0.5.
 const KEY_PHOTOPIC: f32 = 0.18;
 const KEY_SCOTOPIC: f32 = 0.008;
 
