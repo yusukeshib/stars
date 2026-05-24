@@ -46,15 +46,26 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    // Gaussian-ish falloff: sharp bright core that fades into a soft halo,
-    // rather than a flat smoothstep disc.
+    // Physical point-spread function: an isotropic Gaussian whose width is
+    // identical for every star. Brightness encodes apparent magnitude via
+    // Pogson's law (see `vertex::magnitude_to_render_params`); apparent size
+    // on screen is *only* the PSF, never a function of the star itself.
+    //
+    // The coefficient must stay in sync with `PSF_QUAD_HALF_WIDTH_SIGMAS` in
+    // `vertex.rs`:
+    //   sigma_quad = PSF_SIGMA_PX / radius_px = 1 / PSF_QUAD_HALF_WIDTH_SIGMAS
+    //   coeff      = 1 / (2 * sigma_quad^2) = PSF_QUAD_HALF_WIDTH_SIGMAS^2 / 2
+    // For half-width = 4 sigma this is 8.0. A unit test in `vertex.rs`
+    // (`shader_coefficient_matches_psf_constants`) pins the relationship.
     let r2 = dot(input.uv, input.uv);
-    let core = exp(-r2 * 5.0);
-    let alpha = core * input.brightness;
+    let psf = exp(-r2 * 8.0);
+    let intensity = psf * input.brightness;
 
-    if alpha < 0.004 {
+    // Naked-eye limiting magnitude (~6.0) falls out of this cutoff for the
+    // m = 0 zeropoint used in `vertex.rs`; fainter stars discard naturally.
+    if intensity < 0.004 {
         discard;
     }
 
-    return vec4<f32>(input.color * alpha, alpha);
+    return vec4<f32>(input.color * intensity, intensity);
 }
