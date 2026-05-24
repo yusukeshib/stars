@@ -79,7 +79,10 @@ impl Renderer {
         let pipeline = pipeline::create_pipeline(device, HDR_FORMAT, &camera_bind_group_layout);
         let skyglow = Skyglow::new(device, &camera_bind_group_layout);
         let overlay = OverlayRenderer::new(device, HDR_FORMAT);
-        let tonemap = Tonemap::new(device, final_format, width, height);
+        // Tonemap pass borrows the camera buffer directly (it samples
+        // `magnitude_zeropoint` for the HDR-flux→cd/m² conversion that
+        // drives the mesopic regime split).
+        let tonemap = Tonemap::new(device, final_format, &camera_buffer, width, height);
 
         Self {
             pipeline,
@@ -115,7 +118,8 @@ impl Renderer {
     /// size. Hosts must call this whenever their swapchain / output
     /// texture changes size; cheap no-op when the size is unchanged.
     pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
-        self.tonemap.resize(device, width, height);
+        self.tonemap
+            .resize(device, &self.camera_buffer, width, height);
     }
 
     pub fn update_camera(&self, queue: &wgpu::Queue, camera: &Camera, width: u32, height: u32) {

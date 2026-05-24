@@ -59,25 +59,13 @@ const NEG_OH_FOUR_LN10: f32 = -0.9210340371976184; // -0.4 · ln(10)
 // 1 sr = (180·3600/π)² arcsec² ≈ 4.2545e10.
 const ARCSEC2_PER_SR: f32 = 4.2545e10;
 
-// Perceptual boost factor for diffuse surface brightness, in magnitudes.
-//
-// A correct per-pixel HDR value for a μ = 22 mag/arcsec² surface against
-// a Reinhard-tonemapped display lands several orders of magnitude below
-// the threshold of visibility, because the renderer does not yet model
-// the eye's spatial-summation pooling (Ricco's area, ≈0.25 deg² in dark-
-// adapted scotopic vision; Hecht 1942 / Crozier 1953) or the multi-decade
-// adaptation regime a real dark-adapted observer is in (cf. Ferwerda et
-// al. 1996). Both effects together boost the *perceived* brightness of a
-// uniform diffuse glow by roughly 5 magnitudes relative to a same-flux
-// point source. We bake that constant boost in here as a stop-gap until
-// the Ferwerda 1996 tone-mapping upgrade lands (ROADMAP Phase 2.5).
-//
-// 3.0 mag = 16× in linear flux. Empirically tuned so the galactic-plane
-// band is clearly visible above the surrounding sky but the off-plane
-// regions stay genuinely dark, matching the contrast a dark-sky observer
-// reports. Larger boosts wash the whole sky to mid-grey; smaller boosts
-// reduce the Milky Way to invisibility.
-const PERCEPTUAL_BOOST_MAGS: f32 = 3.0;
+// Skyglow surface brightness is written directly on the renderer's
+// physical brightness scale (no perceptual fudge). The Ferwerda 1996
+// adaptive tone-reproduction operator in `shaders/tonemap.wgsl` takes
+// care of mapping the dark-sky adaptation regime onto the display, so
+// the diffuse glow ends up visible against a genuinely-dark sky without
+// any constant boost being needed in this shader.
+const PERCEPTUAL_BOOST_MAGS: f32 = 0.0;
 
 fn isl_mag_per_arcsec2(l_rad: f32, b_rad: f32) -> f32 {
     let l_deg = l_rad * RAD_TO_DEG;
