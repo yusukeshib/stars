@@ -2,7 +2,7 @@
 //!
 //! Three-stage pipeline:
 //!
-//! 1. **Scene → HDR** — star, overlay and skyglow passes accumulate into
+//! 1. **Scene → HDR** — star and skyglow passes accumulate into
 //!    an `Rgba16Float` colour attachment so Pogson's-law radiances and
 //!    Spencer-PSF tails survive past the [0, 1] range a UNORM target would
 //!    clip them to.
@@ -323,8 +323,8 @@ impl Tonemap {
         self.height = height;
     }
 
-    /// View to bind as the colour attachment for the scene (skyglow +
-    /// stars + overlays).
+    /// View to bind as the colour attachment for the physical scene
+    /// (skyglow + stars). UI overlays are composited after tonemapping.
     pub fn scene_view(&self) -> &wgpu::TextureView {
         &self.hdr_view
     }

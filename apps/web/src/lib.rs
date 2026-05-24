@@ -141,8 +141,8 @@ impl StarView {
     /// Update the active overlay layers. `layers` is a list of kebab-case names
     /// that match the CLI's `--overlays` flag: "horizon", "cardinals",
     /// "alt-az-grid", "equatorial-grid", "ecliptic", "celestial-equator",
-    /// "meridian". Unknown names are silently ignored so the JS layer can
-    /// evolve without breaking older builds.
+    /// "meridian", "galactic-equator". Unknown names are ignored with a
+    /// warning so the JS layer can evolve without breaking older builds.
     ///
     /// `grid_step_deg` and `opacity` are passed through to the renderer, which
     /// applies its own clamps; finite values outside the renderer's accepted
@@ -182,7 +182,8 @@ impl StarView {
             azimuth_rad,
             altitude_rad,
             fov_y_rad,
-        };
+        }
+        .clamped();
     }
 
     pub fn resize(&self, width: u32, height: u32) {

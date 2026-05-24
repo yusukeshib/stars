@@ -136,7 +136,7 @@ job (canvas, window, headless texture).
 ```rust
 use renderer::{Camera, LocalView, Renderer};
 
-let renderer = Renderer::new(&device, surface_format, &instances);
+let renderer = Renderer::new(&device, surface_format, width, height, &instances);
 
 let view = LocalView {
     azimuth_rad:  180_f32.to_radians(),
@@ -174,9 +174,10 @@ queue.submit([encoder.finish()]);
 surface_texture.present();
 ```
 
-On `Resized` events: reconfigure the surface and set
-`camera.aspect = w as f32 / h as f32`. The renderer reads the new viewport
-through `update_camera`, so nothing else needs touching.
+On `Resized` events: reconfigure the surface, set
+`camera.aspect = w as f32 / h as f32`, and call
+`renderer.resize(&device, w, h)` so the internal HDR target tracks the
+swapchain. The renderer reads the new viewport through `update_camera`.
 
 ---
 
@@ -253,7 +254,7 @@ radec_hours_deg_to_cartesian(ra_hours, dec_degrees) -> Vec3
 struct Star { position: Vec3, magnitude: f32, color: [f32; 3] }
 
 // renderer
-Renderer::new(&device, format, &[StarInstance]) -> Renderer
+Renderer::new(&device, format, width, height, &[StarInstance]) -> Renderer
 Renderer::set_overlays(&device, &OverlayConfig)
 Renderer::update_camera(&queue, &Camera, w, h)
 Renderer::render(&mut encoder, &TextureView)
@@ -270,5 +271,5 @@ NAKED_EYE_LIMITING_MAGNITUDE: f32  // 6.0; literature default
 // Overlays (all routed through OverlayKind::as_kebab_str / from_kebab_str)
 OverlayConfig { layers: Vec<OverlayKind>, grid_step_deg: f64, opacity: f32 }
 enum OverlayKind { Horizon, Cardinals, AltAzGrid, EquatorialGrid,
-                   Ecliptic, CelestialEquator, Meridian }
+                   Ecliptic, CelestialEquator, Meridian, GalacticEquator }
 ```

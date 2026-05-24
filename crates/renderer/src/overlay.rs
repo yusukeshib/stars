@@ -74,7 +74,7 @@ impl OverlayKind {
     /// Canonical kebab-case name, shared by the CLI flag (`--overlays …`) and
     /// the WASM/JS bindings. Single source of truth for the host-facing
     /// string ↔ variant mapping; all native hosts route through this via
-    /// `stars-app-common::OverlayArg`, and the web host calls
+    /// `stars-host-common::OverlayArg`, and the web host calls
     /// [`OverlayKind::from_kebab_str`] directly.
     pub fn as_kebab_str(self) -> &'static str {
         match self {
@@ -136,6 +136,10 @@ enum OverlayFrame {
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct OverlayVertex {
     position: [f32; 3],
+}
+
+impl OverlayVertex {
+    const OFFSET_POSITION: u64 = std::mem::offset_of!(Self, position) as u64;
 }
 
 #[repr(C)]
@@ -202,7 +206,7 @@ impl OverlayRenderer {
                     array_stride: std::mem::size_of::<OverlayVertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[wgpu::VertexAttribute {
-                        offset: 0,
+                        offset: OverlayVertex::OFFSET_POSITION,
                         shader_location: 0,
                         format: wgpu::VertexFormat::Float32x3,
                     }],

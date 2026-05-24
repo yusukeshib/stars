@@ -111,6 +111,46 @@ impl Default for LocalView {
 /// gimbal-lock-free representation (quaternion) rather than widening this.
 const ALT_LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.01;
 
+/// Narrowest supported vertical field of view. Below ≈5° the current single-
+/// precision view-projection matrices and fixed-size point-spread sprites make
+/// the renderer behave more like a telescope simulator, which Phase 1 is not.
+const MIN_FOV_Y_RAD: f32 = 5.0 * std::f32::consts::PI / 180.0;
+/// Widest supported vertical field of view. Larger values are better served by
+/// a full-sky projection (ROADMAP Phase 4) rather than a perspective camera.
+const MAX_FOV_Y_RAD: f32 = 120.0 * std::f32::consts::PI / 180.0;
+
+impl LocalView {
+    /// Return a finite, renderer-safe view.
+    ///
+    /// Hosts may construct `LocalView` directly (CLI flags, WASM bindings,
+    /// tests), so the renderer cannot rely on only the interactive helpers to
+    /// clamp it. This keeps `look_at_rh` away from the zenith/nadir gimbal-lock
+    /// singularity and keeps `perspective_rh` away from zero/NaN FOVs.
+    pub fn clamped(self) -> Self {
+        let default = Self::default();
+        let azimuth_rad = if self.azimuth_rad.is_finite() {
+            self.azimuth_rad.rem_euclid(std::f32::consts::TAU)
+        } else {
+            default.azimuth_rad
+        };
+        let altitude_rad = if self.altitude_rad.is_finite() {
+            self.altitude_rad.clamp(-ALT_LIMIT, ALT_LIMIT)
+        } else {
+            default.altitude_rad
+        };
+        let fov_y_rad = if self.fov_y_rad.is_finite() {
+            self.fov_y_rad.clamp(MIN_FOV_Y_RAD, MAX_FOV_Y_RAD)
+        } else {
+            default.fov_y_rad
+        };
+        Self {
+            azimuth_rad,
+            altitude_rad,
+            fov_y_rad,
+        }
+    }
+}
+
 pub struct Camera {
     pub observer: Observer,
     pub view: LocalView,
@@ -130,7 +170,7 @@ impl Camera {
     pub fn new(observer: Observer, view: LocalView, aspect: f32) -> Self {
         Self {
             observer,
-            view,
+            view: view.clamped(),
             aspect,
             atmosphere: Atmosphere::default(),
             limiting_magnitude: NAKED_EYE_LIMITING_MAGNITUDE,
@@ -143,10 +183,15 @@ impl Camera {
         equatorial_to_horizontal_matrix(self.observer.latitude_rad, lst)
     }
 
+    fn effective_view(&self) -> LocalView {
+        self.view.clamped()
+    }
+
     /// Forward direction (in local ENU) the camera is looking at.
     fn forward_local(&self) -> Vec3 {
-        let (sa, ca) = self.view.azimuth_rad.sin_cos();
-        let (sp, cp) = self.view.altitude_rad.sin_cos();
+        let view = self.effective_view();
+        let (sa, ca) = view.azimuth_rad.sin_cos();
+        let (sp, cp) = view.altitude_rad.sin_cos();
         Vec3::new(sa * cp, ca * cp, sp)
     }
 
@@ -155,8 +200,8 @@ impl Camera {
     /// (horizon line, alt-az grid, cardinal direction markers).
     pub fn view_matrix_local(&self) -> Mat4 {
         // look_at_rh derives screen-right from (forward × up); using local zenith as
-        // "up" keeps the horizon level on screen. Altitude is clamped elsewhere to
-        // avoid gimbal lock when looking straight up/down.
+        // "up" keeps the horizon level on screen. `forward_local` uses a clamped
+        // view so host-supplied ±90° altitudes cannot hit the gimbal-lock singularity.
         Mat4::look_at_rh(Vec3::ZERO, self.forward_local(), Vec3::Z)
     }
 
@@ -167,7 +212,7 @@ impl Camera {
     }
 
     pub fn projection_matrix(&self) -> Mat4 {
-        Mat4::perspective_rh(self.view.fov_y_rad, self.aspect, 0.01, 10.0)
+        Mat4::perspective_rh(self.effective_view().fov_y_rad, self.aspect, 0.01, 10.0)
     }
 
     /// View-projection for J2000 equatorial-frame geometry. Alias kept for backward compat.
@@ -205,7 +250,7 @@ impl Camera {
     /// FoVs; wide-FoV edge fall-off would need a per-fragment computation,
     /// scoped for a future PR).
     fn pixel_solid_angle_sr(&self, height_pixels: u32) -> f32 {
-        let pixel_size_rad = self.view.fov_y_rad / height_pixels.max(1) as f32;
+        let pixel_size_rad = self.effective_view().fov_y_rad / height_pixels.max(1) as f32;
         pixel_size_rad * pixel_size_rad
     }
 
@@ -231,14 +276,20 @@ impl Camera {
     /// Drag-style interactive rotation: `daz` scrolls azimuth (East-positive),
     /// `dalt` raises altitude. Altitude is clamped just shy of ±π/2 to avoid gimbal lock.
     pub fn rotate_view(&mut self, daz: f32, dalt: f32) {
-        self.view.azimuth_rad = (self.view.azimuth_rad + daz).rem_euclid(std::f32::consts::TAU);
-        self.view.altitude_rad = (self.view.altitude_rad + dalt).clamp(-ALT_LIMIT, ALT_LIMIT);
+        let view = self.effective_view();
+        self.view.azimuth_rad = (view.azimuth_rad + daz).rem_euclid(std::f32::consts::TAU);
+        self.view.altitude_rad = (view.altitude_rad + dalt).clamp(-ALT_LIMIT, ALT_LIMIT);
+        self.view.fov_y_rad = view.fov_y_rad;
     }
 
     /// Multiplicative FOV zoom. `factor < 1` zooms in (narrower FOV).
     pub fn zoom_fov(&mut self, factor: f32) {
-        self.view.fov_y_rad =
-            (self.view.fov_y_rad * factor).clamp(5.0_f32.to_radians(), 120.0_f32.to_radians());
+        let view = self.effective_view();
+        let factor = if factor.is_finite() { factor } else { 1.0 };
+        self.view = LocalView {
+            fov_y_rad: (view.fov_y_rad * factor).clamp(MIN_FOV_Y_RAD, MAX_FOV_Y_RAD),
+            ..view
+        };
     }
 }
 
@@ -294,6 +345,22 @@ mod tests {
         assert!(cam.view.altitude_rad <= ALT_LIMIT + 1e-6);
         cam.rotate_view(0.0, -200.0);
         assert!(cam.view.altitude_rad >= -ALT_LIMIT - 1e-6);
+    }
+
+    #[test]
+    fn initial_view_is_clamped() {
+        let cam = Camera::new(
+            observer_at(0.0),
+            LocalView {
+                azimuth_rad: -0.5,
+                altitude_rad: 100.0,
+                fov_y_rad: 0.0,
+            },
+            1.0,
+        );
+        assert!((0.0..std::f32::consts::TAU).contains(&cam.view.azimuth_rad));
+        assert!(cam.view.altitude_rad <= ALT_LIMIT);
+        assert_eq!(cam.view.fov_y_rad, MIN_FOV_Y_RAD);
     }
 
     /// The third row of the equatorial→ENU matrix — which `zenith_in_equatorial`

@@ -51,8 +51,13 @@ export const OVERLAY_LABELS: Record<OverlayLayer, string> = {
 export const isOverlayLayer = (s: unknown): s is OverlayLayer =>
   typeof s === "string" && (OVERLAY_LAYERS as readonly string[]).includes(s);
 
+export const MIN_ALTITUDE_DEG = -89.5;
+export const MAX_ALTITUDE_DEG = 89.5;
+export const MIN_FOV_DEG = 5;
+export const MAX_FOV_DEG = 120;
+
 export const clampAltitude = (deg: number): number =>
-  Math.max(-89.5, Math.min(89.5, deg));
+  Math.max(MIN_ALTITUDE_DEG, Math.min(MAX_ALTITUDE_DEG, deg));
 
 export const wrapAzimuth = (deg: number): number => {
   const v = deg % 360;
@@ -60,7 +65,7 @@ export const wrapAzimuth = (deg: number): number => {
 };
 
 export const clampFov = (deg: number): number =>
-  Math.max(10, Math.min(120, deg));
+  Math.max(MIN_FOV_DEG, Math.min(MAX_FOV_DEG, deg));
 
 const DEG = Math.PI / 180;
 export const toRad = (d: number) => d * DEG;
