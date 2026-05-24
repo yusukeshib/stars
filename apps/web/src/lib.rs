@@ -5,10 +5,15 @@ use astronomy::{julian_date_from_unix_seconds, Observer};
 use catalog::load_embedded;
 use renderer::{
     magnitude_to_render_params, Camera, LocalView, OverlayConfig, OverlayKind, Renderer,
-    StarInstance,
+    StarInstance, NAKED_EYE_LIMITING_MAGNITUDE,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+
+/// Slightly past strict naked-eye to compensate for typical monitor viewing
+/// conditions (the on-screen dynamic range is much smaller than a dark-adapted
+/// observer's). See `renderer::magnitude_to_render_params` for the model.
+const LIMITING_MAGNITUDE: f32 = NAKED_EYE_LIMITING_MAGNITUDE + 1.5;
 
 #[wasm_bindgen(start)]
 pub fn main() {
@@ -69,7 +74,19 @@ impl StarView {
             .map_err(|e| JsValue::from_str(&format!("Device error: {e}")))?;
 
         let surface_caps = surface.get_capabilities(&adapter);
-        let format = surface_caps.formats[0];
+        // Prefer an sRGB surface so the hardware applies the linear→sRGB EOTF
+        // on present. The star shader emits linear radiance (Pogson's law, see
+        // `vertex::magnitude_to_render_params`); writing that straight into a
+        // non-sRGB framebuffer crushes mid/faint magnitudes to near-black on
+        // the display. Selecting an sRGB format is the correct, lossless way
+        // to get perceptually right brightness without altering the physics.
+        let format = surface_caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(surface_caps.formats[0]);
+        log::info!("Surface format: {format:?} (sRGB: {})", format.is_srgb());
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -88,7 +105,7 @@ impl StarView {
         let instances: Vec<StarInstance> = stars
             .iter()
             .map(|s| {
-                let p = magnitude_to_render_params(s.magnitude);
+                let p = magnitude_to_render_params(s.magnitude, LIMITING_MAGNITUDE);
                 StarInstance {
                     position: s.position.into(),
                     size: p.radius_px,
@@ -123,8 +140,7 @@ impl StarView {
     /// to know the constant.
     pub fn set_observer(&self, lat_deg: f64, lng_deg: f64, time_unix_ms: f64) {
         let jd = julian_date_from_unix_seconds(time_unix_ms / 1000.0);
-        self.state.borrow_mut().camera.observer =
-            Observer::from_degrees(lat_deg, lng_deg, jd);
+        self.state.borrow_mut().camera.observer = Observer::from_degrees(lat_deg, lng_deg, jd);
     }
 
     /// Update the active overlay layers. `layers` is a list of kebab-case names

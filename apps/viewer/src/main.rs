@@ -8,7 +8,7 @@ use catalog::load_from_file;
 use clap::{Parser, ValueEnum};
 use renderer::{
     magnitude_to_render_params, Camera, LocalView, OverlayConfig, OverlayKind, Renderer,
-    StarInstance,
+    StarInstance, NAKED_EYE_LIMITING_MAGNITUDE,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -118,10 +118,13 @@ fn main() -> Result<()> {
     let stars = load_from_file(&args.catalog)
         .with_context(|| format!("Reading catalog at {}", args.catalog.display()))?;
     log::info!("Loaded {} stars", stars.len());
+    // Slightly past strict naked-eye to compensate for typical monitor
+    // viewing conditions; see `magnitude_to_render_params` docs.
+    let limiting_mag = NAKED_EYE_LIMITING_MAGNITUDE + 1.5;
     let instances: Vec<StarInstance> = stars
         .iter()
         .map(|s| {
-            let p = magnitude_to_render_params(s.magnitude);
+            let p = magnitude_to_render_params(s.magnitude, limiting_mag);
             StarInstance {
                 position: s.position.into(),
                 size: p.radius_px,
