@@ -38,10 +38,10 @@ export function StatusBar({ observer, view, timeMs }: Props) {
       }}
     >
       <div>
-        <span style={{ opacity: 0.55 }}>位置 </span>
+        <span style={{ opacity: 0.55 }}>Location </span>
         {observer.latitudeDeg.toFixed(2)}°, {observer.longitudeDeg.toFixed(2)}°
         <span style={{ opacity: 0.4 }}>  ·  </span>
-        <span style={{ opacity: 0.55 }}>時刻 </span>
+        <span style={{ opacity: 0.55 }}>Time </span>
         {fmtTime(timeMs)}
       </div>
       <div style={{ marginTop: 2 }}>
