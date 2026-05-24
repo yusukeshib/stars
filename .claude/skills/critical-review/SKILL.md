@@ -1,6 +1,6 @@
 ---
 name: critical-review
-description: Critically review the entire stars codebase along three axes — (1) architecture and crate boundaries, (2) Rust code quality, (3) academic / scientific correctness — then fix every finding and ship a PR. Use when the user asks for "critical review", "thorough review", "厳しいレビュー", "学術的レビュー", or otherwise asks for a deep, skeptical pass that goes beyond engineering hygiene into IAU-grade correctness.
+description: Critically review the entire stars codebase along three axes — (1) architecture and crate boundaries, (2) Rust code quality, (3) academic / scientific correctness — then fix every finding and ship a PR. Use when the user asks for "critical review", "thorough review", "code review", "コードレビュー", "厳しいレビュー", "学術的レビュー", "quality pass", or "tighten up the code".
 user-invocable: true
 allowed-tools:
   - Bash
@@ -21,26 +21,23 @@ small (~1700 lines of Rust + ~400 lines of TS); read every file with fresh
 eyes and a hostile mindset. The output is a structured report **followed by
 a commit that fixes everything actionable** — not just the report.
 
-This is distinct from `quality-pass`:
+This is the only review skill in the repo. Every code-review request
+routes here, from a quick mechanical sweep to a deep IAU-grade pass.
+Match the report depth to the user's signal:
 
-| Skill | Lens |
-|---|---|
-| `quality-pass` | Engineering hygiene: dead deps, naming, boundaries, magic numbers |
-| `critical-review` | All of the above **plus** academic correctness vs IAU/SOFA, numerical precision, citability |
-
-Run `critical-review` when you want a Phase-2/Phase-3-ROADMAP-aware sweep. Run
-`quality-pass` for a quicker mechanical cleanup.
+- "review the code" / "コードレビュー" / "quality pass" → lighter
+  pass: prioritise axes (1) and (2), skim axis (3) for obvious issues,
+  skip the IAU-citation deep-dive unless the changes touch math.
+- "critical", "thorough", "厳しく", "学術的" → full three-axis pass
+  including the IAU/SOFA/citation deep-dive in axis (3).
 
 ## When to invoke
 
 Triggers in the user's request include:
-- "very critical", "thorough", "academic", "rigorous"
+- "review", "code review", "コードレビュー", "quality pass", "tighten up"
+- "critical", "thorough", "academic", "rigorous"
 - "学術的", "厳しく", "徹底的に", "アカデミックに"
 - Mentions of "IAU", "SOFA", "precision", "arcsec", "Phase 2", "citation"
-- Any request that pairs "architecture" + "code quality" + "correctness"
-
-If the user just says "review the code" without those signals, prefer
-`quality-pass` instead.
 
 ## Workflow
 
@@ -58,15 +55,17 @@ If the user just says "review the code" without those signals, prefer
 3. **Report first, in the user's language.** Produce a structured review with
    the three sections below. Tag every finding 🔴 / 🟡 / 🟢 (must-fix /
    discussable / nit). Map every finding to a file:line. Then proceed to
-   fix all 🔴 and as many 🟡 as scope allows; leave 🟢 fixes for the
-   `quality-pass` skill unless trivially co-located.
+   fix all 🔴 and as many 🟡 as scope allows; promote 🟢 fixes only
+   when trivially co-located with the other work this pass.
 
 4. **Track with `TaskCreate`** when there are 3+ fixes. Mark each
    `in_progress` before starting, `completed` immediately after.
 
 5. **Fix systematically.** Group edits by category; keep the commit's intent
    clear. Prefer one well-structured commit at the end. **Do not** add
-   features — this skill cleans and clarifies, never extends.
+   features — this skill cleans and clarifies, never extends. Do not
+   create new top-level `.md` docs; extend `USAGE.md` / `ROADMAP.md` /
+   inline comments.
 
 6. **Verify.** All of:
    - `cargo fmt --all -- --check`
@@ -111,7 +110,8 @@ If the user just says "review the code" without those signals, prefer
 
 - Public surface: `pub fn` only used inside its own crate must be `pub(crate)`.
   Module visibility in `lib.rs` is `mod`, not `pub mod`, unless the module
-  itself is the public entry point.
+  itself is the public entry point. `Result<(), JsValue>` returns from
+  `#[wasm_bindgen]` methods that always return `Ok` should be unit.
 - **Mixed-unit function signatures are 🔴.** `fn(ra_hours, dec_degrees)` either
   encodes the units in the name (`radec_hours_deg_to_cartesian`) or uses
   newtypes.
@@ -119,16 +119,51 @@ If the user just says "review the code" without those signals, prefer
   computed via `std::mem::offset_of!`, never hardcoded.
 - Magic numbers in clamp / threshold positions need a named constant and a
   comment explaining the derivation (e.g. `ALT_LIMIT = π/2 − 0.01`: why 0.01?).
+  Render clear colour, FOV clamps, magnitude cutoffs, time-speed presets —
+  promote to named constants when used twice or when the meaning isn't
+  obvious from context.
+- Function names should reflect their return type. `magnitude_to_size`
+  returning `(size, brightness)` was wrong — fixed to
+  `magnitude_to_render_params -> RenderParams`.
 - `match` arms that fall through to `_ => return` on a host-driver type
   (e.g. `wgpu::CurrentSurfaceTexture`) must log the unexpected variant.
   Silent skips have masked real OS-level failures.
 - `f64 → f32` casts on angles measured in radians-near-2π lose ~0.15″.
   Evaluate trig in f64, cast to f32 only at the matrix-element level.
+- **Dead branches.** `x.rem_euclid(positive)` already returns non-negative;
+  the follow-up `if v < 0 { v += tau }` is dead. `Number("")` is `0` in TS,
+  which silently snaps latitude to the equator — inputs must validate.
+- **Dead deps.** Every `[dependencies]` entry must be actually `use`d in that
+  crate's source. Run `grep -rn "<dep>::" crates/<x>/src` to verify; common
+  rot: `log`, `bytemuck`, `glam`, `js-sys` listed but unused.
+- **Stale paths in defaults.** Default `--catalog` paths must track the
+  current data location (`crates/catalog/data/...`), not the pre-refactor
+  path. Catalog renames break these silently.
+- **Test hygiene.** A test that just re-applies the function under test and
+  asserts the trivial identity is a tautology — replace with one that
+  compares against a known astronomical fact (e.g. north celestial pole
+  projects to view altitude ≈ observer's latitude). Tolerances on float
+  comparisons should match the precision of the underlying model (1e-12
+  for time math, 1e-4 for `Mat4`-via-`f32`).
+- **HUD/CLI flag parity.** Flag names must match across `stars-cli` and
+  `stars-viewer` (`--lat`, `--lng`, `--time`, `--azimuth`, `--altitude`,
+  `--fov`).
+- **React/TS hygiene** (when `apps/web/frontend/` is touched):
+  - Inputs validate before applying (`Number("")` is `0`).
+  - `<label>` has `htmlFor` linked to the input's `id`.
+  - `useRef` declarations sit at the top of the component, not
+    interleaved with `useEffect`.
+  - The render-loop tick pulls from refs, not props, so the loop doesn't
+    need to be torn down on every prop change.
+  - Don't duplicate Rust constants in TS — pass raw inputs across the
+    WASM boundary (e.g. pass `Date.now()` ms; convert to JD in Rust
+    via `astronomy::julian_date_from_unix_seconds`).
 
 ### (3) Academic / scientific correctness
 
-This is what separates `critical-review` from `quality-pass`. For every
-formula or constant, ask: *would I be embarrassed if a referee cited this?*
+This is the axis that raises a review from "engineering hygiene" to
+"defensible against a referee". For every formula or constant, ask:
+*would I be embarrassed if a paper cited this?*
 
 Mandatory checks:
 
@@ -169,7 +204,8 @@ For every finding in this axis, decide:
   silent failures, claims the code doesn't back up.
 - 🟡 **Fix or document this pass.** Magic numbers, missing citations, host
   duplication, doc-vs-comment-vs-code disagreement.
-- 🟢 **Nit / next pass.** Style, minor optimization, additional tests.
+- 🟢 **Nit.** Style, minor optimisation, additional tests — fix only if
+  trivially co-located with other work this pass.
 
 ## What NOT to do
 
