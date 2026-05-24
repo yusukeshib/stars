@@ -7,11 +7,11 @@ edition = "2021"
 renderer = { path = "../../crates/renderer" }
 catalog = { path = "../../crates/catalog", features = ["filesystem"] }
 astronomy = { path = "../../crates/astronomy" }
+stars-host-common = { path = "../../crates/common" }
 wgpu = { workspace = true }
 log = { workspace = true }
 winit = "0.30"
 pollster = "0.4"
 env_logger = "0.11"
 clap = { version = "4", features = ["derive"] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 anyhow = "1"

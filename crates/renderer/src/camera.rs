@@ -31,6 +31,14 @@ impl Default for LocalView {
     }
 }
 
+/// How close to the zenith / nadir the camera is allowed to tilt before the
+/// clamp engages, in radians. The clamp exists because `Mat4::look_at_rh`
+/// uses `forward × up` to build the right-axis: when `forward` aligns with
+/// our world `up = +Z`, the cross product collapses and the view matrix
+/// degenerates. The 0.01 rad (≈0.57°) gap keeps `|forward × up| ≳ 0.01`, which
+/// glam normalises without precision loss while staying invisible at
+/// reasonable FoVs. If you ever want to *look* at the zenith, switch to a
+/// gimbal-lock-free representation (quaternion) rather than widening this.
 const ALT_LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.01;
 
 pub struct Camera {

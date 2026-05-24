@@ -1,13 +1,14 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use astronomy::{julian_date_from_unix_seconds, Observer};
+use astronomy::Observer;
 use catalog::load_from_file;
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use renderer::{
     magnitude_to_render_params, Camera, LocalView, OverlayConfig, OverlayKind, Renderer,
     StarInstance,
 };
+use stars_host_common::{parse_time_to_jd, OverlayArg};
 
 /// CLI default for the observer's limiting magnitude. Looser than the strict
 /// dark-adapted naked-eye 6.0 because indoor screens can't reproduce the
@@ -94,49 +95,6 @@ struct Args {
     limiting_magnitude: f32,
 }
 
-/// Mirror of `OverlayKind` for clap. Kept here so the renderer crate stays
-/// free of the clap dependency.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
-enum OverlayArg {
-    Horizon,
-    Cardinals,
-    AltAzGrid,
-    EquatorialGrid,
-    Ecliptic,
-    CelestialEquator,
-    Meridian,
-}
-
-impl std::fmt::Display for OverlayArg {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Match the kebab-case names clap auto-derives from the ValueEnum variants.
-        let s = match self {
-            OverlayArg::Horizon => "horizon",
-            OverlayArg::Cardinals => "cardinals",
-            OverlayArg::AltAzGrid => "alt-az-grid",
-            OverlayArg::EquatorialGrid => "equatorial-grid",
-            OverlayArg::Ecliptic => "ecliptic",
-            OverlayArg::CelestialEquator => "celestial-equator",
-            OverlayArg::Meridian => "meridian",
-        };
-        f.write_str(s)
-    }
-}
-
-impl From<OverlayArg> for OverlayKind {
-    fn from(o: OverlayArg) -> Self {
-        match o {
-            OverlayArg::Horizon => OverlayKind::Horizon,
-            OverlayArg::Cardinals => OverlayKind::Cardinals,
-            OverlayArg::AltAzGrid => OverlayKind::AltAzGrid,
-            OverlayArg::EquatorialGrid => OverlayKind::EquatorialGrid,
-            OverlayArg::Ecliptic => OverlayKind::Ecliptic,
-            OverlayArg::CelestialEquator => OverlayKind::CelestialEquator,
-            OverlayArg::Meridian => OverlayKind::Meridian,
-        }
-    }
-}
-
 fn overlay_config_from_args(args: &Args) -> OverlayConfig {
     let layers = if args.no_overlays {
         Vec::new()
@@ -152,21 +110,6 @@ fn overlay_config_from_args(args: &Args) -> OverlayConfig {
         grid_step_deg: args.grid_step_deg,
         opacity: args.overlay_opacity.clamp(0.0, 1.0),
     }
-}
-
-fn parse_time_to_jd(time: Option<&str>) -> Result<f64> {
-    let unix_seconds = match time {
-        Some(s) => {
-            let dt = chrono::DateTime::parse_from_rfc3339(s)
-                .with_context(|| format!("Invalid RFC3339 time: {s}"))?;
-            dt.timestamp() as f64 + dt.timestamp_subsec_nanos() as f64 * 1e-9
-        }
-        None => {
-            let now = chrono::Utc::now();
-            now.timestamp() as f64 + now.timestamp_subsec_nanos() as f64 * 1e-9
-        }
-    };
-    Ok(julian_date_from_unix_seconds(unix_seconds))
 }
 
 fn main() -> Result<()> {

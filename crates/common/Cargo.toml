@@ -1,0 +1,17 @@
+[package]
+name = "stars-host-common"
+version = "0.1.0"
+edition = "2021"
+
+# Shared helpers for the native host binaries (`stars-cli`, `stars-viewer`).
+# Lives under `crates/` for workspace-layout consistency, but only the host
+# apps consume it — the engine crates (`astronomy`, `catalog`, `renderer`)
+# must NOT depend on it because it pulls in `clap` and `chrono`, both of
+# which we keep off the WASM / FFI / test embedding paths.
+
+[dependencies]
+astronomy = { path = "../astronomy" }
+renderer = { path = "../renderer" }
+clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+anyhow = "1"

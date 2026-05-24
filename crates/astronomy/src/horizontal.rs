@@ -22,29 +22,42 @@ pub fn equatorial_to_horizontal(ra: f64, dec: f64, lst: f64, lat: f64) -> AltAz 
 /// Rotation that maps a J2000 equatorial unit vector into the observer's local
 /// East-North-Up frame.
 ///
-/// `lat_rad` is geodetic latitude, `lst_rad` is Local Mean Sidereal Time. The matrix
-/// is orthonormal; its transpose maps ENU back to equatorial.
+/// `lat_rad` is the observer's latitude. For the geometry below this is
+/// strictly the **astronomical latitude** — the angle between the celestial
+/// equator and the local gravity vector — because we treat "Up" as the local
+/// vertical. For real-world inputs the user supplies geodetic (= geographic)
+/// latitude, which differs from astronomical latitude only by the deflection
+/// of the vertical (≲1″ essentially everywhere), so the two are interchangeable
+/// at Phase 1 precision. The difference from *geocentric* latitude (up to
+/// ≈11.5′ at ±45°) does NOT matter for stars — their distances make diurnal
+/// parallax negligible — but WILL matter for the Moon and planets in Phase 2.
+///
+/// `lst_rad` is Local Mean Sidereal Time. The matrix is orthonormal; its
+/// transpose maps ENU back to equatorial.
+///
+/// Trig is evaluated in `f64` so the per-frame uniform retains ≲arcsec
+/// precision after the final cast to `f32`. (`f32::sin_cos` at LST near 2π
+/// quantises to ≈0.15″ — visible if star labels ever land.)
 pub fn equatorial_to_horizontal_matrix(lat_rad: f64, lst_rad: f64) -> Mat4 {
-    let phi = lat_rad as f32;
-    let theta = lst_rad as f32;
-    let (s_phi, c_phi) = phi.sin_cos();
-    let (s_theta, c_theta) = theta.sin_cos();
+    let (s_phi, c_phi) = lat_rad.sin_cos();
+    let (s_theta, c_theta) = lst_rad.sin_cos();
 
-    // Rows: East, North, Up basis vectors expressed in equatorial coords.
-    // glam Mat3::from_cols stores columns, so transpose by swapping.
+    // Rows: East, North, Up basis vectors expressed in equatorial coords
+    // (verified by N × U = E using the right-handed ENU convention).
+    // glam Mat3::from_cols stores columns, so we list columns below.
     let r = Mat3::from_cols_array(&[
         // col 0
-        -s_theta,
-        -s_phi * c_theta,
-        c_phi * c_theta,
+        -s_theta as f32,
+        (-s_phi * c_theta) as f32,
+        (c_phi * c_theta) as f32,
         // col 1
-        c_theta,
-        -s_phi * s_theta,
-        c_phi * s_theta,
+        c_theta as f32,
+        (-s_phi * s_theta) as f32,
+        (c_phi * s_theta) as f32,
         // col 2
         0.0,
-        c_phi,
-        s_phi,
+        c_phi as f32,
+        s_phi as f32,
     ]);
     Mat4::from_mat3(r)
 }

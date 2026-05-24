@@ -157,15 +157,12 @@ impl StarView {
     pub fn set_overlays(&self, layers: Vec<String>, grid_step_deg: f64, opacity: f32) {
         let kinds: Vec<OverlayKind> = layers
             .iter()
-            .filter_map(|name| match name.as_str() {
-                "horizon" => Some(OverlayKind::Horizon),
-                "cardinals" => Some(OverlayKind::Cardinals),
-                "alt-az-grid" => Some(OverlayKind::AltAzGrid),
-                "equatorial-grid" => Some(OverlayKind::EquatorialGrid),
-                "ecliptic" => Some(OverlayKind::Ecliptic),
-                "celestial-equator" => Some(OverlayKind::CelestialEquator),
-                "meridian" => Some(OverlayKind::Meridian),
-                _ => None,
+            .filter_map(|name| {
+                let parsed = OverlayKind::from_kebab_str(name);
+                if parsed.is_none() {
+                    log::warn!("unknown overlay name from JS: {name:?}");
+                }
+                parsed
             })
             .collect();
         let grid_step_deg = if grid_step_deg.is_finite() {

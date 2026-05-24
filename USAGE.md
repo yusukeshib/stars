@@ -97,16 +97,21 @@ clock you can reuse.
 
 ```rust
 use catalog::{load_from_file /* or load_embedded */};
-use renderer::{magnitude_to_render_params, StarInstance};
+use renderer::{magnitude_to_render_params, StarInstance, NAKED_EYE_LIMITING_MAGNITUDE};
 
 let stars = load_from_file("crates/catalog/data/hyg_v42.csv")?;
 //   or:  let stars = catalog::load_embedded();           // embedded feature
 //   or:  let stars = catalog::load_from_csv(csv_string); // any source
 
+// Faintest magnitude the simulated observer can still see. 6.0 is the
+// strict dark-adapted naked-eye limit; bump it (e.g. 7.5) on indoor screens
+// whose dynamic range can't reproduce a dark sky faithfully.
+let limiting_magnitude = NAKED_EYE_LIMITING_MAGNITUDE + 1.5;
+
 let instances: Vec<StarInstance> = stars
     .iter()
     .map(|s| {
-        let p = magnitude_to_render_params(s.magnitude);
+        let p = magnitude_to_render_params(s.magnitude, limiting_magnitude);
         StarInstance {
             position:   s.position.into(),
             size:       p.radius_px,
@@ -118,8 +123,9 @@ let instances: Vec<StarInstance> = stars
 ```
 
 Catalog filtering happens inside `catalog`: rows fainter than magnitude 8 and
-rows further than 100 kpc are dropped automatically. Get the CSV with
-`./scripts/download-catalog.sh` (writes to `crates/catalog/data/hyg_v42.csv`).
+rows whose `dist` (parsecs) is HYG's `100000` sentinel-for-unknown-parallax
+are dropped automatically. Get the CSV with `./scripts/download-catalog.sh`
+(writes to `crates/catalog/data/hyg_v42.csv`).
 
 ### 4. Stand up wgpu, then build a `Renderer` + `Camera`
 
@@ -243,11 +249,12 @@ load_from_csv(&str) -> Vec<Star>
 load_from_file(path) -> io::Result<Vec<Star>>   // feature = "filesystem"
 load_embedded() -> Vec<Star>                    // feature = "embedded"
 bv_to_rgb(bv) -> [f32; 3]
-radec_to_cartesian(ra_hours, dec_degrees) -> Vec3
+radec_hours_deg_to_cartesian(ra_hours, dec_degrees) -> Vec3
 struct Star { position: Vec3, magnitude: f32, color: [f32; 3] }
 
 // renderer
 Renderer::new(&device, format, &[StarInstance]) -> Renderer
+Renderer::set_overlays(&device, &OverlayConfig)
 Renderer::update_camera(&queue, &Camera, w, h)
 Renderer::render(&mut encoder, &TextureView)
 
@@ -257,5 +264,11 @@ Camera::zoom_fov(factor)
 
 LocalView { azimuth_rad, altitude_rad, fov_y_rad }
 StarInstance { position: [f32;3], size: f32, color: [f32;3], brightness: f32 }
-magnitude_to_render_params(mag) -> RenderParams { radius_px, brightness }
+magnitude_to_render_params(mag, limiting_magnitude) -> RenderParams { radius_px, brightness }
+NAKED_EYE_LIMITING_MAGNITUDE: f32  // 6.0; literature default
+
+// Overlays (all routed through OverlayKind::as_kebab_str / from_kebab_str)
+OverlayConfig { layers: Vec<OverlayKind>, grid_step_deg: f64, opacity: f32 }
+enum OverlayKind { Horizon, Cardinals, AltAzGrid, EquatorialGrid,
+                   Ecliptic, CelestialEquator, Meridian }
 ```

@@ -18,7 +18,15 @@ use wgpu::util::DeviceExt;
 
 use crate::camera::Camera;
 
-/// Obliquity of the ecliptic at J2000.0 (IAU 2006), in radians.
+/// Mean obliquity of the ecliptic **at J2000.0**, IAU 2006 value
+/// (ε₀ = 84381.406″ = 23.4392911°), in radians.
+///
+/// The renderer draws a *fixed* ecliptic in J2000 equatorial coordinates,
+/// not the mean ecliptic of date. The two differ by ≈30″ per 50 years from
+/// J2000 due to planetary precession of the ecliptic plane — invisible at
+/// Phase 1 naked-eye precision, but worth knowing before this code grows a
+/// citation. Phase 2 should switch to obliquity-of-date once IAU 2006
+/// precession lands; see ROADMAP.
 const OBLIQUITY_RAD: f64 = 0.409_092_804_222_329_3;
 
 /// Inclusive bounds clamped onto `OverlayConfig::grid_step_deg` before the
@@ -40,12 +48,48 @@ pub enum OverlayKind {
     AltAzGrid,
     /// Parallels of constant declination + meridians of constant right ascension.
     EquatorialGrid,
-    /// Great circle along the ecliptic (sun/moon/planet path).
+    /// Great circle of the **J2000 mean ecliptic** — strictly, the apparent path
+    /// of the Sun across the celestial sphere. The Moon and planets stay within
+    /// a few degrees of it (Moon ±5.1°, Mercury ±7°) but are not exactly on it.
     Ecliptic,
     /// Great circle at declination = 0.
     CelestialEquator,
     /// Local meridian: great circle through north point, zenith, south point, nadir.
     Meridian,
+}
+
+impl OverlayKind {
+    /// Canonical kebab-case name, shared by the CLI flag (`--overlays …`) and
+    /// the WASM/JS bindings. Single source of truth for the host-facing
+    /// string ↔ variant mapping; all native hosts route through this via
+    /// `stars-app-common::OverlayArg`, and the web host calls
+    /// [`OverlayKind::from_kebab_str`] directly.
+    pub fn as_kebab_str(self) -> &'static str {
+        match self {
+            OverlayKind::Horizon => "horizon",
+            OverlayKind::Cardinals => "cardinals",
+            OverlayKind::AltAzGrid => "alt-az-grid",
+            OverlayKind::EquatorialGrid => "equatorial-grid",
+            OverlayKind::Ecliptic => "ecliptic",
+            OverlayKind::CelestialEquator => "celestial-equator",
+            OverlayKind::Meridian => "meridian",
+        }
+    }
+
+    /// Inverse of [`OverlayKind::as_kebab_str`]. Returns `None` for unknown
+    /// names so hosts can choose whether to warn or silently ignore them.
+    pub fn from_kebab_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "horizon" => OverlayKind::Horizon,
+            "cardinals" => OverlayKind::Cardinals,
+            "alt-az-grid" => OverlayKind::AltAzGrid,
+            "equatorial-grid" => OverlayKind::EquatorialGrid,
+            "ecliptic" => OverlayKind::Ecliptic,
+            "celestial-equator" => OverlayKind::CelestialEquator,
+            "meridian" => OverlayKind::Meridian,
+            _ => return None,
+        })
+    }
 }
 
 /// Overlay configuration. Hosts construct this and call [`Renderer::set_overlays`].
@@ -578,6 +622,27 @@ mod tests {
         let c = OverlayConfig::default();
         assert!(c.layers.contains(&OverlayKind::Horizon));
         assert!(c.layers.contains(&OverlayKind::Cardinals));
+    }
+
+    #[test]
+    fn kebab_str_round_trips_every_variant() {
+        for kind in [
+            OverlayKind::Horizon,
+            OverlayKind::Cardinals,
+            OverlayKind::AltAzGrid,
+            OverlayKind::EquatorialGrid,
+            OverlayKind::Ecliptic,
+            OverlayKind::CelestialEquator,
+            OverlayKind::Meridian,
+        ] {
+            let s = kind.as_kebab_str();
+            assert_eq!(
+                OverlayKind::from_kebab_str(s),
+                Some(kind),
+                "round-trip failed for {kind:?} via {s:?}"
+            );
+        }
+        assert_eq!(OverlayKind::from_kebab_str("unknown"), None);
     }
 
     #[test]
