@@ -133,7 +133,11 @@ export function SettingsPanel({
         </Section>
 
         <Section label="TIME (local)">
+          <label htmlFor="set-time" style={{ ...labelStyle, display: "block", marginBottom: 6 }}>
+            Local time
+          </label>
           <input
+            id="set-time"
             type="datetime-local"
             value={toLocalDatetimeInput(timeMs)}
             onChange={(e) => {

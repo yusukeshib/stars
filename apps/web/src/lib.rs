@@ -213,10 +213,14 @@ impl StarView {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                log::warn!("surface texture was outdated/lost; reconfiguring surface");
                 s.surface.configure(&s.device, &s.config);
                 return;
             }
-            _ => return,
+            unexpected => {
+                log::warn!("skipping frame after unexpected surface texture state: {unexpected:?}");
+                return;
+            }
         };
         let view = surface_texture
             .texture
