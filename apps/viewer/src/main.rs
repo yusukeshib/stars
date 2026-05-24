@@ -115,6 +115,7 @@ fn main() -> Result<()> {
         start_jd,
         initial_view,
         overlays,
+        limiting_mag,
     );
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -138,6 +139,7 @@ struct App {
     lng: f64,
     initial_view: LocalView,
     overlays: OverlayConfig,
+    limiting_magnitude: f32,
     sky_clock: SkyClock,
     mouse_pressed: bool,
     last_mouse: Option<(f64, f64)>,
@@ -192,6 +194,7 @@ impl SkyClock {
 }
 
 impl App {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         stars: Vec<StarInstance>,
         lat: f64,
@@ -199,6 +202,7 @@ impl App {
         start_jd: f64,
         initial_view: LocalView,
         overlays: OverlayConfig,
+        limiting_magnitude: f32,
     ) -> Self {
         Self {
             gpu: None,
@@ -208,6 +212,7 @@ impl App {
             lng,
             initial_view,
             overlays,
+            limiting_magnitude,
             sky_clock: SkyClock::new(start_jd),
             mouse_pressed: false,
             last_mouse: None,
@@ -265,11 +270,12 @@ impl ApplicationHandler for App {
         let mut renderer = Renderer::new(&device, format, size.width, size.height, &self.stars);
         renderer.set_overlays(&device, &self.overlays);
         let observer = Observer::from_degrees(self.lat, self.lng, self.sky_clock.current_jd());
-        let camera = Camera::new(
+        let mut camera = Camera::new(
             observer,
             self.initial_view,
             size.width as f32 / size.height as f32,
         );
+        camera.limiting_magnitude = self.limiting_magnitude;
 
         self.gpu = Some(GpuState {
             surface,

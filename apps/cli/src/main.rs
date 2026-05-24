@@ -102,6 +102,13 @@ struct Args {
     /// altitude — useful for debugging or for views from outside Earth.
     #[arg(long)]
     no_extinction: bool,
+
+    /// Disable the diffuse-sky (integrated starlight + diffuse galactic
+    /// light) skyglow pass. With the default (skyglow on), the sky
+    /// background includes the analytic Leinert et al. 1998 model so the
+    /// Milky Way band is visible against the dark sky.
+    #[arg(long)]
+    no_skyglow: bool,
 }
 
 fn overlay_config_from_args(args: &Args) -> OverlayConfig {
@@ -151,11 +158,14 @@ fn main() -> Result<()> {
     } else {
         Atmosphere::default()
     };
+    let skyglow_enabled = !args.no_skyglow;
 
     let pixels = pollster::block_on(render_to_pixels(
         observer,
         view,
         atmosphere,
+        skyglow_enabled,
+        limiting_mag,
         args.width,
         args.height,
         &instances,
@@ -173,10 +183,13 @@ fn main() -> Result<()> {
 
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
+#[allow(clippy::too_many_arguments)]
 async fn render_to_pixels(
     observer: Observer,
     view: LocalView,
     atmosphere: Atmosphere,
+    skyglow_enabled: bool,
+    limiting_mag: f32,
     width: u32,
     height: u32,
     stars: &[StarInstance],
@@ -225,8 +238,10 @@ async fn render_to_pixels(
 
     let mut renderer = Renderer::new(&device, TEXTURE_FORMAT, width, height, stars);
     renderer.set_overlays(&device, overlays);
+    renderer.set_skyglow_enabled(skyglow_enabled);
     let mut camera = Camera::new(observer, view, width as f32 / height as f32);
     camera.atmosphere = atmosphere;
+    camera.limiting_magnitude = limiting_mag;
     renderer.update_camera(&queue, &camera, width, height);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
