@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { StarView } from "stars-web";
-import { toRad, type AtmosphereConfig, type Observer, type OverlayConfig, type View } from "../observer";
+import { toRad, type AtmosphereConfig, type Observer, type OverlayConfig, type PlanetsConfig, type PlanningTable, type View } from "../observer";
 
 type Props = {
   observer: Observer;
@@ -9,9 +9,11 @@ type Props = {
   timeMs: number;
   overlays: OverlayConfig;
   atmosphere: AtmosphereConfig;
+  planets: PlanetsConfig;
   onDrag: (deltaAzDeg: number, deltaAltDeg: number) => void;
   onWheel: (zoomFactor: number) => void;
   onSunAltitude: (sunAltitudeDeg: number) => void;
+  onPlanning: (planning: PlanningTable) => void;
 };
 
 type PointerPoint = { x: number; y: number };
@@ -32,9 +34,11 @@ export function StarCanvas({
   timeMs,
   overlays,
   atmosphere,
+  planets,
   onDrag,
   onWheel,
   onSunAltitude,
+  onPlanning,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const handleRef = useRef<StarView | null>(null);
@@ -49,11 +53,13 @@ export function StarCanvas({
   const timeRef = useRef(timeMs);
   const overlaysRef = useRef(overlays);
   const atmosphereRef = useRef(atmosphere);
+  const planetsRef = useRef(planets);
   observerRef.current = observer;
   viewRef.current = view;
   timeRef.current = timeMs;
   overlaysRef.current = overlays;
   atmosphereRef.current = atmosphere;
+  planetsRef.current = planets;
 
   // Push overlays to wasm whenever the config changes. Geometry is rebuilt on
   // the GPU side, so we don't want to do it every frame -- a useEffect keyed
@@ -64,6 +70,10 @@ export function StarCanvas({
   useEffect(() => {
     handleRef.current?.set_overlays(overlays.layers, overlays.gridStepDeg, overlays.opacity);
   }, [overlays]);
+
+  useEffect(() => {
+    handleRef.current?.set_planets_enabled(planets.enabled);
+  }, [planets]);
 
   useEffect(() => {
     handleRef.current?.set_atmosphere_config(
@@ -104,8 +114,11 @@ export function StarCanvas({
         at.pressureHpa,
         at.temperatureC,
       );
+      handle.set_planets_enabled(planetsRef.current.enabled);
 
       let lastSunAltitudePublish = 0;
+      let lastPlanningPublish = -Infinity;
+      let lastPlanningKey = "";
       const tick = (now: number) => {
         if (cancelled) return;
         const o = observerRef.current;
@@ -115,6 +128,16 @@ export function StarCanvas({
           lastSunAltitudePublish = now;
           const sunAltitudeDeg = handle.sun_altitude_deg();
           if (Number.isFinite(sunAltitudeDeg)) onSunAltitude(sunAltitudeDeg);
+        }
+        const planningKey = `${o.latitudeDeg.toFixed(3)},${o.longitudeDeg.toFixed(3)},${Math.floor(timeRef.current / 60000)}`;
+        if (planningKey !== lastPlanningKey || now - lastPlanningPublish > 30_000) {
+          lastPlanningKey = planningKey;
+          lastPlanningPublish = now;
+          try {
+            onPlanning(JSON.parse(handle.planning_table_json()) as PlanningTable);
+          } catch {
+            // Keep rendering if a development wasm build returns malformed planning data.
+          }
         }
         handle.set_view(toRad(v.azimuthDeg), toRad(v.altitudeDeg), toRad(v.fovDeg));
         handle.render_frame();

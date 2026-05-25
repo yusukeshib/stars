@@ -7,6 +7,8 @@ import {
   type AtmospherePreset,
   type Observer,
   type OverlayConfig,
+  type PlanetsConfig,
+  type PlanningTable,
   type View,
 } from "../observer";
 import { OverlayToggles } from "./OverlayToggles";
@@ -18,10 +20,14 @@ type Props = {
   sunAltitudeDeg: number | null;
   overlays: OverlayConfig;
   atmosphere: AtmosphereConfig;
+  planets: PlanetsConfig;
+  planning: PlanningTable | null;
   onSetObserver: (next: Observer) => void;
   onSetTime: (timeMs: number) => void;
   onSetOverlays: (next: OverlayConfig) => void;
   onSetAtmosphere: (next: AtmosphereConfig) => void;
+  onSetPlanets: (next: PlanetsConfig) => void;
+  onCopySessionUrl: () => void | Promise<void>;
   onUseGeolocation: () => void;
 };
 
@@ -81,10 +87,14 @@ export function StatusBar({
   sunAltitudeDeg,
   overlays,
   atmosphere,
+  planets,
+  planning,
   onSetObserver,
   onSetTime,
   onSetOverlays,
   onSetAtmosphere,
+  onSetPlanets,
+  onCopySessionUrl,
   onUseGeolocation,
 }: Props) {
   const [openPopover, setOpenPopover] = useState<Popover | null>(null);
@@ -229,6 +239,17 @@ export function StatusBar({
           <Section label="OVERLAYS">
             <OverlayToggles config={overlays} onChange={onSetOverlays} />
           </Section>
+          <Section label="PLANETS">
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={planets.enabled}
+                onChange={(e) => onSetPlanets({ enabled: e.target.checked })}
+              />
+              Mercury → Neptune
+            </label>
+          </Section>
+          {planning && <PlanningPanel planning={planning} />}
           <Section label="ATMOSPHERE">
             <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
               <input
@@ -338,6 +359,9 @@ export function StatusBar({
               }
             />
           </Section>
+          <button type="button" onClick={onCopySessionUrl} style={buttonStyle}>
+            Copy session URL
+          </button>
           <p style={{ margin: "14px 0 0", fontSize: 11, opacity: 0.45 }}>
             drag the sky to look around · scroll to zoom
           </p>
@@ -427,6 +451,46 @@ function Section({ label, children }: { label: string; children: React.ReactNode
       </div>
       {children}
     </section>
+  );
+}
+
+function fmtEventTime(ms: number | null): string {
+  if (ms === null || !Number.isFinite(ms)) return "—";
+  const d = new Date(ms);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function PlanningPanel({ planning }: { planning: PlanningTable }) {
+  return (
+    <Section label="RISE / TRANSIT / SET">
+      <div style={{ maxHeight: 170, overflow: "auto", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+        {planning.rows.map((row) => (
+          <div
+            key={row.name}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "74px repeat(3, 46px) 48px",
+              gap: 6,
+              padding: "3px 0",
+              borderBottom: "1px solid rgba(255,255,255,0.06)",
+            }}
+          >
+            <span>{row.name}</span>
+            <span title="Rise">↑ {fmtEventTime(row.riseMs)}</span>
+            <span title="Transit">↟ {fmtEventTime(row.transitMs)}</span>
+            <span title="Set">↓ {fmtEventTime(row.setMs)}</span>
+            <span>{row.transitAltitudeDeg === null ? "—" : `${row.transitAltitudeDeg.toFixed(0)}°`}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 8, display: "grid", gap: 3 }}>
+        {planning.twilight.map((segment) => (
+          <div key={`${segment.label}-${segment.startMs}`} style={{ opacity: 0.72 }}>
+            {segment.label}: {fmtEventTime(segment.startMs)}–{fmtEventTime(segment.endMs)}
+          </div>
+        ))}
+      </div>
+    </Section>
   );
 }
 

@@ -7,6 +7,7 @@ import {
   type AtmosphereConfig,
   type Observer,
   type OverlayConfig,
+  type PlanetsConfig,
   type View,
 } from "./observer";
 
@@ -27,6 +28,7 @@ export type PersistedConfig = {
   view: View;
   overlays?: OverlayConfig;
   atmosphere?: AtmosphereConfig;
+  planets?: PlanetsConfig;
 };
 
 export type PartialPersistedConfig = Partial<Omit<PersistedConfig, "version">>;
@@ -47,6 +49,7 @@ export function loadConfig(): PartialPersistedConfig | null {
       view?: unknown;
       overlays?: unknown;
       atmosphere?: unknown;
+      planets?: unknown;
     };
     if (obj.version !== CURRENT_VERSION) return null;
     const out: PartialPersistedConfig = {};
@@ -55,6 +58,8 @@ export function loadConfig(): PartialPersistedConfig | null {
     if (isOverlayConfig(obj.overlays)) out.overlays = obj.overlays;
     const atmosphere = parseAtmosphereConfig(obj.atmosphere);
     if (atmosphere) out.atmosphere = atmosphere;
+    const planets = parsePlanetsConfig(obj.planets);
+    if (planets) out.planets = planets;
     return out;
   } catch {
     return null;
@@ -119,6 +124,12 @@ function isOverlayConfig(v: unknown): v is OverlayConfig {
     inRange(o.gridStepDeg, GRID_STEP_RANGE) &&
     inRange(o.opacity, OPACITY_RANGE)
   );
+}
+
+function parsePlanetsConfig(v: unknown): PlanetsConfig | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Partial<PlanetsConfig>;
+  return typeof o.enabled === "boolean" ? { enabled: o.enabled } : null;
 }
 
 function parseAtmosphereConfig(v: unknown): AtmosphereConfig | null {

@@ -116,6 +116,10 @@ struct Args {
     /// Override air temperature in °C for atmospheric refraction.
     #[arg(long, allow_hyphen_values = true)]
     temperature_c: Option<f32>,
+
+    /// Disable Mercury-through-Neptune rendering.
+    #[arg(long)]
+    no_planets: bool,
 }
 
 fn main() -> Result<()> {
@@ -163,6 +167,7 @@ fn main() -> Result<()> {
         overlays,
         limiting_mag,
         atmosphere,
+        !args.no_planets,
     );
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -188,6 +193,7 @@ struct App {
     overlays: OverlayConfig,
     limiting_magnitude: f32,
     atmosphere: Atmosphere,
+    planets_enabled: bool,
     sky_clock: SkyClock,
     mouse_pressed: bool,
     last_mouse: Option<(f64, f64)>,
@@ -252,6 +258,7 @@ impl App {
         overlays: OverlayConfig,
         limiting_magnitude: f32,
         atmosphere: Atmosphere,
+        planets_enabled: bool,
     ) -> Self {
         Self {
             gpu: None,
@@ -263,6 +270,7 @@ impl App {
             overlays,
             limiting_magnitude,
             atmosphere,
+            planets_enabled,
             sky_clock: SkyClock::new(start_jd),
             mouse_pressed: false,
             last_mouse: None,
@@ -358,6 +366,7 @@ impl ApplicationHandler for App {
         );
         camera.limiting_magnitude = self.limiting_magnitude;
         camera.atmosphere = self.atmosphere;
+        camera.planets_enabled = self.planets_enabled;
 
         self.gpu = Some(GpuState {
             surface,

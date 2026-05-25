@@ -22,6 +22,88 @@ const SOLAR_RADIUS_KM: f64 = 695_700.0;
 /// Mean lunar radius in kilometres, IAU/IAG Working Group cartographic value.
 const LUNAR_RADIUS_KM: f64 = 1_737.4;
 
+/// Solar-system planets rendered/planned by Phase 2. Earth is intentionally
+/// omitted because this crate is currently Earth-observer centric.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Planet {
+    Mercury,
+    Venus,
+    Mars,
+    Jupiter,
+    Saturn,
+    Uranus,
+    Neptune,
+}
+
+impl Planet {
+    pub const ALL: [Self; 7] = [
+        Self::Mercury,
+        Self::Venus,
+        Self::Mars,
+        Self::Jupiter,
+        Self::Saturn,
+        Self::Uranus,
+        Self::Neptune,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Mercury => "Mercury",
+            Self::Venus => "Venus",
+            Self::Mars => "Mars",
+            Self::Jupiter => "Jupiter",
+            Self::Saturn => "Saturn",
+            Self::Uranus => "Uranus",
+            Self::Neptune => "Neptune",
+        }
+    }
+
+    fn astro(self) -> astro::planet::Planet {
+        match self {
+            Self::Mercury => astro::planet::Planet::Mercury,
+            Self::Venus => astro::planet::Planet::Venus,
+            Self::Mars => astro::planet::Planet::Mars,
+            Self::Jupiter => astro::planet::Planet::Jupiter,
+            Self::Saturn => astro::planet::Planet::Saturn,
+            Self::Uranus => astro::planet::Planet::Uranus,
+            Self::Neptune => astro::planet::Planet::Neptune,
+        }
+    }
+}
+
+/// Apparent geocentric/topocentric planet state for rendering and planning.
+#[derive(Debug, Clone, Copy)]
+pub struct PlanetApparent {
+    pub planet: Planet,
+    /// Apparent right ascension in radians, equatorial frame of date.
+    pub right_ascension_rad: f64,
+    /// Apparent declination in radians, equatorial frame of date.
+    pub declination_rad: f64,
+    /// Apparent ecliptic longitude in radians.
+    pub ecliptic_longitude_rad: f64,
+    /// Apparent ecliptic latitude in radians.
+    pub ecliptic_latitude_rad: f64,
+    /// Observer-planet distance in astronomical units.
+    pub distance_au: f64,
+    /// Sun-planet distance in astronomical units.
+    pub heliocentric_distance_au: f64,
+    /// Apparent angular radius of the planetary disk in radians.
+    pub angular_radius_rad: f64,
+    /// Illuminated fraction, 0 = new, 1 = full.
+    pub illuminated_fraction: f64,
+    /// Sun-planet-Earth phase angle in radians.
+    pub phase_angle_rad: f64,
+    /// Approximate apparent visual magnitude.
+    pub magnitude: f64,
+}
+
+impl PlanetApparent {
+    /// Unit vector from Earth/observer toward the planet in equatorial coordinates.
+    pub fn direction_equatorial(self) -> Vec3 {
+        equatorial_unit_vector(self.right_ascension_rad, self.declination_rad)
+    }
+}
+
 /// Apparent geocentric Sun state for rendering.
 #[derive(Debug, Clone, Copy)]
 pub struct SunApparent {
@@ -65,6 +147,9 @@ pub struct MoonApparent {
     /// π = new Moon. This is the angle used by lunar brightness laws and disk
     /// shading, distinct from the geocentric elongation seen by the observer.
     pub phase_angle_rad: f64,
+    /// Approximate fraction of the lunar disk covered by Earth's umbra, used as
+    /// a visual eclipse aid. 0 = no umbral contact, 1 = fully inside umbra.
+    pub earth_shadow_fraction: f64,
 }
 
 /// Renderer-facing apparent disk inputs for the two atmosphere illuminants.
@@ -106,6 +191,19 @@ fn ra_dec_from_equatorial_vector(v: [f64; 3]) -> (f64, f64, f64) {
     let right_ascension_rad = v[1].atan2(v[0]).rem_euclid(std::f64::consts::TAU);
     let declination_rad = (v[2] / distance).clamp(-1.0, 1.0).asin();
     (right_ascension_rad, declination_rad, distance)
+}
+
+fn angular_separation_f64(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let ad = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+    let bd = (b[0] * b[0] + b[1] * b[1] + b[2] * b[2]).sqrt();
+    ((a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (ad * bd))
+        .clamp(-1.0, 1.0)
+        .acos()
+}
+
+fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// Mean obliquity of the ecliptic for the low-precision Sun/Moon renderer.
@@ -208,6 +306,86 @@ pub fn apparent_sun_topocentric(observer: Observer) -> SunApparent {
     }
 }
 
+/// Apparent geocentric position of a planet for a dynamical Julian Date.
+///
+/// The source coordinates come from the `astro` crate's VSOP87D heliocentric
+/// series with one light-time iteration (`geocent_apprnt_ecl_coords`) and the
+/// same FK5 ecliptic correction used for the solar pipeline. The returned
+/// equatorial frame is the mean equator/equinox of date, matching the current
+/// Sun/Moon renderer inputs.
+pub fn apparent_planet(planet: Planet, julian_date: f64) -> PlanetApparent {
+    let astro_planet = planet.astro();
+    let (ecl, distance_au) = astro::planet::geocent_apprnt_ecl_coords(&astro_planet, julian_date);
+    let (lambda, beta) = astro::planet::ecl_coords_to_FK5(julian_date, ecl.long, ecl.lat);
+    let eq =
+        ecliptic_to_equatorial_vector(lambda, beta, distance_au, mean_obliquity_rad(julian_date));
+    let (right_ascension_rad, declination_rad, _) = ra_dec_from_equatorial_vector(eq);
+
+    let (_, _, heliocentric_distance_au) =
+        astro::planet::heliocent_coords(&astro_planet, julian_date);
+    let (_, _, earth_sun_distance_au) =
+        astro::planet::heliocent_coords(&astro::planet::Planet::Earth, julian_date);
+    let cos_phase = ((heliocentric_distance_au * heliocentric_distance_au)
+        + (distance_au * distance_au)
+        - (earth_sun_distance_au * earth_sun_distance_au))
+        / (2.0 * heliocentric_distance_au * distance_au);
+    let phase_angle_rad = cos_phase.clamp(-1.0, 1.0).acos();
+    let illuminated_fraction = 0.5 * (1.0 + phase_angle_rad.cos());
+    let phase_deg = phase_angle_rad.to_degrees();
+    let magnitude = match planet {
+        Planet::Saturn => -8.88 + 5.0 * (heliocentric_distance_au * distance_au).log10(),
+        _ => astro::planet::apprnt_mag_84(
+            &astro_planet,
+            phase_deg,
+            distance_au,
+            heliocentric_distance_au,
+        )
+        .unwrap_or(6.0),
+    };
+
+    PlanetApparent {
+        planet,
+        right_ascension_rad,
+        declination_rad,
+        ecliptic_longitude_rad: lambda.rem_euclid(std::f64::consts::TAU),
+        ecliptic_latitude_rad: beta,
+        distance_au,
+        heliocentric_distance_au,
+        angular_radius_rad: astro::planet::semidiameter(&astro_planet, distance_au).unwrap_or(0.0),
+        illuminated_fraction,
+        phase_angle_rad,
+        magnitude,
+    }
+}
+
+/// Apparent topocentric planet state for an observer on Earth.
+pub fn apparent_planet_topocentric(observer: Observer, planet: Planet) -> PlanetApparent {
+    let geo = apparent_planet(planet, observer.time.jd_tdb);
+    let dir = equatorial_unit_vector_f64(geo.right_ascension_rad, geo.declination_rad);
+    let distance_km = geo.distance_au * ASTRONOMICAL_UNIT_KM;
+    let observer_km = observer_equatorial_position_km(observer);
+    let topo = [
+        dir[0] * distance_km - observer_km[0],
+        dir[1] * distance_km - observer_km[1],
+        dir[2] * distance_km - observer_km[2],
+    ];
+    let (right_ascension_rad, declination_rad, topocentric_distance_km) =
+        ra_dec_from_equatorial_vector(topo);
+    let distance_au = topocentric_distance_km / ASTRONOMICAL_UNIT_KM;
+    PlanetApparent {
+        right_ascension_rad,
+        declination_rad,
+        distance_au,
+        angular_radius_rad: astro::planet::semidiameter(&planet.astro(), distance_au)
+            .unwrap_or(0.0),
+        ..geo
+    }
+}
+
+pub fn apparent_planets_topocentric(observer: Observer) -> [PlanetApparent; 7] {
+    Planet::ALL.map(|planet| apparent_planet_topocentric(observer, planet))
+}
+
 /// Apparent geocentric Moon position for a Julian Date.
 ///
 /// The geocentric ecliptic longitude/latitude/distance come from the `astro`
@@ -226,11 +404,29 @@ pub fn apparent_moon(julian_date: f64) -> MoonApparent {
     let (right_ascension_rad, declination_rad, _) = ra_dec_from_equatorial_vector(eq);
     let angular_radius_rad = (LUNAR_RADIUS_KM / distance_km).asin();
 
-    let moon_dir = equatorial_unit_vector(right_ascension_rad, declination_rad);
-    let sun_dir = apparent_sun(julian_date).direction_equatorial();
-    let elongation = (moon_dir.dot(sun_dir) as f64).clamp(-1.0, 1.0).acos();
+    let moon_dir = equatorial_unit_vector_f64(right_ascension_rad, declination_rad);
+    let sun = apparent_sun(julian_date);
+    let sun_dir = equatorial_unit_vector_f64(sun.right_ascension_rad, sun.declination_rad);
+    let elongation = angular_separation_f64(moon_dir, sun_dir);
     let phase_angle_rad = (std::f64::consts::PI - elongation).clamp(0.0, std::f64::consts::PI);
     let illuminated_fraction = 0.5 * (1.0 + phase_angle_rad.cos());
+
+    // Visual lunar-eclipse aid: Earth's umbral cone radius at the Moon is the
+    // geocentric Earth radius minus the Sun's apparent cone over one lunar
+    // distance. Smooth the contact over one lunar radius so partial eclipses
+    // transition gradually instead of blinking.
+    let anti_sun = [-sun_dir[0], -sun_dir[1], -sun_dir[2]];
+    let shadow_sep = angular_separation_f64(moon_dir, anti_sun);
+    let umbra_radius = (EARTH_EQUATORIAL_RADIUS_KM / distance_km).asin() - sun.angular_radius_rad;
+    let earth_shadow_fraction = if umbra_radius > 0.0 {
+        1.0 - smoothstep(
+            (umbra_radius - angular_radius_rad).max(0.0),
+            umbra_radius + angular_radius_rad,
+            shadow_sep,
+        )
+    } else {
+        0.0
+    };
 
     MoonApparent {
         right_ascension_rad,
@@ -239,6 +435,7 @@ pub fn apparent_moon(julian_date: f64) -> MoonApparent {
         angular_radius_rad,
         illuminated_fraction,
         phase_angle_rad,
+        earth_shadow_fraction,
     }
 }
 
@@ -266,6 +463,7 @@ pub fn apparent_moon_topocentric(observer: Observer) -> MoonApparent {
         angular_radius_rad: (LUNAR_RADIUS_KM / distance_km).asin(),
         illuminated_fraction: geo.illuminated_fraction,
         phase_angle_rad: geo.phase_angle_rad,
+        earth_shadow_fraction: geo.earth_shadow_fraction,
     }
 }
 
@@ -304,6 +502,34 @@ mod tests {
         let radius_arcmin = moon.angular_radius_rad.to_degrees() * 60.0;
         assert!((14.0..=17.5).contains(&radius_arcmin));
         assert!((0.0..=1.0).contains(&moon.illuminated_fraction));
+        assert!((0.0..=1.0).contains(&moon.earth_shadow_fraction));
+    }
+
+    #[test]
+    fn planets_have_finite_apparent_states() {
+        let observer = Observer::from_degrees(35.0, 139.0, 2_460_000.5);
+        let planets = apparent_planets_topocentric(observer);
+        assert_eq!(planets.len(), Planet::ALL.len());
+        for planet in planets {
+            assert!(
+                planet.right_ascension_rad.is_finite(),
+                "{:?} RA",
+                planet.planet
+            );
+            assert!(
+                planet.declination_rad.is_finite(),
+                "{:?} Dec",
+                planet.planet
+            );
+            assert!(planet.distance_au > 0.1, "{:?} distance", planet.planet);
+            assert!(
+                planet.angular_radius_rad > 0.0,
+                "{:?} radius",
+                planet.planet
+            );
+            assert!((0.0..=1.0).contains(&planet.illuminated_fraction));
+            assert!(planet.magnitude.is_finite(), "{:?} mag", planet.planet);
+        }
     }
 
     fn angular_separation_rad(a_ra: f64, a_dec: f64, b_ra: f64, b_dec: f64) -> f64 {

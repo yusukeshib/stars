@@ -2,7 +2,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use astronomy::{
-    apparent_sun_topocentric, equatorial_to_horizontal, lmst_radians, Observer, TimeScales,
+    apparent_sun_topocentric, equatorial_to_horizontal, evening_plan, jd_utc_to_unix_ms,
+    lmst_radians, Observer, TimeScales,
 };
 use catalog::load_embedded;
 use renderer::{
@@ -21,6 +22,21 @@ const LIMITING_MAGNITUDE: f32 = DEFAULT_SCREEN_LIMITING_MAGNITUDE;
 pub fn main() {
     console_error_panic_hook::set_once();
     console_log::init_with_level(log::Level::Info).ok();
+}
+
+fn push_num(out: &mut String, value: f64) {
+    if value.is_finite() {
+        out.push_str(&format!("{value:.3}"));
+    } else {
+        out.push_str("null");
+    }
+}
+
+fn push_opt_jd_ms(out: &mut String, jd_utc: Option<f64>) {
+    match jd_utc {
+        Some(jd) => push_num(out, jd_utc_to_unix_ms(jd)),
+        None => out.push_str("null"),
+    }
 }
 
 struct RenderState {
@@ -216,6 +232,54 @@ impl StarView {
             fov_y_rad,
         }
         .clamped();
+    }
+
+    pub fn set_planets_enabled(&self, enabled: bool) {
+        self.state.borrow_mut().camera.planets_enabled = enabled;
+    }
+
+    /// Return the current local-evening rise/transit/set table and twilight
+    /// bands as a JSON string. Keeping this in Rust makes the UI use the same
+    /// ephemerides/time-scale split as the renderer.
+    pub fn planning_table_json(&self) -> String {
+        let observer = self.state.borrow().camera.observer;
+        let plan = evening_plan(observer);
+        let mut s = String::new();
+        s.push_str("{\"startMs\":");
+        push_num(&mut s, jd_utc_to_unix_ms(plan.start_jd_utc));
+        s.push_str(",\"endMs\":");
+        push_num(&mut s, jd_utc_to_unix_ms(plan.end_jd_utc));
+        s.push_str(",\"rows\":[");
+        for (idx, row) in plan.rows.iter().enumerate() {
+            if idx > 0 { s.push(','); }
+            s.push_str("{\"name\":\"");
+            s.push_str(row.name);
+            s.push_str("\",\"riseMs\":");
+            push_opt_jd_ms(&mut s, row.rise_jd_utc);
+            s.push_str(",\"transitMs\":");
+            push_opt_jd_ms(&mut s, row.transit_jd_utc);
+            s.push_str(",\"setMs\":");
+            push_opt_jd_ms(&mut s, row.set_jd_utc);
+            s.push_str(",\"transitAltitudeDeg\":");
+            match row.transit_altitude_rad {
+                Some(alt) => push_num(&mut s, alt.to_degrees()),
+                None => s.push_str("null"),
+            }
+            s.push('}');
+        }
+        s.push_str("],\"twilight\":[");
+        for (idx, band) in plan.twilight.iter().enumerate() {
+            if idx > 0 { s.push(','); }
+            s.push_str("{\"label\":\"");
+            s.push_str(band.band.label());
+            s.push_str("\",\"startMs\":");
+            push_num(&mut s, jd_utc_to_unix_ms(band.start_jd_utc));
+            s.push_str(",\"endMs\":");
+            push_num(&mut s, jd_utc_to_unix_ms(band.end_jd_utc));
+            s.push('}');
+        }
+        s.push_str("]}");
+        s
     }
 
     /// Update atmosphere controls from the web UI. `enabled=false` matches the
