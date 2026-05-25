@@ -99,7 +99,7 @@ Columns:
 | 2 | **Annual aberration** — up to 20″ | Standard formulas; folds into the equatorial→ENU matrix | ⬜ |
 | 2 | **Stellar proper motion** — apply HYG's `pmra` / `pmdec` when epoch ≠ catalog epoch | HYG carries the columns already | ⬜ |
 | 2 | **Atmospheric refraction** — up to 34′ at the horizon | Bennett 1982 / Saemundsson 1986; flag in UI when on | ⬜ |
-| 2 | **Sun, Moon** — apparent topocentric direction, angular radius, phase, and disk rendering inputs | VSOP87 (Sun) + ELP2000 (Moon); feeds scattering, twilight, moon phase, and rise/set | ⏳ next |
+| 2 | **Sun, Moon** — apparent topocentric direction, angular radius, phase, and disk rendering inputs | VSOP87 (Sun) + ELP2000 (Moon); feeds scattering, twilight, moon phase, and rise/set | ✅ done (`astronomy::ephemeris`, `renderer::CameraUniform`) |
 | 2 | **Solar / lunar illuminants** — spectral or XYZ irradiance for direct sunlight and moonlight at the top of the atmosphere | ASTM G-173 / CIE daylight basis for Sun; Krisciunas & Schaefer 1991 for moonlight brightness | ⏳ next |
 | 2 | **Sunlit atmospheric scattering / sky colour** — Rayleigh + Mie aerosol + ozone absorption sky model driven by Sun altitude, view direction, observer altitude, and turbidity; produces blue daylight, golden-hour warmth, sunset reddening, and horizon haze | Preetham, Shirley & Smits 1999; Hosek & Wilkie 2012; Bruneton & Neyret 2008 | ⏳ next |
 | 2 | **Twilight and day/night blend** — combine sunlit scattering, moonlit sky, Phase 1' dark-sky glow, and star visibility using solar depression angle instead of hard-coded background colours | Civil / nautical / astronomical bands remain UI annotations; renderer cross-fades radiance physically across 0°, −6°, −12°, −18° Sun altitude | ⏳ next |
