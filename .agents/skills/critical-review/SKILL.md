@@ -21,9 +21,10 @@ small (~1700 lines of Rust + ~400 lines of TS); read every file with fresh
 eyes and a hostile mindset. The output is a structured report **followed by
 a commit that fixes everything actionable** — not just the report.
 
-This is the only review skill in the repo. Every code-review request
-routes here, from a quick mechanical sweep to a deep IAU-grade pass.
-Match the report depth to the user's signal:
+This is the primary review skill in the repo. Every code-review request should
+be strict about two non-negotiable standards: **crate boundaries are an
+architectural contract**, and **academic / scientific correctness must be held
+to referee-grade scrutiny**. Match the report depth to the user's signal:
 
 - "review the code" / "コードレビュー" / "quality pass" → lighter
   pass: prioritise axes (1) and (2), skim axis (3) for obvious issues,
@@ -42,9 +43,10 @@ Triggers in the user's request include:
 ## Workflow
 
 1. **Scan everything.** Read every file under `crates/`, `apps/`, plus the
-   workspace `Cargo.toml`, each crate/app `Cargo.toml`, `ROADMAP.md`,
-   `USAGE.md`, the `Makefile`, `.github/workflows/*.yml`, and the frontend
-   under `apps/web/frontend/src/`. **Do not skim.** Open shaders
+   workspace `Cargo.toml`, each crate/app `Cargo.toml`, `AGENTS.md`,
+   `ARCHITECTURE.md`, `CONTRIBUTING.md`, `ROADMAP.md`, `PROGRESS.md`,
+   `VALIDATION.md`, `DATA_SOURCES.md`, the `Makefile`, `.github/workflows/*.yml`,
+   and the frontend under `apps/web/frontend/src/`. **Do not skim.** Open shaders
    (`crates/renderer/src/shaders/*.wgsl`) — they are part of the math.
 
 2. **Cross-reference ROADMAP.** Anything the ROADMAP marks as Phase 2/3 is
@@ -63,9 +65,11 @@ Triggers in the user's request include:
 
 5. **Fix systematically.** Group edits by category; keep the commit's intent
    clear. Prefer one well-structured commit at the end. **Do not** add
-   features — this skill cleans and clarifies, never extends. Do not
-   create new top-level `.md` docs; extend `USAGE.md` / `ROADMAP.md` /
-   inline comments.
+   features — this skill cleans and clarifies, never extends. Update the
+   relevant documentation in the same PR (`README.md`, `README.ja.md`,
+   `ROADMAP.md`, `PROGRESS.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`,
+   `VALIDATION.md`, `DATA_SOURCES.md`) whenever the review changes behaviour,
+   public API, data sources, validation, or project status.
 
 6. **Verify.** All of:
    - `cargo fmt --all -- --check`
@@ -94,17 +98,19 @@ Triggers in the user's request include:
 
 ### (1) Architecture & crate boundaries
 
-- The split is fixed by `USAGE.md`:
+- The split is fixed by `ARCHITECTURE.md` and must be enforced strictly. Treat
+  crate-boundary drift as a design bug, not as a style preference:
   - `crates/{astronomy,catalog,renderer}` = **engine** (no clap, no chrono, no winit, no wasm-bindgen).
   - `crates/common` = **host helpers** for native binaries only (clap, chrono).
   - `apps/{cli,viewer,web}` = **hosts** (UI / CLI / WASM).
 - `renderer` must **not** depend on `catalog`. `catalog` must not depend on `renderer`.
 - Any concept that shows up in *two* hosts identically is a candidate for
   `crates/common` (string ↔ enum maps, time parsing, default flag values).
-- `USAGE.md` and its "5-step recipe" are the API contract. Any API drift
-  between code and `USAGE.md` is a 🔴 finding.
-- Avoid creating new top-level `.md` files; extend `USAGE.md` or
-  `ROADMAP.md` instead.
+- `ARCHITECTURE.md` is the crate/API contract. Any API or boundary drift
+  between code and `ARCHITECTURE.md` is a 🔴 finding.
+- If implementation status changes, update `PROGRESS.md` / `ROADMAP.md` in the
+  same review fix. If scientific claims, validation expectations, or data
+  provenance change, update `VALIDATION.md` / `DATA_SOURCES.md`.
 
 ### (2) Rust code quality
 
@@ -162,7 +168,9 @@ Triggers in the user's request include:
 ### (3) Academic / scientific correctness
 
 This is the axis that raises a review from "engineering hygiene" to
-"defensible against a referee". For every formula or constant, ask:
+"defensible against a referee". Be especially strict here: scientific claims,
+coordinate frames, time scales, constants, and citations are correctness
+requirements, not documentation niceties. For every formula or constant, ask:
 *would I be embarrassed if a paper cited this?*
 
 Mandatory checks:
@@ -185,9 +193,10 @@ Mandatory checks:
 - **Color**: B−V → RGB needs an attributed source (Ballesteros 2012 →
   blackbody → CIE 1931 → sRGB is the citable path). A piecewise polynomial
   fit is fine if its limitations are documented.
-- **Atmosphere**: refraction and extinction are *not* applied. Doc this
-  loudly anywhere the user might mistake the rendered altitude for the
-  observed altitude.
+- **Atmosphere**: refraction, extinction, daylight, twilight, moonlight, and
+  dark-sky glow claims must match the implemented model and its valid domain.
+  If a user might mistake a renderer approximation for observed physical
+  truth, document the limitation loudly.
 - **Catalog filtering**: HYG uses `dist = 100000` as a sentinel for
   unknown / negative parallax. Filters keyed on that value must say so in
   the comment.
@@ -213,8 +222,8 @@ For every finding in this axis, decide:
 - Don't rewrite working math "more elegantly" — the current formulas are
   pinned by tests; preserve them.
 - Don't promote 🟢 to 🟡 to inflate the report.
-- Don't create new `.md` docs. Extend `USAGE.md` / `ROADMAP.md` / inline
-  comments.
+- Don't leave docs stale. Update the existing docs according to `AGENTS.md` /
+  `CONTRIBUTING.md` rather than creating ad-hoc new docs.
 - Don't conclude "nothing found" without genuinely scanning every file. If
   the codebase really is clean, say so explicitly and stop — running the
   skill must always either fix something or certify the absence of
