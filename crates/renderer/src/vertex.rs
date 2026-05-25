@@ -145,6 +145,14 @@ pub const SHADER_INTENSITY_CUTOFF: f32 = 0.004;
 /// down to magnitude six".
 pub const NAKED_EYE_LIMITING_MAGNITUDE: f32 = 6.0;
 
+/// Default limiting magnitude for screen-based hosts.
+///
+/// This is slightly past strict naked-eye because indoor screens cannot
+/// reproduce the dynamic range of a pristine night sky; the more sensitive
+/// virtual observer compensates without breaking Pogson's law. The value also
+/// lines up with the HYG catalog's practical depth (~m 7.5).
+pub const DEFAULT_SCREEN_LIMITING_MAGNITUDE: f32 = NAKED_EYE_LIMITING_MAGNITUDE + 1.5;
+
 /// Convert a star's apparent magnitude into renderer parameters.
 ///
 /// Brightness follows Pogson's law exactly:

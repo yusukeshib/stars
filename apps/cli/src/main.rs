@@ -6,16 +6,9 @@ use catalog::load_from_file;
 use clap::Parser;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, LocalView, OverlayConfig,
-    OverlayKind, Renderer, StarInstance,
+    OverlayKind, Renderer, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{parse_time_to_jd, AtmospherePresetArg, OverlayArg};
-
-/// CLI default for the observer's limiting magnitude. Looser than the strict
-/// dark-adapted naked-eye 6.0 because indoor screens can't reproduce the
-/// dynamic range of a pristine night sky — a slightly more sensitive virtual
-/// observer compensates without breaking Pogson's law. Also lines up well
-/// with the HYG catalog's depth (~m 7.5).
-const DEFAULT_LIMITING_MAGNITUDE: f32 = 7.5;
 
 /// Render the night sky as seen from a given observer to a PNG.
 #[derive(Parser, Debug)]
@@ -64,7 +57,7 @@ struct Args {
     /// Overlay layers to draw. Comma-separated list, or pass --no-overlays to disable all.
     ///
     /// Possible values: horizon, cardinals, alt-az-grid, equatorial-grid,
-    /// ecliptic, celestial-equator, meridian.
+    /// ecliptic, celestial-equator, meridian, galactic-equator.
     #[arg(
         long,
         value_delimiter = ',',
@@ -91,7 +84,7 @@ struct Args {
     ///
     /// 6.0 = strict dark-adapted naked eye; 7.5 ≈ binocular visual limit and
     /// is a good default for indoor screens.
-    #[arg(long, default_value_t = DEFAULT_LIMITING_MAGNITUDE)]
+    #[arg(long, default_value_t = DEFAULT_SCREEN_LIMITING_MAGNITUDE)]
     limiting_magnitude: f32,
 
     /// Disable atmospheric extinction and sunlit sky scattering. With the

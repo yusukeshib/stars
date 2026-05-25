@@ -7,10 +7,10 @@
 
 /// Mean direct normal solar illuminance above the atmosphere, in lux.
 ///
-/// The value is derived from the solar constant (~1361 W/m²) and the daylight
-/// luminous-efficacy range (~93 lm/W). It represents the top-of-atmosphere
-/// photopic illuminance of direct sunlight at 1 AU, before extinction or
-/// scattering by the local atmosphere.
+/// Derived from the modern solar constant scale (~1361 W/m² at the IAU 2012
+/// exact astronomical unit) and daylight luminous efficacy near 93 lm/W. It is
+/// a broadband photopic rendering scale, not a spectral solar irradiance table;
+/// Phase 2 tracks ASTM G-173 / CIE daylight-basis spectra for that.
 pub const SOLAR_ILLUMINANCE_1_AU_LUX: f64 = 127_000.0;
 
 /// Approximate direct solar illuminance at top of atmosphere for an Earth-Sun
@@ -19,8 +19,8 @@ pub fn solar_illuminance_lux(distance_au: f64) -> f64 {
     SOLAR_ILLUMINANCE_1_AU_LUX / (distance_au * distance_au)
 }
 
-/// CIE D65-like daylight chromaticity converted to linear RGB and normalised
-/// to the green channel.
+/// CIE standard illuminant D65 white point converted to linear RGB and
+/// normalised to the green channel.
 ///
 /// This is a rendering convenience: the scattering shader still applies the
 /// wavelength-dependent Rayleigh/Mie terms, but it needs a white solar input
@@ -31,24 +31,29 @@ pub const SOLAR_LINEAR_RGB: [f64; 3] = [0.950, 1.000, 1.089];
 /// Full-moon horizontal illuminance at sea level under a clear atmosphere,
 /// order-of-magnitude average in lux.
 ///
-/// Moonlight varies by phase, distance, libration, and atmospheric path. The
-/// first scattering pass only needs a physically plausible scale so that later
-/// ELP2000 Moon geometry can modulate it instead of inventing a new unit.
+/// Krisciunas & Schaefer 1991 and sky-brightness literature put full-Moon
+/// illumination around 0.2–0.3 lux depending on lunar altitude, extinction,
+/// phase angle, and site conditions. This constant is the first-pass scale for
+/// rendering, not a calibrated lunar photometry product.
 pub const FULL_MOON_ILLUMINANCE_LUX: f64 = 0.25;
 
-/// Mean geocentric lunar distance, in kilometres, used to scale first-order
-/// moonlight brightness before the final ELP2000 / photometric phase law lands.
+/// Mean geocentric lunar distance in kilometres, the conventional IAU/IAG
+/// rounded value used to scale first-order moonlight brightness before the
+/// final ELP2000 / photometric phase law lands.
 pub const MEAN_MOON_DISTANCE_KM: f64 = 384_400.0;
 
-/// CIE 1931 XYZ chromaticity/luminance-like weights for the top-of-atmosphere
-/// solar illuminant, normalised to `Y=1`. This is the same D65 daylight white
-/// as [`SOLAR_LINEAR_RGB`], exposed in XYZ so renderers that work spectrally or
-/// colourimetrically do not need to reverse-engineer the RGB convenience value.
+/// CIE 1931 2° XYZ tristimulus white point for standard illuminant D65,
+/// normalised to `Y=1`. This is the same daylight white as [`SOLAR_LINEAR_RGB`],
+/// exposed in XYZ so renderers that work spectrally or colourimetrically do not
+/// need to reverse-engineer the RGB convenience value.
 pub const SOLAR_XYZ_Y_NORMALIZED: [f64; 3] = [0.95047, 1.0, 1.08883];
 
-/// Approximate full-Moon XYZ colour, normalised to `Y=1`. Moonlight is slightly
-/// warmer than D65 after reflecting from the lunar regolith; the absolute scale
-/// comes from [`lunar_illuminance_lux`].
+/// Approximate full-Moon XYZ colour, normalised to `Y=1`.
+///
+/// Moonlight is slightly warmer than D65 after reflection from the lunar
+/// regolith. The chromaticity here is a visual-rendering placeholder; Phase 2's
+/// spectral/XYZ illuminant row tracks replacing it with a cited lunar spectrum.
+/// The absolute scale comes from [`lunar_illuminance_lux`].
 pub const FULL_MOON_XYZ_Y_NORMALIZED: [f64; 3] = [1.01, 1.0, 0.82];
 
 /// Approximate moonlight illuminance for a given illuminated fraction,
