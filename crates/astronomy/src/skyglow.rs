@@ -146,8 +146,10 @@ const S10_TO_MAG_ARCSEC2_OFFSET: f64 = 27.78;
 
 /// Approximate total V-band diffuse-sky surface brightness in mag/arcsec².
 ///
-/// `l_rad`/`b_rad` are galactic coordinates for ISL/DGL and dust; `ecliptic_lat_rad`
-/// and `sun_relative_lon_rad` drive the zodiacal-light component. Smaller `μ` =
+/// `l_rad`/`b_rad` are galactic coordinates for ISL/DGL and dust;
+/// `ecliptic_lat_rad` drives the current broad zodiacal-light band. The
+/// `sun_relative_lon_rad` argument is reserved for the Phase 2 Leinert-table /
+/// gegenschein implementation and is intentionally ignored today. Smaller `μ` =
 /// brighter sky. This is calibrated for naked-eye visualisation and remains an
 /// analytic approximation, not a replacement for the published 2-D tables.
 /// Empirical V-band zenith twilight surface brightness in mag/arcsec².

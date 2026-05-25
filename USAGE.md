@@ -42,11 +42,21 @@ If you just want to read the existing hosts as templates:
 
 Coordinate conventions (all crates agree):
 
-- Time is **Julian Date in UT** (`UT1 ≈ UTC`).
-- Equatorial positions are **J2000 unit-sphere Cartesian**:
-  `x = cos δ cos α, y = cos δ sin α, z = sin δ`.
-- Local frame is **ENU** (East, North, Up).
-- Azimuth is from **North toward East**; altitude is **above horizon** (radians).
+- Time is **Julian Date in UT** (`UT1 ≈ UTC`). Leap seconds, DUT1, TT, TAI,
+  and TDB are Phase 2 work; current DUT1 error can move sidereal quantities by
+  up to about 13.5 arcsec.
+- Catalog stars are **J2000/ICRS-like unit-sphere Cartesian**:
+  `x = cos δ cos α, y = cos δ sin α, z = sin δ`. Precession, nutation,
+  aberration, and proper motion are not applied yet.
+- The current Sun/Moon helpers are low-precision apparent/topocentric visual
+  inputs for rendering daylight, moonlight, and disks. They are not the final
+  VSOP87/ELP2000, IAU-2006/2000A precision stack tracked in ROADMAP Phase 2.
+- Local frame is **ENU** (East, North, Up). Observer latitude is treated as
+  geodetic for topocentric solar-system parallax and as astronomical/geographic
+  for stellar ENU projection; the distinction is below Phase 1 star precision.
+- Azimuth is from **North toward East**; altitude is **geometric** altitude above
+  the horizon (radians). Atmospheric extinction is modeled, but atmospheric
+  refraction is not yet applied.
 
 ---
 
@@ -266,7 +276,8 @@ Camera::zoom_fov(factor)
 LocalView { azimuth_rad, altitude_rad, fov_y_rad }
 StarInstance { position: [f32;3], size: f32, color: [f32;3], brightness: f32 }
 magnitude_to_render_params(mag, limiting_magnitude) -> RenderParams { radius_px, brightness }
-NAKED_EYE_LIMITING_MAGNITUDE: f32  // 6.0; literature default
+NAKED_EYE_LIMITING_MAGNITUDE: f32      // 6.0; literature default
+DEFAULT_SCREEN_LIMITING_MAGNITUDE: f32 // 7.5; screen-host default
 
 // Overlays (all routed through OverlayKind::as_kebab_str / from_kebab_str)
 OverlayConfig { layers: Vec<OverlayKind>, grid_step_deg: f64, opacity: f32 }

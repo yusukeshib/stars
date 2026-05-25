@@ -8,7 +8,7 @@ use catalog::load_from_file;
 use clap::Parser;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, LocalView, OverlayConfig,
-    OverlayKind, Renderer, StarInstance, NAKED_EYE_LIMITING_MAGNITUDE,
+    OverlayKind, Renderer, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{parse_time_to_jd, AtmospherePresetArg, OverlayArg};
 use winit::application::ApplicationHandler;
@@ -103,9 +103,7 @@ fn main() -> Result<()> {
     let stars = load_from_file(&args.catalog)
         .with_context(|| format!("Reading catalog at {}", args.catalog.display()))?;
     log::info!("Loaded {} stars", stars.len());
-    // Slightly past strict naked-eye to compensate for typical monitor
-    // viewing conditions; see `magnitude_to_render_params` docs.
-    let limiting_mag = NAKED_EYE_LIMITING_MAGNITUDE + 1.5;
+    let limiting_mag = DEFAULT_SCREEN_LIMITING_MAGNITUDE;
     let instances: Vec<StarInstance> = stars
         .iter()
         .map(|s| build_star_instance(s.position.into(), s.color, s.magnitude, limiting_mag))

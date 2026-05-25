@@ -9,13 +9,22 @@ use glam::Vec3;
 
 use crate::{lmst_radians, Observer};
 
+/// J2000.0 epoch, JD(TT) 2451545.0. The project currently passes JD(UT1≈UTC)
+/// through most APIs; see the function-level notes below where formulae are
+/// formally TT/TDB-based.
 const J2000_JD: f64 = 2_451_545.0;
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 const ARCSEC_TO_RAD: f64 = DEG_TO_RAD / 3600.0;
+/// Astronomical Unit in kilometres, IAU 2012 Resolution B2 exact definition.
 const ASTRONOMICAL_UNIT_KM: f64 = 149_597_870.7;
-const EARTH_EQUATORIAL_RADIUS_KM: f64 = 6_378.14;
+/// WGS84 semi-major axis in kilometres (NGA.STND.0036 / EPSG:7030). Used with
+/// geodetic observer latitude for first-order topocentric parallax.
+const EARTH_EQUATORIAL_RADIUS_KM: f64 = 6_378.137;
+/// WGS84 flattening, exact reciprocal 298.257223563.
 const EARTH_FLATTENING: f64 = 1.0 / 298.257_223_563;
+/// Nominal solar radius in kilometres, IAU 2015 Resolution B3.
 const SOLAR_RADIUS_KM: f64 = 695_700.0;
+/// Mean lunar radius in kilometres, IAU/IAG Working Group cartographic value.
 const LUNAR_RADIUS_KM: f64 = 1_737.4;
 
 /// Apparent geocentric Sun state for rendering.

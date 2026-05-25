@@ -1,5 +1,7 @@
-// Tonemap pass — Pattanaik/Ferwerda-inspired rod-cone adaptation feeding
-// Reinhard 2002 §3.3 photographic display mapping.
+// Tonemap pass — a Pattanaik/Ferwerda-inspired rod-cone approximation feeding
+// Reinhard 2002 §3.3 photographic display mapping. This is not the full
+// Pattanaik 1998 multiscale local-adaptation model; ROADMAP tracks that
+// standards-bearing upgrade separately.
 //
 // The pipeline:
 //
@@ -163,9 +165,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let w_phot = mesopic_photopic_weight(la_cd_m2);
     let key = mix(KEY_SCOTOPIC, KEY_PHOTOPIC, w_phot);
 
-    // Pattanaik 1998 separates rod and cone responses: as local fragment
+    // Approximate Pattanaik 1998's rod/cone separation: as local fragment
     // luminance falls below the CIE mesopic range, chroma is replaced by a
     // V'(λ)-weighted scotopic signal rather than tone-mapping RGB unchanged.
+    // The full multiscale/local-adaptation model remains Phase 1' follow-up.
     let l_frag_cd_m2 = hdr_flux_to_cd_m2(dot(hdr, PHOTOPIC_LUMA), zeropoint);
     let w_cone = mesopic_photopic_weight(l_frag_cd_m2);
     let rod_signal = dot(hdr, SCOTOPIC_LUMA);

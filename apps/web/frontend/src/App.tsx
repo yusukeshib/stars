@@ -42,6 +42,7 @@ const numberParam = (
 ): number => {
   const raw = params.get(key);
   if (raw === null) return fallback;
+  if (raw.trim() === "") return fallback;
   const value = Number(raw);
   return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
 };
