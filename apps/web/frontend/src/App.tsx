@@ -52,8 +52,8 @@ export function App() {
     return () => clearTimeout(handle);
   }, [observer, view, overlays]);
 
-  // Clock always ticks. When the user picks a custom moment via the settings
-  // panel we simply rebase `timeMs`; the same loop keeps advancing from there.
+  // Clock always ticks. When the user picks a custom moment via the quick time
+  // popup we simply rebase `timeMs`; the same loop keeps advancing from there.
   useEffect(() => {
     let raf = 0;
     const step = (now: number) => {

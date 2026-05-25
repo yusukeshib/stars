@@ -14,9 +14,8 @@ type Props = {
   onChange: (next: OverlayConfig) => void;
 };
 
-/// Checkbox list of overlay layers plus grid-step and opacity sliders. The
-/// layer set and naming mirror the CLI's `--overlays` flag exactly, so users
-/// who consult the CLI help find the same vocabulary here.
+/// Checkbox list of overlay layers plus grid-step and opacity sliders. The web
+/// UI exposes the useful line/grid overlays while hiding legacy cardinal marks.
 export function OverlayToggles({ config, onChange }: Props) {
   const toggle = (layer: OverlayLayer) => {
     const has = config.layers.includes(layer);

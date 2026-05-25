@@ -169,7 +169,9 @@ export function StarCanvas({ observer, view, timeMs, overlays, onDrag, onWheel }
         onDrag(-dx * scale, dy * scale);
       }}
       onPointerUp={(e) => {
-        e.currentTarget.releasePointerCapture(e.pointerId);
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
         activePointers.current.delete(e.pointerId);
         pinchDistance.current = null;
 
