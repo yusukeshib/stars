@@ -23,7 +23,7 @@
 - 地球外の `galactic-north` / `custom-external` 視点による、IAU 銀河座標系パーセクスケールカメラからの局所的な天の川円盤表示。
 - OTA と接眼レンズの組み合わせから倍率、プレートスケール、射出瞳、実視野を求める望遠鏡接眼レンズシミュレーション。
 - CLI / desktop / web で共有できる schema-versioned JSON session と、短い共有向けの Web session URL。
-- 決定的な validation / demo 用 scene preset と、任意実行の screenshot review 用 gallery。
+- 決定的な validation / demo 用 scene preset、notebook 再現性 example、任意実行の screenshot review 用 gallery。
 - 引用用 metadata、Zenodo release archive 用 metadata、モデル選択を確認する standards-compliance page。
 
 ## CLI 生成ギャラリー
@@ -97,15 +97,16 @@ scripts            カタログ取得・README 画像生成・WASM build helper
 - [`docs/standards-compliance.md`](docs/standards-compliance.md) — 実装済みの IAU/SOFA 系 routine、近似、non-goal。
 - [`docs/scene-presets.md`](docs/scene-presets.md) — 決定的な named scene と JSON session export workflow。
 - [`docs/validation-gallery.md`](docs/validation-gallery.md) — 生成式 demo gallery と任意実行の screenshot regression workflow。
+- [`examples/notebooks`](examples/notebooks) — JSON session の再生、固定された天文 table の比較、CLI rendering を行う Jupyter / Python example。
 
 ## 現在の開発フォーカス
 
-Phase 1、Phase 1'、Phase 2、citation / standards documentation、Phase 4 の全天投影、Phase 4 の地球外・銀河視点、そして Phase 4 の望遠鏡接眼レンズシミュレーションは実装済みです。次は、見た目の追加だけでなく、再現性・検証可能性・教育用途を強くする順番で進めるのが自然です。
+Phase 1、Phase 1'、Phase 2、citation / standards documentation、notebook 再現性 example、Phase 4 の全天投影、Phase 4 の地球外・銀河視点、そして Phase 4 の望遠鏡接眼レンズシミュレーションは実装済みです。次は、残りの platform 基盤を固めつつ、見た目と UX を小さく拡張していくのが自然です。
 
-1. CLI / session output を使った早期の notebook example。
-2. Gaia / Tycho / Hipparcos ingest の前に、catalog backend のスケーリング設計。
-3. Messier / NGC などの deep-sky overlay。
-4. accessibility、観測計画機能の polish、変光星 light curve。
+1. Gaia / Tycho / Hipparcos ingest の前に、catalog backend のスケーリング設計。
+2. Messier / NGC などの deep-sky overlay。
+3. accessibility、観測計画機能の polish、変光星 light curve。
+4. Phase 3 platform 向けの Python bindings と headless server mode。
 
 ## 開発に参加する場合
 

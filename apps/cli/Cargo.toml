@@ -7,6 +7,10 @@ edition = "2021"
 name = "stars"
 path = "src/main.rs"
 
+[[example]]
+name = "session-table"
+path = "examples/session_table.rs"
+
 [dependencies]
 renderer = { path = "../../crates/renderer" }
 astronomy = { path = "../../crates/astronomy" }

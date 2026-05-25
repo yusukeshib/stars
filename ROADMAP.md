@@ -67,10 +67,10 @@ large new data integrations, then continue the remaining visual Phase 4 work in
 small, shippable slices. Phase 1, Phase 1', Phase 2, the core stellar
 apparent-place corrections, full-sky projections, the fixed external galactic
 viewpoint, telescope eyepiece simulation, custom external viewpoint origins,
-scene presets, the validation/demo gallery workflow, citation metadata, and the
-standards-compliance page are now complete. A row is `✅ done` only when the
-model named in its references is implemented, documented, tested, and wired into
-all relevant hosts.
+scene presets, notebook reproducibility examples, the validation/demo gallery
+workflow, citation metadata, and the standards-compliance page are now complete.
+A row is `✅ done` only when the model named in its references is implemented,
+documented, tested, and wired into all relevant hosts.
 
 ### Atmosphere implementation ladder
 
@@ -92,19 +92,19 @@ is split into independently shippable rungs:
    with the model limits.
 
 There are currently no `⏳ next` atmosphere rows; the active queue has moved to
-notebook examples, catalog scaling design, and Phase 4 visual polish.
+catalog scaling design and Phase 4 visual polish.
 
 ### Recommended near-term sequence
 
 These items are intentionally ordered before the largest catalog additions so
 future features have stable scenes, source manifests, and review hooks:
 
-1. **Notebook reproducibility examples:** examples that use CLI/session outputs
-   before full Python bindings land.
-2. **Catalog scaling design:** document the backend, identifier, LOD,
+1. **Catalog scaling design:** document the backend, identifier, LOD,
    streaming, and WASM-subset plan before Gaia / Tycho / Hipparcos ingest.
-3. **Visual and UX polish:** deep-sky overlays, accessibility, observation
+2. **Visual and UX polish:** deep-sky overlays, accessibility, observation
    planning polish, variable-star light curves, and eyepiece preset provenance.
+3. **Remaining Phase 3 platform hooks:** Python bindings and headless server
+   mode once the catalog/backend shape is clear.
 
 ---
 
@@ -175,7 +175,7 @@ Columns:
 | `P3-11` | 3 | **Validation / demo gallery + visual regression** | Render preset PNGs with fixed inputs; publish a human gallery and run perceptual or tolerance-based screenshot comparisons where CI can do so reliably | ✅ done (`docs/validation-gallery.md`, `scripts/render-validation-gallery.sh`) |
 | `P3-12` | 3 | **Guided education mode** | Cross-host tour content explaining horizon, equator, ecliptic, galactic plane, time motion, twilight, and projection choices | ⬜ |
 | `P3-13` | 3 | **Data provenance manifest** | Machine-readable manifest recording source URL/archive ID, version, license, local path, hash, preprocessing command, and fields used for every data artifact | ⬜ |
-| `P3-14` | 3 | **Notebook examples** | Reproducible examples that load JSON sessions, compare tabular astronomy outputs, and render the same scene as web / CLI | ⬜ |
+| `P3-14` | 3 | **Notebook examples** | Reproducible examples that load JSON sessions, compare tabular astronomy outputs, and render the same scene as web / CLI | ✅ done (`examples/notebooks`, `apps/cli/examples/session_table.rs`) |
 | `P3-15` | 3 | **Public demo gallery** | Curated shareable scenes such as Tokyo tonight, summer Milky Way, lunar eclipse aid, and galactic-north view, backed by stable session files | ⬜ |
 | `P4-01` | 4 | **Full-sky projections** | Mollweide, Aitoff, and Hammer all-sky maps selectable in CLI, desktop, and web; perspective remains the default | ✅ done (`renderer::SkyProjection`, `shaders/{star,skyglow,overlay}.wgsl`, `apps/{cli,viewer,web}`) |
 | `P4-02` | 4 | **Out-of-Earth viewpoint** | `SkyViewpoint::GalacticNorth` moves the camera above the IAU galactic plane, places HYG stars by parsec distance, and draws an analytic top-down Milky Way disc in CLI, desktop, and web | ✅ done (`renderer::SkyViewpoint`, `shaders/{star,skyglow}.wgsl`, `apps/{cli,viewer,web}`) |

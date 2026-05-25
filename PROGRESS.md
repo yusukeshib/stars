@@ -16,9 +16,9 @@ Implemented phase groups:
 - Phase 1' physical dark-sky visual pipeline.
 - Phase 2 time systems, apparent-place corrections, atmosphere, solar-system
   bodies, and planning UI.
-- Phase 3 schema-versioned JSON sessions, deterministic scene presets, a
-  validation/demo gallery workflow, citation metadata, and standards-compliance
-  notes.
+- Phase 3 schema-versioned JSON sessions, deterministic scene presets,
+  notebook reproducibility examples, a validation/demo gallery workflow,
+  citation metadata, and standards-compliance notes.
 - Phase 4 full-sky projections and external galactic viewpoint.
 
 Still open:
@@ -319,12 +319,12 @@ Validation:
 - the standards page cross-references the implementation files that contain the
   pinned numerical tests.
 
-### Scene presets and validation gallery
+### Scene presets, notebook examples, and validation gallery
 
 Implemented deterministic Phase 3 scene presets for reproducible demos,
-validation screenshots, and bug reports. Native hosts can list or load presets
-with `--list-presets` / `--preset`; the CLI can export any effective preset or
-scene as JSON with `--write-session --write-session-only`.
+validation screenshots, notebooks, and bug reports. Native hosts can list or
+load presets with `--list-presets` / `--preset`; the CLI can export any
+effective preset or scene as JSON with `--write-session --write-session-only`.
 
 Preset coverage includes:
 
@@ -334,10 +334,13 @@ Preset coverage includes:
 - Hammer and Mollweide all-sky maps;
 - built-in galactic-north and custom external galactic viewpoints.
 
-The validation gallery workflow renders these presets to
-`docs/assets/validation/` and optionally compares regenerated PNGs against
-committed baselines when the rendering adapter is stable enough for screenshot
-CI.
+The notebook workflow in `examples/notebooks` loads the same JSON sessions,
+uses the `stars-cli` `session-table` example to produce tabular Sun/Moon/planet
+outputs, compares those outputs with committed CSV fixtures, and can render the
+same scene through the CLI without requiring Python bindings. The validation
+gallery workflow renders presets to `docs/assets/validation/` and optionally
+compares regenerated PNGs against committed baselines when the rendering adapter
+is stable enough for screenshot CI.
 
 Primary implementation areas:
 
@@ -347,12 +350,16 @@ Primary implementation areas:
 - `scripts/export-scene-presets.sh`;
 - `scripts/render-validation-gallery.sh`;
 - `docs/scene-presets.md`;
-- `docs/validation-gallery.md`.
+- `docs/validation-gallery.md`;
+- `apps/cli/examples/session_table.rs`;
+- `examples/notebooks`.
 
 Validation:
 
 - host-common tests pin preset metadata uniqueness and JSON session
   round-trips;
+- `make notebook-check` compares notebook astronomy tables with pinned CSV
+  fixtures without requiring Jupyter, a star catalog, or a GPU;
 - the gallery script provides repeatable human screenshots and opt-in exact
   screenshot regression for pinned GPU/driver environments.
 
