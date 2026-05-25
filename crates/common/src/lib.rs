@@ -14,8 +14,8 @@ use astronomy::TimeScales;
 use catalog::load_from_file;
 use clap::ValueEnum;
 use renderer::{
-    build_star_instance, Atmosphere, AtmospherePreset, OverlayConfig, OverlayKind, SkyProjection,
-    SkyViewpoint, StarInstance,
+    build_star_instance, Atmosphere, AtmospherePreset, ExternalViewpoint, OverlayConfig,
+    OverlayKind, SkyProjection, SkyViewpoint, StarInstance,
 };
 
 /// CLI-facing mirror of [`OverlayKind`] that derives [`ValueEnum`] so `clap`
@@ -105,6 +105,7 @@ impl From<ProjectionArg> for SkyProjection {
 pub enum ViewpointArg {
     Earth,
     GalacticNorth,
+    CustomExternal,
 }
 
 impl std::fmt::Display for ViewpointArg {
@@ -118,6 +119,7 @@ impl From<ViewpointArg> for SkyViewpoint {
         match v {
             ViewpointArg::Earth => SkyViewpoint::Earth,
             ViewpointArg::GalacticNorth => SkyViewpoint::GalacticNorth,
+            ViewpointArg::CustomExternal => SkyViewpoint::CustomExternal,
         }
     }
 }
@@ -168,6 +170,45 @@ pub fn overlay_config_from_args(
         grid_step_deg,
         opacity: overlay_opacity.clamp(0.0, 1.0),
     }
+}
+
+/// Optional custom external-viewpoint controls parsed by native hosts.
+///
+/// Coordinates use IAU galactic Cartesian parsecs: Sun at `(0, 0, 0)`, `+X`
+/// toward `l=0°`, `+Y` toward `l=90°`, and `+Z` toward the north galactic pole.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ExternalViewpointOverrides {
+    pub origin_pc: Option<[f32; 3]>,
+    pub target_pc: Option<[f32; 3]>,
+    pub up: Option<[f32; 3]>,
+}
+
+impl ExternalViewpointOverrides {
+    pub fn has_any(self) -> bool {
+        self.origin_pc.is_some() || self.target_pc.is_some() || self.up.is_some()
+    }
+}
+
+pub fn viewpoint_from_args(
+    viewpoint: ViewpointArg,
+    overrides: ExternalViewpointOverrides,
+) -> (SkyViewpoint, ExternalViewpoint) {
+    let mut external = ExternalViewpoint::default();
+    if let Some(origin_pc) = overrides.origin_pc {
+        external.origin_pc = origin_pc;
+    }
+    if let Some(target_pc) = overrides.target_pc {
+        external.target_pc = target_pc;
+    }
+    if let Some(up) = overrides.up {
+        external.up = up;
+    }
+    let viewpoint = if overrides.has_any() {
+        SkyViewpoint::CustomExternal
+    } else {
+        viewpoint.into()
+    };
+    (viewpoint, external)
 }
 
 /// Optional atmosphere overrides parsed by native hosts.
@@ -337,12 +378,35 @@ mod tests {
 
     #[test]
     fn viewpoint_arg_round_trips() {
-        for arg in [ViewpointArg::Earth, ViewpointArg::GalacticNorth] {
+        for arg in [
+            ViewpointArg::Earth,
+            ViewpointArg::GalacticNorth,
+            ViewpointArg::CustomExternal,
+        ] {
             let viewpoint: SkyViewpoint = arg.into();
             let s = viewpoint.as_kebab_str();
             assert_eq!(SkyViewpoint::from_kebab_str(s), Some(viewpoint));
             assert_eq!(format!("{arg}"), s);
         }
+    }
+
+    #[test]
+    fn custom_external_viewpoint_overrides_select_custom_mode() {
+        let (viewpoint, external) = viewpoint_from_args(
+            ViewpointArg::Earth,
+            ExternalViewpointOverrides {
+                origin_pc: Some([1.0, 2.0, 3.0]),
+                target_pc: None,
+                up: Some([0.0, 0.0, 1.0]),
+            },
+        );
+        assert_eq!(viewpoint, SkyViewpoint::CustomExternal);
+        assert_eq!(external.origin_pc, [1.0, 2.0, 3.0]);
+        assert_eq!(
+            external.target_pc,
+            ExternalViewpoint::GALACTIC_NORTH.target_pc
+        );
+        assert_eq!(external.up, [0.0, 0.0, 1.0]);
     }
 
     #[test]

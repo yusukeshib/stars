@@ -117,9 +117,14 @@ All crates should preserve these conventions:
 - Catalog positions are J2000 / ICRS-like unit-sphere Cartesian coordinates:
   `x = cos δ cos α`, `y = cos δ sin α`, `z = sin δ`.
 - Catalog distances are stored in parsecs from HYG's `dist` column. The
-  Earth-centred sky dome treats stars as directions at infinity; the external
-  galactic viewpoint multiplies the J2000 direction by this distance and
-  rotates it into IAU galactic Cartesian coordinates.
+  Earth-centred sky dome treats stars as directions at infinity; external
+  viewpoints multiply the J2000 direction by this distance and rotate it into
+  IAU galactic Cartesian coordinates. In that frame the Sun is `(0, 0, 0)`,
+  `+X` points to galactic longitude `l=0°`, `+Y` to `l=90°`, and `+Z` to the
+  north galactic pole. `SkyViewpoint::GalacticNorth` is the preset origin
+  `(0, 0, 30000)` pc looking at the Sun with up `(0, 1, 0)`;
+  `SkyViewpoint::CustomExternal` uses the host-provided origin, target, and up
+  vectors in the same frame.
 - HYG proper motion is converted into a Cartesian tangent vector in radians per
   Julian year.
 - Civil input time is UTC.
@@ -145,8 +150,8 @@ A typical frame is:
    with perceptual radius, brightness, colour, and proper-motion fields.
 4. Host creates or resizes the `wgpu` surface / target texture.
 5. `Camera` combines `Observer`, `LocalView`, aspect ratio, `SkyProjection`,
-   `SkyViewpoint`, correction terms, solar-system apparent directions, and
-   atmosphere settings into GPU uniforms.
+   `SkyViewpoint`, optional `ExternalViewpoint`, correction terms,
+   solar-system apparent directions, and atmosphere settings into GPU uniforms.
 6. `Renderer::render` draws skyglow / bodies / stars into an HDR target,
    tonemaps to the output view, then composites overlay lines and labels in
    LDR screen space.
@@ -162,9 +167,9 @@ The exact pass layout can change, but responsibilities should stay separated:
   sunlit scattering, twilight, moonlit sky, and solar-system disks. Perspective
   reconstructs rays through the inverse view-projection matrix; all-sky modes
   invert the selected Mollweide / Aitoff / Hammer map before rotating the ray
-  back to equatorial coordinates. In `SkyViewpoint::GalacticNorth`, this pass
-  instead ray-marches the top-down galactic plane intersection and draws a
-  compact analytic Milky Way disc for external context.
+  back to equatorial coordinates. In external viewpoints, this pass instead
+  ray-marches the galactic-plane intersection from the configured parsec-scale
+  origin and draws a compact analytic Milky Way disc for context.
 - **Star pass**: per-star proper motion, corrections, refraction, extinction,
   projection, PSF/glare, and HDR accumulation. In the external galactic
   viewpoint, atmospheric effects are skipped and stars are projected as parsec
@@ -209,7 +214,12 @@ let view = LocalView {
 };
 let mut camera = Camera::new(observer, view, width as f32 / height as f32);
 camera.projection = SkyProjection::Perspective; // or Mollweide / Aitoff / Hammer
-camera.viewpoint = SkyViewpoint::Earth; // or GalacticNorth for a top-down Milky Way map
+camera.viewpoint = SkyViewpoint::Earth; // or GalacticNorth / CustomExternal
+camera.external_viewpoint = renderer::ExternalViewpoint::new(
+    [8_200.0, 0.0, 2_000.0], // origin_pc in IAU galactic Cartesian parsecs
+    [0.0, 0.0, 0.0],         // target_pc
+    [0.0, 0.0, 1.0],         // up vector in the same frame
+);
 ```
 
 Interactive hosts should refresh time every frame, or expose an explicit pause /

@@ -14,6 +14,7 @@ import {
   isSkyProjection,
   isSkyViewpoint,
   type AtmosphereConfig,
+  type ExternalViewpointConfig,
   type Observer,
   type OverlayConfig,
   type PlanetsConfig,
@@ -54,6 +55,22 @@ const numberParam = (
   const value = Number(raw);
   return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
 };
+
+const vec3Param = (
+  params: URLSearchParams,
+  key: string,
+  fallback: { x: number; y: number; z: number },
+  min: number,
+  max: number,
+): { x: number; y: number; z: number } => {
+  const parts = (params.get(key) ?? "").split(",").map((part) => Number(part));
+  if (parts.length !== 3 || parts.some((value) => !Number.isFinite(value))) return fallback;
+  const clamp = (value: number) => Math.max(min, Math.min(max, value));
+  return { x: clamp(parts[0]), y: clamp(parts[1]), z: clamp(parts[2]) };
+};
+
+const vec3SearchParam = ({ x, y, z }: { x: number; y: number; z: number }): string =>
+  `${x.toFixed(1)},${y.toFixed(1)},${z.toFixed(1)}`;
 
 type UrlSession = {
   observer?: Observer;
@@ -130,6 +147,9 @@ function loadSessionFromUrl(): UrlSession | null {
     "planets",
     "projection",
     "viewpoint",
+    "originPc",
+    "targetPc",
+    "up",
     "atmosphere",
     "atmospherePreset",
     "turbidity",
@@ -161,6 +181,12 @@ function loadSessionFromUrl(): UrlSession | null {
   const jd = Number(params.get("jd"));
   const projectionParam = params.get("projection");
   const viewpointParam = params.get("viewpoint");
+  const hasExternalViewpointParam = params.has("originPc") || params.has("targetPc") || params.has("up");
+  const external: ExternalViewpointConfig = {
+    originPc: vec3Param(params, "originPc", DEFAULT_PROJECTION_CONFIG.external.originPc, -1_000_000, 1_000_000),
+    targetPc: vec3Param(params, "targetPc", DEFAULT_PROJECTION_CONFIG.external.targetPc, -1_000_000, 1_000_000),
+    up: vec3Param(params, "up", DEFAULT_PROJECTION_CONFIG.external.up, -10, 10),
+  };
   return {
     observer,
     view,
@@ -173,7 +199,10 @@ function loadSessionFromUrl(): UrlSession | null {
         : DEFAULT_PROJECTION_CONFIG.projection,
       viewpoint: isSkyViewpoint(viewpointParam)
         ? viewpointParam
-        : DEFAULT_PROJECTION_CONFIG.viewpoint,
+        : hasExternalViewpointParam
+          ? "custom-external"
+          : DEFAULT_PROJECTION_CONFIG.viewpoint,
+      external,
     },
     timeMs: Number.isFinite(jd) ? (jd - 2440587.5) * 86400000 : undefined,
   };
@@ -202,6 +231,9 @@ function sessionUrl({ observer, view, overlays, atmosphere, planets, projection,
   url.searchParams.set("planets", planets.enabled ? "on" : "off");
   url.searchParams.set("projection", projection.projection);
   url.searchParams.set("viewpoint", projection.viewpoint);
+  url.searchParams.set("originPc", vec3SearchParam(projection.external.originPc));
+  url.searchParams.set("targetPc", vec3SearchParam(projection.external.targetPc));
+  url.searchParams.set("up", vec3SearchParam(projection.external.up));
   url.searchParams.set("atmosphere", atmosphere.enabled ? "on" : "off");
   url.searchParams.set("atmospherePreset", atmosphere.preset);
   url.searchParams.set("turbidity", atmosphere.turbidity.toFixed(1));

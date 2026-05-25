@@ -16,6 +16,7 @@ import {
   type ProjectionConfig,
   type SkyProjection,
   type SkyViewpoint,
+  type Vec3,
   type View,
 } from "../observer";
 import { OverlayToggles } from "./OverlayToggles";
@@ -596,6 +597,38 @@ function SettingsPanel({
           ))}
         </select>
 
+        {projection.viewpoint === "custom-external" && (
+          <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+            <Vec3NumberRow
+              id="external-origin-pc"
+              label="Origin pc (X, Y, Z)"
+              value={projection.external.originPc}
+              min={-1_000_000}
+              max={1_000_000}
+              step={100}
+              onChange={(originPc) => onSetProjection({ ...projection, external: { ...projection.external, originPc } })}
+            />
+            <Vec3NumberRow
+              id="external-target-pc"
+              label="Target pc (X, Y, Z)"
+              value={projection.external.targetPc}
+              min={-1_000_000}
+              max={1_000_000}
+              step={100}
+              onChange={(targetPc) => onSetProjection({ ...projection, external: { ...projection.external, targetPc } })}
+            />
+            <Vec3NumberRow
+              id="external-up"
+              label="Up vector (X, Y, Z)"
+              value={projection.external.up}
+              min={-10}
+              max={10}
+              step={0.1}
+              onChange={(up) => onSetProjection({ ...projection, external: { ...projection.external, up } })}
+            />
+          </div>
+        )}
+
         <label htmlFor="sky-projection" style={{ ...labelStyle, marginTop: 10 }}>
           Screen projection
         </label>
@@ -613,7 +646,7 @@ function SettingsPanel({
           ))}
         </select>
         <p style={helperTextStyle}>
-          Earth full-sky maps ignore FOV but still rotate with azimuth/altitude. The galactic viewpoint uses a perspective parsec-scale camera above the Milky Way disc and hides Earth-local overlays.
+          Earth full-sky maps ignore FOV but still rotate with azimuth/altitude. External viewpoints use a perspective parsec-scale camera in IAU galactic Cartesian coordinates (Sun at 0,0,0; +X l=0°; +Y l=90°; +Z north galactic pole) and hide Earth-local overlays.
         </p>
       </SettingCard>
 
@@ -815,6 +848,53 @@ function PlanningPanel({ planning }: { planning: PlanningTable }) {
         ))}
       </div>
     </SettingCard>
+  );
+}
+
+function Vec3NumberRow({
+  id,
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: Vec3;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: Vec3) => void;
+}) {
+  const updateAxis = (axis: keyof Vec3, raw: string) => {
+    if (raw === "") return;
+    const next = Number(raw);
+    if (Number.isFinite(next)) {
+      onChange({ ...value, [axis]: Math.max(min, Math.min(max, next)) });
+    }
+  };
+  return (
+    <div>
+      <label style={labelStyle}>{label}</label>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+        {(["x", "y", "z"] as const).map((axis) => (
+          <input
+            key={axis}
+            aria-label={`${label} ${axis}`}
+            id={`${id}-${axis}`}
+            type="number"
+            min={min}
+            max={max}
+            step={step}
+            value={value[axis]}
+            onChange={(e) => updateAxis(axis, e.target.value)}
+            style={inputStyle}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
