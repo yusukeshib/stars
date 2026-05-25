@@ -10,7 +10,7 @@ use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, LocalView, OverlayConfig,
     OverlayKind, Renderer, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
-use stars_host_common::{parse_time_to_jd, AtmospherePresetArg, OverlayArg};
+use stars_host_common::{parse_time_to_time_scales, AtmospherePresetArg, OverlayArg};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
@@ -99,7 +99,7 @@ fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();
 
-    let start_jd = parse_time_to_jd(args.time.as_deref())?;
+    let start_jd = parse_time_to_time_scales(args.time.as_deref())?.jd_utc;
     let stars = load_from_file(&args.catalog)
         .with_context(|| format!("Reading catalog at {}", args.catalog.display()))?;
     log::info!("Loaded {} stars", stars.len());

@@ -8,7 +8,7 @@ use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, LocalView, OverlayConfig,
     OverlayKind, Renderer, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
-use stars_host_common::{parse_time_to_jd, AtmospherePresetArg, OverlayArg};
+use stars_host_common::{parse_time_to_time_scales, AtmospherePresetArg, OverlayArg};
 
 /// Render the night sky as seen from a given observer to a PNG.
 #[derive(Parser, Debug)]
@@ -146,10 +146,17 @@ fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();
 
-    let jd = parse_time_to_jd(args.time.as_deref())?;
-    log::info!("Observer lat={} lng={} jd={}", args.lat, args.lng, jd);
+    let time = parse_time_to_time_scales(args.time.as_deref())?;
+    log::info!(
+        "Observer lat={} lng={} jd_utc={} jd_ut1={} jd_tdb={}",
+        args.lat,
+        args.lng,
+        time.jd_utc,
+        time.jd_ut1,
+        time.jd_tdb
+    );
 
-    let observer = Observer::from_degrees(args.lat, args.lng, jd);
+    let observer = Observer::from_degrees_with_time(args.lat, args.lng, time);
     let view = LocalView {
         azimuth_rad: (args.azimuth as f32).to_radians(),
         altitude_rad: (args.altitude as f32).to_radians(),

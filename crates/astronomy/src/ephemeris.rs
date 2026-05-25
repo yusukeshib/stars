@@ -8,12 +8,7 @@
 
 use glam::Vec3;
 
-use crate::{lmst_radians, Observer};
-
-/// J2000.0 epoch, JD(TT) 2451545.0. The project currently passes JD(UT1≈UTC)
-/// through most APIs; see the function-level notes below where formulae are
-/// formally TT/TDB-based.
-const J2000_JD: f64 = 2_451_545.0;
+use crate::{lmst_radians, Observer, J2000_JD};
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 /// Astronomical Unit in kilometres, IAU 2012 Resolution B2 exact definition.
 const ASTRONOMICAL_UNIT_KM: f64 = 149_597_870.7;
@@ -119,7 +114,7 @@ fn ra_dec_from_equatorial_vector(v: [f64; 3]) -> (f64, f64, f64) {
 /// (ε₀ = 23°26′21.448″ at J2000.0, with century terms in Julian centuries
 /// from J2000). It is adequate for the current visual VSOP87/FK5 + lunar
 /// series inputs, but it is **not** the final IAU 2006 precession-nutation
-/// stack tracked in ROADMAP Phase 2.
+/// stack tracked in README Phase 2.
 fn mean_obliquity_rad(julian_date: f64) -> f64 {
     let t = (julian_date - J2000_JD) / 36_525.0;
     let mean_obliquity_arcsec = 21.448 - t * (46.8150 + t * (0.00059 - t * 0.001813));
@@ -146,7 +141,7 @@ fn ecliptic_to_equatorial_vector(
 }
 
 fn observer_equatorial_position_km(observer: Observer) -> [f64; 3] {
-    let lst = lmst_radians(observer.julian_date, observer.longitude_rad);
+    let lst = lmst_radians(observer.time.jd_ut1, observer.longitude_rad);
     let (sin_lat, cos_lat) = observer.latitude_rad.sin_cos();
     let (sin_lst, cos_lst) = lst.sin_cos();
     // Interpret `Observer::latitude_rad` as geodetic latitude and place the
@@ -164,12 +159,12 @@ fn observer_equatorial_position_km(observer: Observer) -> [f64; 3] {
     ]
 }
 
-/// Apparent geocentric position of the Sun for a Julian Date.
+/// Apparent geocentric position of the Sun for a dynamical Julian Date.
 ///
 /// The geocentric ecliptic longitude/distance come from the `astro` crate's
 /// VSOP87 Earth solution (`astro::sun::geocent_ecl_pos`) with the FK5 correction
-/// applied. The project still threads JD(UT1≈UTC) until the Time Systems row
-/// lands; callers that already have TT/TDB can pass that Julian date here.
+/// applied. Pass `TimeScales::jd_tdb` (or TT for the current low-precision
+/// visual model) rather than UTC/UT1 when a full time-scale bundle is available.
 pub fn apparent_sun(julian_date: f64) -> SunApparent {
     let (sun_ecl, distance_au) = astro::sun::geocent_ecl_pos(julian_date);
     let (lambda, beta) = astro::sun::ecl_coords_to_FK5(julian_date, sun_ecl.long, sun_ecl.lat);
@@ -192,7 +187,7 @@ pub fn apparent_sun(julian_date: f64) -> SunApparent {
 /// Sun/Moon plumbing consistently observer-local. The underlying geocentric
 /// solar longitude remains the VSOP87/FK5 value from [`apparent_sun`].
 pub fn apparent_sun_topocentric(observer: Observer) -> SunApparent {
-    let geo = apparent_sun(observer.julian_date);
+    let geo = apparent_sun(observer.time.jd_tdb);
     let dir = equatorial_unit_vector_f64(geo.right_ascension_rad, geo.declination_rad);
     let distance_km = geo.distance_au * ASTRONOMICAL_UNIT_KM;
     let observer_km = observer_equatorial_position_km(observer);
@@ -254,7 +249,7 @@ pub fn apparent_moon(julian_date: f64) -> MoonApparent {
 /// horizon, which is large enough to matter for moonlit-sky directionality,
 /// disk rendering, and rise/set timing.
 pub fn apparent_moon_topocentric(observer: Observer) -> MoonApparent {
-    let geo = apparent_moon(observer.julian_date);
+    let geo = apparent_moon(observer.time.jd_tdb);
     let dir = equatorial_unit_vector_f64(geo.right_ascension_rad, geo.declination_rad);
     let observer_km = observer_equatorial_position_km(observer);
     let topo = [
@@ -322,7 +317,7 @@ mod tests {
     #[test]
     fn topocentric_moon_applies_diurnal_parallax() {
         let observer = Observer::from_degrees(35.0, 139.0, 2_460_000.5);
-        let geo = apparent_moon(observer.julian_date);
+        let geo = apparent_moon(observer.time.jd_tdb);
         let topo = apparent_moon_topocentric(observer);
         let separation = angular_separation_rad(
             geo.right_ascension_rad,
@@ -339,7 +334,7 @@ mod tests {
     #[test]
     fn topocentric_sun_parallax_is_small_but_finite() {
         let observer = Observer::from_degrees(35.0, 139.0, 2_460_000.5);
-        let geo = apparent_sun(observer.julian_date);
+        let geo = apparent_sun(observer.time.jd_tdb);
         let topo = apparent_sun_topocentric(observer);
         let separation_arcsec = angular_separation_rad(
             geo.right_ascension_rad,

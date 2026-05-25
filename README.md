@@ -56,11 +56,11 @@ topocentric positions. The goal is for sky colour to be driven by physical
 illuminants and atmosphere parameters rather than by hard-coded gradients.
 
 **Current highest priority:** continue the remaining Phase 2 positional-
-precision work (time systems, precession, nutation, aberration, proper motion,
-and refraction). The Phase 1' dark-sky atmosphere and the Phase 2 atmosphere
-illuminant/scattering ladder are now complete. A row is `✅ done` only when the
-model named in its references is implemented, documented, tested, and wired into
-all hosts.
+precision work (precession, nutation, aberration, proper motion, and
+refraction). The Phase 1' dark-sky atmosphere, Phase 2 time systems, and the
+Phase 2 atmosphere illuminant/scattering ladder are now complete. A row is
+`✅ done` only when the model named in its references is implemented,
+documented, tested, and wired into all hosts.
 
 ### Atmosphere implementation ladder
 
@@ -119,7 +119,7 @@ Columns:
 | `P1P-09` | 1' | **Zodiacal light + airglow + interstellar dust** — Leinert-inspired sun-relative zodiacal-light band plus antisolar gegenschein, dark-site airglow floor, and analytic SFD-inspired dust extinction are summed in S10 flux units in both the Rust reference model and the skyglow shader | Leinert et al. 1998 §5 (ZL) and §7 (airglow); Schlegel, Finkbeiner & Davis 1998, ApJ 500, 525 (dust) | ✅ done (`astronomy::skyglow`, `shaders/skyglow.wgsl`) |
 | `P1P-10` | 1' | **Per-fragment rod/cone tone reproduction** — tonemap computes fragment-local adaptation luminance, selects rod/cone response from the local CIE 191 mesopic state, and feeds the result through the Reinhard keyed operator | Pattanaik et al. 1998, SIGGRAPH '98; Ferwerda et al. 1996, SIGGRAPH '96; Durand & Dorsey 2002 (edge-aware local-adaptation refinement) | ✅ done (`shaders/tonemap.wgsl`) |
 | `P1P-11` | 1' | **Catalogue colour pipeline upgrade** — B−V → T_eff → blackbody spectrum → CIE 1931 XYZ → sRGB, replacing the current piecewise-polynomial fit so the photopic input to the mesopic blend is physically calibrated | Ballesteros, F. J. 2012, EPL 97, 34008 | ✅ done (`catalog::color`) |
-| `P2-01` | 2 | **Time systems** — separate UTC, UT1, TT, TAI; expose TDB for ephemerides | Underpins everything below; pulls in a leap-second table | ⬜ |
+| `P2-01` | 2 | **Time systems** — separate UTC, UT1, TT, TAI; expose TDB for ephemerides | Built-in IERS/USNO leap-second table, explicit DUT1, TT, and approximate TDB exposed through `astronomy::TimeScales` and wired into all hosts | ✅ done (`astronomy::time`, `astronomy::Observer`) |
 | `P2-02` | 2 | **Precession** — star positions of date instead of J2000 | IAU 2006 (P03) | ⬜ |
 | `P2-03` | 2 | **Nutation** — ~9″ accuracy | IAU 2000A or 2000B | ⬜ |
 | `P2-04` | 2 | **Annual aberration** — up to 20″ | Standard formulas; folds into the equatorial→ENU matrix | ⬜ |

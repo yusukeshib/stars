@@ -1,7 +1,7 @@
 //! Lightweight astronomy helpers used by the renderer.
 //!
 //! Conventions:
-//! - Time is expressed as Julian Date (UT1 ≈ UTC, sub-second drift ignored).
+//! - Civil input time is UTC; Earth rotation uses UT1; ephemerides use TT/TDB.
 //! - Coordinates are J2000-ish equatorial: x = cos δ cos α, y = cos δ sin α, z = sin δ.
 //! - Local frame is ENU (East, North, Up) at the observer.
 //! - Angles internally are radians; helpers also accept degrees / hours where noted.
@@ -21,4 +21,8 @@ pub use ephemeris::{
 };
 pub use horizontal::{equatorial_to_horizontal, equatorial_to_horizontal_matrix, AltAz};
 pub use observer::Observer;
-pub use time::{gmst_radians, julian_date_from_unix_seconds, lmst_radians};
+pub use time::{
+    approximate_tdb_from_tt, gmst_radians, julian_date_from_unix_seconds, lmst_radians,
+    tai_minus_utc_seconds_at_jd_utc, LeapSecond, TimeScales, J2000_JD, LEAP_SECONDS,
+    SECONDS_PER_DAY, UNIX_EPOCH_JD,
+};

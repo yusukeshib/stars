@@ -42,15 +42,17 @@ If you just want to read the existing hosts as templates:
 
 Coordinate conventions (all crates agree):
 
-- Time is **Julian Date in UT** (`UT1 ≈ UTC`). Leap seconds, DUT1, TT, TAI,
-  and TDB are Phase 2 work; current DUT1 error can move sidereal quantities by
+- Time is represented by `astronomy::TimeScales`: UTC for civil input, UT1
+  for Earth rotation / sidereal time, TAI and TT from the built-in leap-second
+  table, and an approximate TDB for ephemerides. DUT1 defaults to zero unless a
+  caller supplies it, so unknown UT1−UTC can still move sidereal quantities by
   up to about 13.5 arcsec.
 - Catalog stars are **J2000/ICRS-like unit-sphere Cartesian**:
   `x = cos δ cos α, y = cos δ sin α, z = sin δ`. Precession, nutation,
   aberration, and proper motion are not applied yet.
 - The current Sun/Moon helpers are low-precision apparent/topocentric visual
   inputs for rendering daylight, moonlight, and disks. They are not the final
-  VSOP87/ELP2000, IAU-2006/2000A precision stack tracked in ROADMAP Phase 2.
+  VSOP87/ELP2000, IAU-2006/2000A precision stack tracked in README Phase 2.
 - Local frame is **ENU** (East, North, Up). Observer latitude is treated as
   geodetic for topocentric solar-system parallax and as astronomical/geographic
   for stellar ENU projection; the distinction is below Phase 1 star precision.
