@@ -42,8 +42,14 @@ struct CameraUniform {
     // Apparent Moon direction in equatorial coordinates. `w` is approximate
     // moonlight illuminance in lux before local horizon/airmass attenuation.
     moon_eq_illuminance: vec4<f32>,
-    // [angular_radius_rad, illuminated_fraction, phase_angle_rad, unused].
+    // [angular_radius_rad, illuminated_fraction, phase_angle_rad, earth_shadow_fraction].
     moon_disk: vec4<f32>,
+    // Mercury through Neptune: xyz = direction, w = angular radius.
+    planet_eq_radius: array<vec4<f32>, 7>,
+    // xyz = display colour, w = apparent visual magnitude.
+    planet_rgb_magnitude: array<vec4<f32>, 7>,
+    // [planet_count, planets_enabled, unused, unused].
+    planet_params: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -284,10 +290,43 @@ fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixe
         let moon_solid_angle = PI * moon_radius * moon_radius;
         let moon_luminance = max(camera.moon_eq_illuminance.w, 0.0) / max(moon_solid_angle, 1e-8);
         let phase = lunar_phase_lambert(ray_dir, moon_dir, sun_dir, moon_radius);
-        rgb += hdr_flux_from_cd_m2(vec3<f32>(1.01, 1.0, 0.82) * moon_luminance * phase, zeropoint)
+        let earth_shadow = clamp(camera.moon_disk.w, 0.0, 1.0);
+        rgb += hdr_flux_from_cd_m2(vec3<f32>(1.01, 1.0, 0.82) * moon_luminance * phase * (1.0 - 0.88 * earth_shadow), zeropoint)
             * disk_mask(ray_dir, moon_dir, moon_radius, pixel_sr);
     }
 
+    return rgb;
+}
+
+fn magnitude_to_flux(magnitude: f32, zeropoint: f32) -> f32 {
+    return exp(NEG_OH_FOUR_LN10 * (magnitude - zeropoint));
+}
+
+fn planet_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_sr: f32) -> vec3<f32> {
+    if camera.planet_params.y <= 0.0 || sin_alt <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+
+    var rgb = vec3<f32>(0.0);
+    let pixel_radius = sqrt(max(pixel_sr, 1e-12));
+    for (var i = 0; i < 7; i = i + 1) {
+        if f32(i) >= camera.planet_params.x {
+            break;
+        }
+        let dir = normalize(camera.planet_eq_radius[i].xyz);
+        if dot(dir, camera.zenith_eq.xyz) <= 0.0 {
+            continue;
+        }
+        let angular_radius = max(camera.planet_eq_radius[i].w, 1e-7);
+        // True disks are usually sub-pixel in a naked-eye planetarium view.
+        // Use a small pixel-scale minimum footprint so the integrated flux is
+        // visible and anti-aliased without pretending the physical radius is larger.
+        let visual_radius = max(angular_radius, pixel_radius * 1.25);
+        let footprint_pixels = max(PI * visual_radius * visual_radius / max(pixel_sr, 1e-12), 1.0);
+        let flux = magnitude_to_flux(camera.planet_rgb_magnitude[i].w, zeropoint);
+        let mask = disk_mask(ray_dir, dir, visual_radius, pixel_sr);
+        rgb += camera.planet_rgb_magnitude[i].xyz * flux * mask / footprint_pixels;
+    }
     return rgb;
 }
 
@@ -498,5 +537,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let twilight_radiance = twilight_sky_radiance(ray_dir, sin_alt, zeropoint);
     let day_radiance = sunlit_scattering_radiance(ray_dir, sin_alt, zeropoint);
     let disk_radiance = sun_moon_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
-    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance, 1.0);
+    let planet_radiance = planet_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
+    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance + planet_radiance, 1.0);
 }

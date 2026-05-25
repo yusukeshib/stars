@@ -1,12 +1,63 @@
+use std::cell::RefCell;
+
 use bytemuck::Zeroable;
 use wgpu::util::DeviceExt;
 
-use crate::camera::{Camera, CameraUniform};
+use crate::camera::{Camera, CameraUniform, PlanetUniforms};
 use crate::overlay::{OverlayConfig, OverlayRenderer};
 use crate::pipeline;
 use crate::skyglow::Skyglow;
 use crate::tonemap::{Tonemap, HDR_FORMAT};
 use crate::vertex::{QuadVertex, StarInstance};
+
+/// Planet positions move slowly on naked-eye render scales, while VSOP87
+/// evaluation is expensive enough to dominate per-frame CPU time. Refresh the
+/// renderer-facing planet uniforms once per simulated hour (or immediately
+/// when observer/refraction/enable state changes) and reuse them while the
+/// camera is dragged or the realtime clock advances within that bucket.
+const PLANET_CACHE_STEP_DAYS: f64 = 1.0 / 24.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PlanetCacheKey {
+    enabled: bool,
+    jd_tdb_bucket: i64,
+    jd_ut1_bucket: i64,
+    latitude_bits: u64,
+    longitude_bits: u64,
+    pressure_bits: u32,
+    temperature_bits: u32,
+    refract: bool,
+}
+
+impl PlanetCacheKey {
+    fn from_camera(camera: &Camera) -> Self {
+        let bucket = |jd: f64| (jd / PLANET_CACHE_STEP_DAYS).floor() as i64;
+        Self {
+            enabled: camera.planets_enabled,
+            jd_tdb_bucket: bucket(camera.observer.time.jd_tdb),
+            jd_ut1_bucket: bucket(camera.observer.time.jd_ut1),
+            latitude_bits: camera.observer.latitude_rad.to_bits(),
+            longitude_bits: camera.observer.longitude_rad.to_bits(),
+            pressure_bits: camera.atmosphere.pressure_hpa.to_bits(),
+            temperature_bits: camera.atmosphere.temperature_c.to_bits(),
+            refract: camera.atmosphere.sunlit_scattering,
+        }
+    }
+}
+
+struct PlanetUniformCache {
+    key: Option<PlanetCacheKey>,
+    uniforms: PlanetUniforms,
+}
+
+impl Default for PlanetUniformCache {
+    fn default() -> Self {
+        Self {
+            key: None,
+            uniforms: PlanetUniforms::disabled(),
+        }
+    }
+}
 
 pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
@@ -20,6 +71,7 @@ pub struct Renderer {
     skyglow_enabled: bool,
     overlay: OverlayRenderer,
     tonemap: Tonemap,
+    planet_uniform_cache: RefCell<PlanetUniformCache>,
 }
 
 impl Renderer {
@@ -100,6 +152,7 @@ impl Renderer {
             skyglow_enabled: true,
             overlay,
             tonemap,
+            planet_uniform_cache: RefCell::new(PlanetUniformCache::default()),
         }
     }
 
@@ -127,7 +180,16 @@ impl Renderer {
     }
 
     pub fn update_camera(&self, queue: &wgpu::Queue, camera: &Camera, width: u32, height: u32) {
-        let uniform = camera.uniform(width, height);
+        let planet_key = PlanetCacheKey::from_camera(camera);
+        let planet_uniforms = {
+            let mut cache = self.planet_uniform_cache.borrow_mut();
+            if cache.key != Some(planet_key) {
+                cache.uniforms = camera.planet_uniforms();
+                cache.key = Some(planet_key);
+            }
+            cache.uniforms
+        };
+        let uniform = camera.uniform_with_planets(width, height, &planet_uniforms);
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
         self.overlay.update_camera(queue, camera);
     }

@@ -127,6 +127,10 @@ struct Args {
     #[arg(long, allow_hyphen_values = true)]
     temperature_c: Option<f32>,
 
+    /// Disable Mercury-through-Neptune rendering.
+    #[arg(long)]
+    no_planets: bool,
+
     /// Disable the diffuse-sky (integrated starlight + diffuse galactic
     /// light) skyglow pass. With the default (skyglow on), the sky
     /// background includes the analytic Leinert et al. 1998 model so the
@@ -185,6 +189,7 @@ fn main() -> Result<()> {
         view,
         atmosphere,
         skyglow_enabled,
+        !args.no_planets,
         limiting_mag,
         args.width,
         args.height,
@@ -209,6 +214,7 @@ async fn render_to_pixels(
     view: LocalView,
     atmosphere: Atmosphere,
     skyglow_enabled: bool,
+    planets_enabled: bool,
     limiting_mag: f32,
     width: u32,
     height: u32,
@@ -261,6 +267,7 @@ async fn render_to_pixels(
     renderer.set_skyglow_enabled(skyglow_enabled);
     let mut camera = Camera::new(observer, view, width as f32 / height as f32);
     camera.atmosphere = atmosphere;
+    camera.planets_enabled = planets_enabled;
     camera.limiting_magnitude = limiting_mag;
     renderer.update_camera(&queue, &camera, width, height);
 

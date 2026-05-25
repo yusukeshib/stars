@@ -52,6 +52,35 @@ export type AtmosphereConfig = {
   temperatureC: number;
 };
 
+export type PlanetsConfig = {
+  enabled: boolean;
+};
+
+export const DEFAULT_PLANETS_CONFIG: PlanetsConfig = {
+  enabled: true,
+};
+
+export type PlanningRow = {
+  name: string;
+  riseMs: number | null;
+  transitMs: number | null;
+  setMs: number | null;
+  transitAltitudeDeg: number | null;
+};
+
+export type TwilightSegment = {
+  label: string;
+  startMs: number;
+  endMs: number;
+};
+
+export type PlanningTable = {
+  startMs: number;
+  endMs: number;
+  rows: PlanningRow[];
+  twilight: TwilightSegment[];
+};
+
 export const DEFAULT_ATMOSPHERE_CONFIG: AtmosphereConfig = {
   enabled: true,
   preset: "clear-rural",

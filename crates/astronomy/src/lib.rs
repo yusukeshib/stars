@@ -13,6 +13,7 @@ mod horizontal;
 pub mod illuminants;
 mod observer;
 pub mod photometry;
+mod planning;
 pub mod skyglow;
 mod time;
 
@@ -22,11 +23,17 @@ pub use corrections::{
     refracted_altitude_saemundsson, years_since_j2000, Nutation,
 };
 pub use ephemeris::{
-    apparent_moon, apparent_moon_topocentric, apparent_sun, apparent_sun_topocentric, MoonApparent,
-    SunApparent, SunMoonApparent,
+    apparent_moon, apparent_moon_topocentric, apparent_planet, apparent_planet_topocentric,
+    apparent_planets_topocentric, apparent_sun, apparent_sun_topocentric, MoonApparent, Planet,
+    PlanetApparent, SunApparent, SunMoonApparent,
 };
 pub use horizontal::{equatorial_to_horizontal, equatorial_to_horizontal_matrix, AltAz};
 pub use observer::Observer;
+pub use planning::{
+    body_altitude_rad, body_equatorial, evening_plan, evening_window_jd_utc, jd_utc_to_unix_ms,
+    rise_transit_set, twilight_band, twilight_indicators, EveningPlan, PlanningBody,
+    RiseTransitSet, TwilightBand, TwilightIndicator, DEFAULT_PLANNING_BODIES,
+};
 pub use time::{
     approximate_tdb_from_tt, gmst_radians, julian_date_from_unix_seconds, lmst_radians,
     tai_minus_utc_seconds_at_jd_utc, LeapSecond, TimeScales, J2000_JD, LEAP_SECONDS,

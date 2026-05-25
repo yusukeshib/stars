@@ -1,8 +1,8 @@
 use astronomy::photometry::DEFAULT_EXTINCTION_K_RGB;
 use astronomy::{
-    earth_velocity_over_c_j2000, equation_of_equinoxes, equatorial_to_horizontal_matrix,
-    illuminants, lmst_radians, precession_nutation_matrix, years_since_j2000, Observer,
-    SunMoonApparent,
+    apparent_planets_topocentric, earth_velocity_over_c_j2000, equation_of_equinoxes,
+    equatorial_to_horizontal_matrix, illuminants, lmst_radians, precession_nutation_matrix,
+    years_since_j2000, Observer, Planet, SunMoonApparent,
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -75,8 +75,39 @@ pub(crate) struct CameraUniform {
     /// moonlight illuminance in lux before local horizon/airmass attenuation.
     pub moon_eq_illuminance: [f32; 4],
     /// Lunar disk inputs: `[angular_radius_rad, illuminated_fraction,
-    /// phase_angle_rad, unused]`.
+    /// phase_angle_rad, earth_shadow_fraction]`.
     pub moon_disk: [f32; 4],
+    /// Planet directions in equatorial coordinates. `w` is angular radius.
+    pub planet_eq_radius: PlanetEqRadiusUniform,
+    /// Planet display colour in linear RGB. `w` is apparent visual magnitude.
+    pub planet_rgb_magnitude: PlanetRgbMagnitudeUniform,
+    /// `[planet_count, planets_enabled, unused, unused]`.
+    pub planet_params: [f32; 4],
+}
+
+pub(crate) const PLANET_UNIFORM_COUNT: usize = 7;
+pub(crate) type PlanetEqRadiusUniform = [[f32; 4]; PLANET_UNIFORM_COUNT];
+pub(crate) type PlanetRgbMagnitudeUniform = [[f32; 4]; PLANET_UNIFORM_COUNT];
+
+/// Cached renderer-facing planet uniforms. Computing VSOP87 planet states is
+/// orders of magnitude more expensive than rebuilding the camera matrices, so
+/// `Renderer` reuses this between coarse ephemeris refreshes while still
+/// updating Sun/Moon, refraction, stars, and camera orientation every frame.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PlanetUniforms {
+    pub eq_radius: PlanetEqRadiusUniform,
+    pub rgb_magnitude: PlanetRgbMagnitudeUniform,
+    pub params: [f32; 4],
+}
+
+impl PlanetUniforms {
+    pub const fn disabled() -> Self {
+        Self {
+            eq_radius: [[0.0; 4]; PLANET_UNIFORM_COUNT],
+            rgb_magnitude: [[0.0; 4]; PLANET_UNIFORM_COUNT],
+            params: [PLANET_UNIFORM_COUNT as f32, 0.0, 0.0, 0.0],
+        }
+    }
 }
 
 /// Named atmosphere presets shared by CLI, native viewer, and web hosts.
@@ -319,6 +350,18 @@ fn apparent_disk_direction_j2000(
         .normalize_or_zero()
 }
 
+fn planet_linear_rgb(planet: Planet) -> [f32; 3] {
+    match planet {
+        Planet::Mercury => [0.86, 0.78, 0.68],
+        Planet::Venus => [1.00, 0.91, 0.70],
+        Planet::Mars => [1.00, 0.54, 0.34],
+        Planet::Jupiter => [0.95, 0.82, 0.62],
+        Planet::Saturn => [0.92, 0.80, 0.55],
+        Planet::Uranus => [0.64, 0.88, 1.00],
+        Planet::Neptune => [0.45, 0.62, 1.00],
+    }
+}
+
 impl LocalView {
     /// Return a finite, renderer-safe view.
     ///
@@ -356,6 +399,9 @@ pub struct Camera {
     pub view: LocalView,
     pub aspect: f32,
     pub atmosphere: Atmosphere,
+    /// Whether Mercury through Neptune are rendered as apparent solar-system
+    /// disks/points from the VSOP87 ephemeris.
+    pub planets_enabled: bool,
     /// Faintest magnitude the simulated observer should be able to detect.
     /// Anchors the linear-flux brightness scale used by both the star pass
     /// and the skyglow surface-brightness pass; see
@@ -373,6 +419,7 @@ impl Camera {
             view: view.clamped(),
             aspect,
             atmosphere: Atmosphere::default(),
+            planets_enabled: true,
             limiting_magnitude: NAKED_EYE_LIMITING_MAGNITUDE,
         }
     }
@@ -462,7 +509,58 @@ impl Camera {
         pixel_size_rad * pixel_size_rad
     }
 
-    pub(crate) fn uniform(&self, width: u32, height: u32) -> CameraUniform {
+    pub(crate) fn planet_uniforms(&self) -> PlanetUniforms {
+        if !self.planets_enabled {
+            return PlanetUniforms::disabled();
+        }
+        let pressure_hpa = if self.atmosphere.pressure_hpa.is_finite() {
+            self.atmosphere.pressure_hpa.clamp(0.0, 1100.0)
+        } else {
+            Atmosphere::DEFAULT.pressure_hpa
+        };
+        let temperature_c = if self.atmosphere.temperature_c.is_finite() {
+            self.atmosphere.temperature_c.clamp(-80.0, 60.0)
+        } else {
+            Atmosphere::DEFAULT.temperature_c
+        };
+        let j2000_to_date = self.j2000_to_date();
+        let date_to_j2000 = j2000_to_date.transpose();
+        let date_to_local = self.equatorial_to_horizontal();
+        let local_to_date = date_to_local.transpose();
+
+        let mut eq_radius = [[0.0; 4]; PLANET_UNIFORM_COUNT];
+        let mut rgb_magnitude = [[0.0; 4]; PLANET_UNIFORM_COUNT];
+        for (idx, planet) in apparent_planets_topocentric(self.observer)
+            .iter()
+            .enumerate()
+        {
+            let dir = apparent_disk_direction_j2000(
+                planet.direction_equatorial(),
+                self.atmosphere.sunlit_scattering,
+                pressure_hpa,
+                temperature_c,
+                date_to_local,
+                local_to_date,
+                date_to_j2000,
+            );
+            let rgb = planet_linear_rgb(planet.planet);
+            eq_radius[idx] = [dir.x, dir.y, dir.z, planet.angular_radius_rad as f32];
+            rgb_magnitude[idx] = [rgb[0], rgb[1], rgb[2], planet.magnitude as f32];
+        }
+
+        PlanetUniforms {
+            eq_radius,
+            rgb_magnitude,
+            params: [PLANET_UNIFORM_COUNT as f32, 1.0, 0.0, 0.0],
+        }
+    }
+
+    pub(crate) fn uniform_with_planets(
+        &self,
+        width: u32,
+        height: u32,
+        planet_uniforms: &PlanetUniforms,
+    ) -> CameraUniform {
         let zenith = self.zenith_in_equatorial();
         let k = self
             .atmosphere
@@ -587,8 +685,11 @@ impl Camera {
                 moon.angular_radius_rad as f32,
                 moon.illuminated_fraction as f32,
                 moon.phase_angle_rad as f32,
-                0.0,
+                moon.earth_shadow_fraction as f32,
             ],
+            planet_eq_radius: planet_uniforms.eq_radius,
+            planet_rgb_magnitude: planet_uniforms.rgb_magnitude,
+            planet_params: planet_uniforms.params,
         }
     }
 
@@ -736,7 +837,8 @@ mod tests {
         cam.atmosphere.visibility_km = f32::NAN;
         cam.atmosphere.pressure_hpa = f32::NAN;
         cam.atmosphere.temperature_c = f32::NAN;
-        let uniform = cam.uniform(800, 600);
+        let planet_uniforms = cam.planet_uniforms();
+        let uniform = cam.uniform_with_planets(800, 600, &planet_uniforms);
         assert_eq!(uniform.extinction_k_rgb, [0.0, 0.0, 0.3, 0.0]);
         assert_eq!(uniform.atmosphere_params[0], Atmosphere::DEFAULT.turbidity);
         assert_eq!(

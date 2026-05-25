@@ -7,10 +7,14 @@ import {
   wrapAzimuth,
   DEFAULT_ATMOSPHERE_CONFIG,
   DEFAULT_OVERLAY_CONFIG,
+  DEFAULT_PLANETS_CONFIG,
   isAtmospherePreset,
+  isOverlayLayer,
   type AtmosphereConfig,
   type Observer,
   type OverlayConfig,
+  type PlanetsConfig,
+  type PlanningTable,
   type View,
 } from "./observer";
 import { loadConfig, saveConfig } from "./storage";
@@ -47,9 +51,18 @@ const numberParam = (
   return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
 };
 
-function loadAtmosphereFromUrl(): AtmosphereConfig | null {
+type UrlSession = {
+  observer?: Observer;
+  view?: View;
+  overlays?: OverlayConfig;
+  atmosphere?: AtmosphereConfig;
+  planets?: PlanetsConfig;
+  timeMs?: number;
+};
+
+function loadAtmosphereFromUrl(params?: URLSearchParams): AtmosphereConfig | null {
   if (typeof window === "undefined") return null;
-  const params = new URLSearchParams(window.location.search);
+  params ??= new URLSearchParams(window.location.search);
   if (
     !params.has("atmosphere") &&
     !params.has("atmospherePreset") &&
@@ -96,9 +109,60 @@ function loadAtmosphereFromUrl(): AtmosphereConfig | null {
   };
 }
 
-function saveAtmosphereToUrl(atmosphere: AtmosphereConfig): void {
-  if (typeof window === "undefined") return;
+function loadSessionFromUrl(): UrlSession | null {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("starsSession") !== "2") return null;
+  const observer: Observer = {
+    latitudeDeg: numberParam(params, "lat", DEFAULT_OBSERVER.latitudeDeg, -90, 90),
+    longitudeDeg: numberParam(params, "lng", DEFAULT_OBSERVER.longitudeDeg, -180, 180),
+  };
+  const view: View = {
+    azimuthDeg: numberParam(params, "az", DEFAULT_VIEW.azimuthDeg, 0, 360),
+    altitudeDeg: numberParam(params, "alt", DEFAULT_VIEW.altitudeDeg, -89.5, 89.5),
+    fovDeg: numberParam(params, "fov", DEFAULT_VIEW.fovDeg, 5, 120),
+  };
+  const overlayLayers = (params.get("overlays") ?? "")
+    .split(",")
+    .filter(isOverlayLayer)
+    .filter((layer) => layer !== "cardinals");
+  const overlays: OverlayConfig = {
+    layers: overlayLayers.length > 0 ? overlayLayers : DEFAULT_OVERLAY_CONFIG.layers,
+    gridStepDeg: numberParam(params, "grid", DEFAULT_OVERLAY_CONFIG.gridStepDeg, 1, 90),
+    opacity: numberParam(params, "overlayOpacity", DEFAULT_OVERLAY_CONFIG.opacity, 0, 1),
+  };
+  const jd = Number(params.get("jd"));
+  return {
+    observer,
+    view,
+    overlays,
+    atmosphere: loadAtmosphereFromUrl(params) ?? undefined,
+    planets: { enabled: params.get("planets") !== "off" },
+    timeMs: Number.isFinite(jd) ? (jd - 2440587.5) * 86400000 : undefined,
+  };
+}
+
+function sessionUrl({ observer, view, overlays, atmosphere, planets, timeMs }: {
+  observer: Observer;
+  view: View;
+  overlays: OverlayConfig;
+  atmosphere: AtmosphereConfig;
+  planets: PlanetsConfig;
+  timeMs: number;
+}): string {
   const url = new URL(window.location.href);
+  url.search = "";
+  url.searchParams.set("starsSession", "2");
+  url.searchParams.set("lat", observer.latitudeDeg.toFixed(5));
+  url.searchParams.set("lng", observer.longitudeDeg.toFixed(5));
+  url.searchParams.set("jd", (timeMs / 86400000 + 2440587.5).toFixed(7));
+  url.searchParams.set("az", view.azimuthDeg.toFixed(2));
+  url.searchParams.set("alt", view.altitudeDeg.toFixed(2));
+  url.searchParams.set("fov", view.fovDeg.toFixed(2));
+  url.searchParams.set("overlays", overlays.layers.join(","));
+  url.searchParams.set("grid", overlays.gridStepDeg.toFixed(0));
+  url.searchParams.set("overlayOpacity", overlays.opacity.toFixed(2));
+  url.searchParams.set("planets", planets.enabled ? "on" : "off");
   url.searchParams.set("atmosphere", atmosphere.enabled ? "on" : "off");
   url.searchParams.set("atmospherePreset", atmosphere.preset);
   url.searchParams.set("turbidity", atmosphere.turbidity.toFixed(1));
@@ -107,39 +171,44 @@ function saveAtmosphereToUrl(atmosphere: AtmosphereConfig): void {
   url.searchParams.set("visibilityKm", atmosphere.visibilityKm.toFixed(0));
   url.searchParams.set("pressureHpa", String(Math.round(atmosphere.pressureHpa)));
   url.searchParams.set("temperatureC", atmosphere.temperatureC.toFixed(0));
-  window.history.replaceState(null, "", url);
+  return url.toString();
 }
 
 // Read once at module load.
 const PERSISTED = loadConfig();
-const URL_ATMOSPHERE = loadAtmosphereFromUrl();
+const URL_SESSION = loadSessionFromUrl();
+const URL_ATMOSPHERE = URL_SESSION?.atmosphere ?? (typeof window !== "undefined" ? loadAtmosphereFromUrl() : null);
 
 export function App() {
-  const [observer, setObserver] = useState<Observer>(PERSISTED?.observer ?? DEFAULT_OBSERVER);
-  const [view, setView] = useState<View>(PERSISTED?.view ?? DEFAULT_VIEW);
+  const [observer, setObserver] = useState<Observer>(URL_SESSION?.observer ?? PERSISTED?.observer ?? DEFAULT_OBSERVER);
+  const [view, setView] = useState<View>(URL_SESSION?.view ?? PERSISTED?.view ?? DEFAULT_VIEW);
   const [overlays, setOverlays] = useState<OverlayConfig>(
-    PERSISTED?.overlays ? normalizeWebOverlays(PERSISTED.overlays) : DEFAULT_OVERLAY_CONFIG,
+    URL_SESSION?.overlays
+      ? normalizeWebOverlays(URL_SESSION.overlays)
+      : PERSISTED?.overlays
+        ? normalizeWebOverlays(PERSISTED.overlays)
+        : DEFAULT_OVERLAY_CONFIG,
   );
   const [atmosphere, setAtmosphere] = useState<AtmosphereConfig>(
     URL_ATMOSPHERE ?? PERSISTED?.atmosphere ?? DEFAULT_ATMOSPHERE_CONFIG,
   );
-  const [timeMs, setTimeMs] = useState<number>(() => Date.now());
+  const [planets, setPlanets] = useState<PlanetsConfig>(
+    URL_SESSION?.planets ?? PERSISTED?.planets ?? DEFAULT_PLANETS_CONFIG,
+  );
+  const [timeMs, setTimeMs] = useState<number>(() => URL_SESSION?.timeMs ?? Date.now());
   const [sunAltitudeDeg, setSunAltitudeDeg] = useState<number | null>(null);
+  const [planning, setPlanning] = useState<PlanningTable | null>(null);
   const lastTickRef = useRef<number>(performance.now());
 
-  // Persist observer + view + overlays + atmosphere whenever they change. We debounce
+  // Persist observer + view + overlays + atmosphere + planets whenever they change. We debounce
   // because the view updates on every mouse/touch frame during a drag, and
   // localStorage.setItem is synchronous; without the debounce we'd write ~60
   // times a second. Time is intentionally not persisted: a stale timestamp on
   // next load would silently mislead the user.
   useEffect(() => {
-    const handle = setTimeout(() => saveConfig({ observer, view, overlays, atmosphere }), 250);
+    const handle = setTimeout(() => saveConfig({ observer, view, overlays, atmosphere, planets }), 250);
     return () => clearTimeout(handle);
-  }, [observer, view, overlays, atmosphere]);
-
-  useEffect(() => {
-    saveAtmosphereToUrl(atmosphere);
-  }, [atmosphere]);
+  }, [observer, view, overlays, atmosphere, planets]);
 
   // Clock always ticks. When the user picks a custom moment via the quick time
   // popup we simply rebase `timeMs`; the same loop keeps advancing from there.
@@ -174,6 +243,7 @@ export function App() {
         timeMs={timeMs}
         overlays={overlays}
         atmosphere={atmosphere}
+        planets={planets}
         onDrag={(daz, dalt) =>
           setView((v) => ({
             ...v,
@@ -185,6 +255,7 @@ export function App() {
           setView((v) => ({ ...v, fovDeg: clampFov(v.fovDeg * factor) }))
         }
         onSunAltitude={setSunAltitudeDeg}
+        onPlanning={setPlanning}
       />
       <StatusBar
         observer={observer}
@@ -193,10 +264,22 @@ export function App() {
         sunAltitudeDeg={sunAltitudeDeg}
         overlays={overlays}
         atmosphere={atmosphere}
+        planets={planets}
+        planning={planning}
         onSetObserver={setObserver}
         onSetTime={setTimeMs}
         onSetOverlays={setOverlays}
         onSetAtmosphere={setAtmosphere}
+        onSetPlanets={setPlanets}
+        onCopySessionUrl={async () => {
+          const url = sessionUrl({ observer, view, overlays, atmosphere, planets, timeMs });
+          try {
+            if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(url);
+          } catch {
+            // Clipboard permission is best-effort; updating the address bar still shares the session.
+          }
+          window.history.replaceState(null, "", url);
+        }}
         onUseGeolocation={useGeolocation}
       />
     </>
