@@ -155,6 +155,7 @@ export function StatusBar({
     message: null,
   });
   const rootRef = useRef<HTMLDivElement>(null);
+  const addressLookupSeq = useRef(0);
   const timeDragRef = useRef<TimeDragState | null>(null);
   const suppressNextTimeClick = useRef(false);
 
@@ -182,6 +183,7 @@ export function StatusBar({
       return;
     }
 
+    const lookupId = ++addressLookupSeq.current;
     setAddressLookup({ status: "loading", message: "Searching address…" });
     try {
       const params = new URLSearchParams({
@@ -195,6 +197,7 @@ export function StatusBar({
       if (!response.ok) throw new Error(`geocoding request failed: ${response.status}`);
 
       const place = firstGeocodingResult(await response.json());
+      if (lookupId !== addressLookupSeq.current) return;
       if (!place) {
         setAddressLookup({ status: "error", message: "No matching place found." });
         return;
@@ -216,6 +219,7 @@ export function StatusBar({
         message: place.display_name ?? place.name ?? "Location updated from address.",
       });
     } catch {
+      if (lookupId !== addressLookupSeq.current) return;
       setAddressLookup({
         status: "error",
         message: "Address lookup failed. Check your connection and try again.",
@@ -315,6 +319,7 @@ export function StatusBar({
                 value={addressQuery}
                 placeholder="Tokyo Tower, Paris, Mauna Kea…"
                 onChange={(e) => {
+                  addressLookupSeq.current += 1;
                   setAddressQuery(e.target.value);
                   if (addressLookup.status !== "idle") {
                     setAddressLookup({ status: "idle", message: null });
