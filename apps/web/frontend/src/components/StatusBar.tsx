@@ -480,7 +480,9 @@ export function StatusBar({
           {fmtDeg(view.altitudeDeg)}
           <span style={separatorStyle}>  ·  </span>
           <span style={mutedStyle}>FOV </span>
-          {projection.projection === "perspective" ? fmtDeg(view.fovDeg) : "full sky"}
+          {projection.viewpoint === "earth" && projection.projection !== "perspective"
+            ? "full sky"
+            : fmtDeg(view.fovDeg)}
           <span style={separatorStyle}>  ·  </span>
           <span style={mutedStyle}>Projection </span>
           {SKY_PROJECTION_LABELS[projection.projection]}
@@ -601,6 +603,7 @@ function SettingsPanel({
           id="sky-projection"
           value={projection.projection}
           onChange={(e) => onSetProjection({ ...projection, projection: e.target.value as SkyProjection })}
+          disabled={projection.viewpoint !== "earth"}
           style={{ ...inputStyle, width: "100%" }}
         >
           {SKY_PROJECTIONS.map((p) => (
@@ -610,7 +613,7 @@ function SettingsPanel({
           ))}
         </select>
         <p style={helperTextStyle}>
-          Full-sky maps ignore FOV but still rotate with azimuth/altitude. The galactic viewpoint moves the camera above the Milky Way disc and hides Earth-local overlays.
+          Earth full-sky maps ignore FOV but still rotate with azimuth/altitude. The galactic viewpoint uses a perspective parsec-scale camera above the Milky Way disc and hides Earth-local overlays.
         </p>
       </SettingCard>
 
