@@ -36,6 +36,38 @@ export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
   opacity: 0.6,
 };
 
+export const ATMOSPHERE_PRESETS = ["clear-rural", "hazy-urban", "high-altitude"] as const;
+export type AtmospherePreset = (typeof ATMOSPHERE_PRESETS)[number];
+
+export type AtmosphereConfig = {
+  enabled: boolean;
+  preset: AtmospherePreset;
+  turbidity: number;
+  observerAltitudeM: number;
+};
+
+export const DEFAULT_ATMOSPHERE_CONFIG: AtmosphereConfig = {
+  enabled: true,
+  preset: "clear-rural",
+  turbidity: 2.5,
+  observerAltitudeM: 0,
+};
+
+export const ATMOSPHERE_PRESET_DEFAULTS: Record<AtmospherePreset, Pick<AtmosphereConfig, "turbidity" | "observerAltitudeM">> = {
+  "clear-rural": { turbidity: 2.5, observerAltitudeM: 0 },
+  "hazy-urban": { turbidity: 5.0, observerAltitudeM: 0 },
+  "high-altitude": { turbidity: 2.0, observerAltitudeM: 2500 },
+};
+
+export const ATMOSPHERE_PRESET_LABELS: Record<AtmospherePreset, string> = {
+  "clear-rural": "Clear rural",
+  "hazy-urban": "Hazy urban",
+  "high-altitude": "High altitude",
+};
+
+export const isAtmospherePreset = (s: unknown): s is AtmospherePreset =>
+  typeof s === "string" && (ATMOSPHERE_PRESETS as readonly string[]).includes(s);
+
 /// Human-readable labels for the UI; order also drives display order.
 export const OVERLAY_LABELS: Record<OverlayLayer, string> = {
   horizon: "Horizon",

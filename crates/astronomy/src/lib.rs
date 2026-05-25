@@ -14,7 +14,10 @@ pub mod photometry;
 pub mod skyglow;
 mod time;
 
-pub use ephemeris::{apparent_moon, apparent_sun, MoonApparent, SunApparent};
+pub use ephemeris::{
+    apparent_moon, apparent_moon_topocentric, apparent_sun, apparent_sun_topocentric, MoonApparent,
+    SunApparent,
+};
 pub use horizontal::{equatorial_to_horizontal, equatorial_to_horizontal_matrix, AltAz};
 pub use observer::Observer;
 pub use time::{gmst_radians, julian_date_from_unix_seconds, lmst_radians};

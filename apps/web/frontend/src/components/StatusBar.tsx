@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import type { Observer, OverlayConfig, View } from "../observer";
+import {
+  ATMOSPHERE_PRESET_DEFAULTS,
+  ATMOSPHERE_PRESET_LABELS,
+  ATMOSPHERE_PRESETS,
+  type AtmosphereConfig,
+  type AtmospherePreset,
+  type Observer,
+  type OverlayConfig,
+  type View,
+} from "../observer";
 import { OverlayToggles } from "./OverlayToggles";
 
 type Props = {
@@ -7,9 +16,11 @@ type Props = {
   view: View;
   timeMs: number;
   overlays: OverlayConfig;
+  atmosphere: AtmosphereConfig;
   onSetObserver: (next: Observer) => void;
   onSetTime: (timeMs: number) => void;
   onSetOverlays: (next: OverlayConfig) => void;
+  onSetAtmosphere: (next: AtmosphereConfig) => void;
   onUseGeolocation: () => void;
 };
 
@@ -59,9 +70,11 @@ export function StatusBar({
   view,
   timeMs,
   overlays,
+  atmosphere,
   onSetObserver,
   onSetTime,
   onSetOverlays,
+  onSetAtmosphere,
   onUseGeolocation,
 }: Props) {
   const [openPopover, setOpenPopover] = useState<Popover | null>(null);
@@ -83,6 +96,13 @@ export function StatusBar({
   };
   const setLongitude = (longitudeDeg: number) => {
     onSetObserver({ ...observer, longitudeDeg: clamp(longitudeDeg, -180, 180) });
+  };
+  const setAtmospherePreset = (preset: AtmospherePreset) => {
+    onSetAtmosphere({
+      ...atmosphere,
+      preset,
+      ...ATMOSPHERE_PRESET_DEFAULTS[preset],
+    });
   };
 
   const time = new Date(timeMs);
@@ -198,6 +218,63 @@ export function StatusBar({
           <Section label="OVERLAYS">
             <OverlayToggles config={overlays} onChange={onSetOverlays} />
           </Section>
+          <Section label="ATMOSPHERE">
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <input
+                type="checkbox"
+                checked={atmosphere.enabled}
+                onChange={(e) => onSetAtmosphere({ ...atmosphere, enabled: e.target.checked })}
+              />
+              Atmosphere / extinction
+            </label>
+
+            <label htmlFor="atmosphere-preset" style={labelStyle}>
+              Preset
+            </label>
+            <select
+              id="atmosphere-preset"
+              value={atmosphere.preset}
+              onChange={(e) => setAtmospherePreset(e.target.value as AtmospherePreset)}
+              disabled={!atmosphere.enabled}
+              style={{ ...inputStyle, width: "100%" }}
+            >
+              {ATMOSPHERE_PRESETS.map((preset) => (
+                <option key={preset} value={preset}>
+                  {ATMOSPHERE_PRESET_LABELS[preset]}
+                </option>
+              ))}
+            </select>
+
+            <SliderNumberRow
+              id="atmosphere-turbidity"
+              label="Turbidity"
+              value={atmosphere.turbidity}
+              min={1.7}
+              max={10}
+              step={0.1}
+              decimals={1}
+              disabled={!atmosphere.enabled}
+              onChange={(turbidity) =>
+                onSetAtmosphere({ ...atmosphere, turbidity: clamp(turbidity, 1.7, 10) })
+              }
+            />
+            <SliderNumberRow
+              id="atmosphere-altitude"
+              label="Observer altitude (m)"
+              value={atmosphere.observerAltitudeM}
+              min={0}
+              max={9000}
+              step={100}
+              decimals={0}
+              disabled={!atmosphere.enabled}
+              onChange={(observerAltitudeM) =>
+                onSetAtmosphere({
+                  ...atmosphere,
+                  observerAltitudeM: clamp(observerAltitudeM, 0, 9000),
+                })
+              }
+            />
+          </Section>
           <p style={{ margin: "14px 0 0", fontSize: 11, opacity: 0.45 }}>
             drag the sky to look around · scroll to zoom
           </p>
@@ -295,6 +372,7 @@ function SliderNumberRow({
   max,
   step,
   decimals = 2,
+  disabled = false,
   onChange,
 }: {
   id: string;
@@ -304,6 +382,7 @@ function SliderNumberRow({
   max: number;
   step: number;
   decimals?: number;
+  disabled?: boolean;
   onChange: (value: number) => void;
 }) {
   const inputValue = decimals === 0 ? String(Math.round(value)) : value.toFixed(decimals);
@@ -327,6 +406,7 @@ function SliderNumberRow({
           max={max}
           step={step}
           value={value}
+          disabled={disabled}
           onChange={(e) => handleChange(e.target.value)}
           style={{ width: "100%" }}
         />
@@ -337,6 +417,7 @@ function SliderNumberRow({
           max={max}
           step={step}
           value={inputValue}
+          disabled={disabled}
           onChange={(e) => handleChange(e.target.value)}
           style={inputStyle}
         />

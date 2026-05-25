@@ -213,6 +213,27 @@ impl StarView {
         };
     }
 
+    /// Update the complete atmosphere state from the web UI: preset controls
+    /// extinction coefficients, while turbidity / altitude remain user-tunable.
+    pub fn set_atmosphere_config(
+        &self,
+        enabled: bool,
+        preset: String,
+        turbidity: f32,
+        observer_altitude_m: f32,
+    ) {
+        self.state.borrow_mut().camera.atmosphere = if enabled {
+            let mut atmosphere = AtmospherePreset::from_kebab_str(&preset)
+                .map(Atmosphere::from_preset)
+                .unwrap_or_default();
+            atmosphere.turbidity = turbidity;
+            atmosphere.observer_altitude_m = observer_altitude_m;
+            atmosphere
+        } else {
+            Atmosphere::OFF
+        };
+    }
+
     pub fn resize(&self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
