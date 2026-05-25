@@ -108,6 +108,10 @@ Columns:
 | `P1-06` | 1 | **localStorage persistence** — observer + view survive reloads | `apps/web/frontend` | ✅ done |
 | `P1-07` | 1 | **Web overlay toggles** — mirror CLI flags inside the settings panel | `apps/web/frontend` | ✅ done |
 | `P1-08` | 1 | **Galactic equator overlay** | Same line pipeline as ecliptic; uses the transform from Phase 1' | ✅ done (`renderer::overlay`) |
+| `P1-09` | 1 | **Constellation lines** — modern western stick figures | `crates/catalog/data/constellation_lines.csv`, derived from BSD-licensed d3-celestial line data, compacted like the embedded star catalog, and drawn by `renderer::overlay` | ✅ done (`catalog::constellations`, `renderer::overlay`) |
+| `P1-10` | 1 | **Constellation boundaries** — IAU/Delporte regions | `crates/catalog/data/constellation_boundaries.csv`, derived from CDS VI/49 / Delporte 1930 B1875 boundary vertices precessed to J2000 and compacted like the embedded star catalog | ✅ done (`catalog::constellations`, `renderer::overlay`) |
+| `P1-11` | 1 | **Star / planet / constellation labels** — star proper names + Bayer / Flamsteed for top ~50 stars, planet names, and constellation names | Needs a font atlas and label-placement pass | ⬜ |
+| `P1-12` | 1 | **N / E / S / W and degree labels** | Text rendering from the same font atlas as sky labels | ⬜ |
 | `P1P-01` | 1' | **Photometric zeropoint** — `magnitude → illuminance (lux)` so the whole pipeline runs in physical units | Schaefer, B. E. 1990, PASP 102, 212 | ✅ done (`astronomy::photometry`) |
 | `P1P-02` | 1' | **Mesopic chromatic-fidelity weight** — log-linear blend over the 0.005–5 cd/m² mesopic range, applied per-star so only bright stars retain B-V colour | CIE 191:2010, *Recommended System for Mesopic Photometry Based on Visual Performance* | ✅ done (`astronomy::photometry`) |
 | `P1P-03` | 1' | **Purkinje-shifted scotopic desaturation** — faint stars collapse toward a rod-weighted (~507 nm peak) grey rather than a flat luma | CIE 1951 V'(λ); Bowmaker & Dartnall 1980, J. Physiol. 298, 501 | ✅ done (`astronomy::photometry`) |
@@ -159,7 +163,8 @@ Columns:
   cardinal markers + an overlay system controllable from a single
   settings panel, with the seven sky-reference circles (horizon,
   cardinals, alt-az grid, equatorial grid, ecliptic, celestial equator,
-  meridian) plus the galactic equator selectable per host.
+  meridian), the galactic equator, constellation lines, and constellation
+  boundaries selectable per host.
 - **Phase 1'.** Default-on rendering with a dark observer shows a visible
   Milky Way band, atmospheric reddening near the horizon, and a clear
   chromatic / achromatic split between bright and faint stars, with every
