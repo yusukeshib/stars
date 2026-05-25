@@ -11,8 +11,8 @@ use renderer::{
 };
 use stars_host_common::{
     atmosphere_from_args, load_star_instances_from_file, overlay_config_from_args,
-    parse_time_to_time_scales, AtmosphereOverrides, AtmospherePresetArg, OverlayArg, ProjectionArg,
-    ViewpointArg,
+    parse_time_to_time_scales, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
+    ExternalViewpointOverrides, OverlayArg, ProjectionArg, ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -66,10 +66,25 @@ struct Args {
     #[arg(long, default_value_t = ProjectionArg::Perspective)]
     projection: ProjectionArg,
 
-    /// Camera location: earth (observer-centred sky) or galactic-north
-    /// (external top-down Milky Way disc map).
+    /// Camera location: earth, galactic-north, or custom-external. Custom
+    /// external coordinates use IAU galactic Cartesian parsecs: Sun at origin,
+    /// +X to l=0°, +Y to l=90°, +Z to the north galactic pole.
     #[arg(long, default_value_t = ViewpointArg::Earth)]
     viewpoint: ViewpointArg,
+
+    /// Custom external camera origin in parsecs: X Y Z in the IAU galactic
+    /// Cartesian frame. Supplying this selects --viewpoint custom-external.
+    #[arg(long, num_args = 3, value_names = ["X", "Y", "Z"], allow_hyphen_values = true)]
+    external_origin_pc: Option<Vec<f32>>,
+
+    /// Custom external camera target in parsecs: X Y Z in the IAU galactic
+    /// Cartesian frame.
+    #[arg(long, num_args = 3, value_names = ["X", "Y", "Z"], allow_hyphen_values = true)]
+    external_target_pc: Option<Vec<f32>>,
+
+    /// Custom external camera up vector in the IAU galactic Cartesian frame.
+    #[arg(long, num_args = 3, value_names = ["X", "Y", "Z"], allow_hyphen_values = true)]
+    external_up: Option<Vec<f32>>,
 
     /// Path to the HYG-format star catalog CSV.
     #[arg(long, default_value = "crates/catalog/data/hyg_v42.csv")]
@@ -167,6 +182,15 @@ fn main() -> Result<()> {
         },
     );
 
+    let (viewpoint, external_viewpoint) = viewpoint_from_args(
+        args.viewpoint,
+        ExternalViewpointOverrides {
+            origin_pc: vec3_arg(&args.external_origin_pc),
+            target_pc: vec3_arg(&args.external_target_pc),
+            up: vec3_arg(&args.external_up),
+        },
+    );
+
     let event_loop = EventLoop::new()?;
     let mut app = App::new(
         instances,
@@ -179,10 +203,18 @@ fn main() -> Result<()> {
         atmosphere,
         !args.no_planets,
         args.projection.into(),
-        args.viewpoint.into(),
+        viewpoint,
+        external_viewpoint,
     );
     event_loop.run_app(&mut app)?;
     Ok(())
+}
+
+fn vec3_arg(values: &Option<Vec<f32>>) -> Option<[f32; 3]> {
+    let [x, y, z] = values.as_deref()? else {
+        return None;
+    };
+    Some([*x, *y, *z])
 }
 
 struct GpuState {
@@ -208,6 +240,7 @@ struct App {
     planets_enabled: bool,
     projection: renderer::SkyProjection,
     viewpoint: renderer::SkyViewpoint,
+    external_viewpoint: renderer::ExternalViewpoint,
     sky_clock: SkyClock,
     mouse_pressed: bool,
     last_mouse: Option<(f64, f64)>,
@@ -275,6 +308,7 @@ impl App {
         planets_enabled: bool,
         projection: renderer::SkyProjection,
         viewpoint: renderer::SkyViewpoint,
+        external_viewpoint: renderer::ExternalViewpoint,
     ) -> Self {
         Self {
             gpu: None,
@@ -289,6 +323,7 @@ impl App {
             planets_enabled,
             projection,
             viewpoint,
+            external_viewpoint,
             sky_clock: SkyClock::new(start_jd),
             mouse_pressed: false,
             last_mouse: None,
@@ -387,6 +422,7 @@ impl ApplicationHandler for App {
         camera.planets_enabled = self.planets_enabled;
         camera.projection = self.projection;
         camera.viewpoint = self.viewpoint;
+        camera.external_viewpoint = self.external_viewpoint;
 
         self.gpu = Some(GpuState {
             surface,

@@ -8,6 +8,7 @@ import {
   DEFAULT_ATMOSPHERE_CONFIG,
   DEFAULT_PROJECTION_CONFIG,
   type AtmosphereConfig,
+  type ExternalViewpointConfig,
   type Observer,
   type OverlayConfig,
   type PlanetsConfig,
@@ -112,6 +113,8 @@ const OZONE_RANGE: [number, number] = [0, 600];
 const VISIBILITY_RANGE: [number, number] = [1, 200];
 const PRESSURE_RANGE: [number, number] = [0, 1100];
 const TEMPERATURE_RANGE: [number, number] = [-80, 60];
+const EXTERNAL_PC_RANGE: [number, number] = [-1_000_000, 1_000_000];
+const EXTERNAL_UP_RANGE: [number, number] = [-10, 10];
 
 function isOverlayConfig(v: unknown): v is OverlayConfig {
   if (!v || typeof v !== "object") return false;
@@ -130,6 +133,24 @@ function parsePlanetsConfig(v: unknown): PlanetsConfig | null {
   return typeof o.enabled === "boolean" ? { enabled: o.enabled } : null;
 }
 
+function parseVec3(v: unknown, range: [number, number]): { x: number; y: number; z: number } | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as { x?: unknown; y?: unknown; z?: unknown };
+  return inRange(o.x, range) && inRange(o.y, range) && inRange(o.z, range)
+    ? { x: o.x, y: o.y, z: o.z }
+    : null;
+}
+
+function parseExternalViewpointConfig(v: unknown): ExternalViewpointConfig {
+  if (!v || typeof v !== "object") return DEFAULT_PROJECTION_CONFIG.external;
+  const o = v as Partial<ExternalViewpointConfig>;
+  return {
+    originPc: parseVec3(o.originPc, EXTERNAL_PC_RANGE) ?? DEFAULT_PROJECTION_CONFIG.external.originPc,
+    targetPc: parseVec3(o.targetPc, EXTERNAL_PC_RANGE) ?? DEFAULT_PROJECTION_CONFIG.external.targetPc,
+    up: parseVec3(o.up, EXTERNAL_UP_RANGE) ?? DEFAULT_PROJECTION_CONFIG.external.up,
+  };
+}
+
 function parseProjectionConfig(v: unknown): ProjectionConfig | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Partial<ProjectionConfig>;
@@ -137,6 +158,7 @@ function parseProjectionConfig(v: unknown): ProjectionConfig | null {
   return {
     projection: o.projection,
     viewpoint: isSkyViewpoint(o.viewpoint) ? o.viewpoint : DEFAULT_PROJECTION_CONFIG.viewpoint,
+    external: parseExternalViewpointConfig(o.external),
   };
 }
 

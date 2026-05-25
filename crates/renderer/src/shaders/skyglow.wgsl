@@ -48,7 +48,7 @@ struct CameraUniform {
     // mode: 0=perspective, 1=Mollweide, 2=Aitoff, 3=Hammer.
     projection_params: vec4<f32>,
     // [viewpoint_mode, external_eye_x_pc, external_eye_y_pc, external_eye_z_pc].
-    // mode: 0=Earth-centred sky dome, 1=external north-galactic-pole map.
+    // mode: 0=Earth-centred sky dome, 1=external IAU-galactic parsec-scale map.
     viewpoint_params: vec4<f32>,
     // Mercury through Neptune: xyz = direction, w = angular radius.
     planet_eq_radius: array<vec4<f32>, 7>,

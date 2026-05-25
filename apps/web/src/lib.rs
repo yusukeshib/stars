@@ -7,8 +7,8 @@ use astronomy::{
 };
 use catalog::load_embedded;
 use renderer::{
-    build_star_instance, Atmosphere, AtmospherePreset, Camera, LocalView, OverlayConfig,
-    OverlayKind, Renderer, SkyProjection, SkyViewpoint, StarInstance,
+    build_star_instance, Atmosphere, AtmospherePreset, Camera, ExternalViewpoint, LocalView,
+    OverlayConfig, OverlayKind, Renderer, SkyProjection, SkyViewpoint, StarInstance,
     DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use wasm_bindgen::prelude::*;
@@ -251,11 +251,34 @@ impl StarView {
             SkyProjection::from_kebab_str(&projection).unwrap_or_default();
     }
 
-    /// Select the camera viewpoint by kebab-case name: `earth` or
-    /// `galactic-north`. Unknown names fall back to the Earth-centred sky dome.
+    /// Select the camera viewpoint by kebab-case name: `earth`,
+    /// `galactic-north`, or `custom-external`. Unknown names fall back to the
+    /// Earth-centred sky dome.
     pub fn set_viewpoint(&self, viewpoint: String) {
         self.state.borrow_mut().camera.viewpoint =
             SkyViewpoint::from_kebab_str(&viewpoint).unwrap_or_default();
+    }
+
+    /// Update the custom external camera. Coordinates are IAU galactic
+    /// Cartesian parsecs: Sun at the origin, +X toward l=0°, +Y toward l=90°,
+    /// and +Z toward the north galactic pole.
+    pub fn set_external_viewpoint(
+        &self,
+        origin_x_pc: f32,
+        origin_y_pc: f32,
+        origin_z_pc: f32,
+        target_x_pc: f32,
+        target_y_pc: f32,
+        target_z_pc: f32,
+        up_x: f32,
+        up_y: f32,
+        up_z: f32,
+    ) {
+        self.state.borrow_mut().camera.external_viewpoint = ExternalViewpoint::new(
+            [origin_x_pc, origin_y_pc, origin_z_pc],
+            [target_x_pc, target_y_pc, target_z_pc],
+            [up_x, up_y, up_z],
+        );
     }
 
     /// Return the current local-evening rise/transit/set table and twilight

@@ -64,17 +64,37 @@ export type PlanetsConfig = {
 export const SKY_PROJECTIONS = ["perspective", "mollweide", "aitoff", "hammer"] as const;
 export type SkyProjection = (typeof SKY_PROJECTIONS)[number];
 
-export const SKY_VIEWPOINTS = ["earth", "galactic-north"] as const;
+export const SKY_VIEWPOINTS = ["earth", "galactic-north", "custom-external"] as const;
 export type SkyViewpoint = (typeof SKY_VIEWPOINTS)[number];
+
+export type Vec3 = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type ExternalViewpointConfig = {
+  originPc: Vec3;
+  targetPc: Vec3;
+  up: Vec3;
+};
 
 export type ProjectionConfig = {
   projection: SkyProjection;
   viewpoint: SkyViewpoint;
+  external: ExternalViewpointConfig;
+};
+
+export const DEFAULT_EXTERNAL_VIEWPOINT: ExternalViewpointConfig = {
+  originPc: { x: 0, y: 0, z: 30000 },
+  targetPc: { x: 0, y: 0, z: 0 },
+  up: { x: 0, y: 1, z: 0 },
 };
 
 export const DEFAULT_PROJECTION_CONFIG: ProjectionConfig = {
   projection: "perspective",
   viewpoint: "earth",
+  external: DEFAULT_EXTERNAL_VIEWPOINT,
 };
 
 export const DEFAULT_PLANETS_CONFIG: PlanetsConfig = {
@@ -144,6 +164,7 @@ export const SKY_PROJECTION_LABELS: Record<SkyProjection, string> = {
 export const SKY_VIEWPOINT_LABELS: Record<SkyViewpoint, string> = {
   earth: "Earth-centred sky",
   "galactic-north": "Milky Way from above",
+  "custom-external": "Custom external camera",
 };
 
 /// Human-readable labels for the UI; order also drives display order.

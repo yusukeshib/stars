@@ -325,6 +325,31 @@ Validation:
   uniform;
 - host-common tests pin native CLI enum mapping.
 
+### Custom external viewpoint origin
+
+Generalized the fixed Phase 4 galactic viewpoint into a host-selectable external
+camera. `SkyViewpoint::GalacticNorth` remains the preset top-down view, while
+`SkyViewpoint::CustomExternal` uses `renderer::ExternalViewpoint` to carry an
+origin, target, and up vector in IAU galactic Cartesian parsecs. The coordinate
+frame is documented as Sun-centred, `+X` toward galactic longitude `l=0°`, `+Y`
+toward `l=90°`, and `+Z` toward the north galactic pole.
+
+Primary implementation areas:
+
+- `renderer::ExternalViewpoint` and custom external camera matrix / uniforms;
+- native `--external-origin-pc`, `--external-target-pc`, and `--external-up`
+  flags for `apps/cli` and `apps/viewer`;
+- WASM bindings plus web settings, persistence, and session URL parameters
+  (`originPc`, `targetPc`, `up`);
+- architecture and roadmap documentation for the external coordinate frame.
+
+Validation:
+
+- renderer tests pin custom external origin upload and finite camera matrices;
+- host-common tests pin `custom-external` CLI round-trips and override
+  selection;
+- Rust workspace check and frontend TypeScript check cover host wiring.
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

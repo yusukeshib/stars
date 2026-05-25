@@ -9,6 +9,17 @@ declare module "stars-web" {
     set_planets_enabled(enabled: boolean): void;
     set_projection(projection: string): void;
     set_viewpoint(viewpoint: string): void;
+    set_external_viewpoint(
+      originXpc: number,
+      originYpc: number,
+      originZpc: number,
+      targetXpc: number,
+      targetYpc: number,
+      targetZpc: number,
+      upX: number,
+      upY: number,
+      upZ: number,
+    ): void;
     planning_table_json(): string;
     set_atmosphere_config(
       enabled: boolean,

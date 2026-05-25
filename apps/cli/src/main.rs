@@ -9,8 +9,8 @@ use renderer::{
 };
 use stars_host_common::{
     atmosphere_from_args, load_star_instances_from_file, overlay_config_from_args,
-    parse_time_to_time_scales, AtmosphereOverrides, AtmospherePresetArg, OverlayArg, ProjectionArg,
-    ViewpointArg,
+    parse_time_to_time_scales, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
+    ExternalViewpointOverrides, OverlayArg, ProjectionArg, ViewpointArg,
 };
 
 /// Render the night sky as seen from a given observer to a PNG.
@@ -45,10 +45,25 @@ struct Args {
     #[arg(long, default_value_t = ProjectionArg::Perspective)]
     projection: ProjectionArg,
 
-    /// Camera location: earth (observer-centred sky) or galactic-north
-    /// (external top-down Milky Way disc map).
+    /// Camera location: earth, galactic-north, or custom-external. Custom
+    /// external coordinates use IAU galactic Cartesian parsecs: Sun at origin,
+    /// +X to l=0°, +Y to l=90°, +Z to the north galactic pole.
     #[arg(long, default_value_t = ViewpointArg::Earth)]
     viewpoint: ViewpointArg,
+
+    /// Custom external camera origin in parsecs: X Y Z in the IAU galactic
+    /// Cartesian frame. Supplying this selects --viewpoint custom-external.
+    #[arg(long, num_args = 3, value_names = ["X", "Y", "Z"], allow_hyphen_values = true)]
+    external_origin_pc: Option<Vec<f32>>,
+
+    /// Custom external camera target in parsecs: X Y Z in the IAU galactic
+    /// Cartesian frame.
+    #[arg(long, num_args = 3, value_names = ["X", "Y", "Z"], allow_hyphen_values = true)]
+    external_target_pc: Option<Vec<f32>>,
+
+    /// Custom external camera up vector in the IAU galactic Cartesian frame.
+    #[arg(long, num_args = 3, value_names = ["X", "Y", "Z"], allow_hyphen_values = true)]
+    external_up: Option<Vec<f32>>,
 
     /// Output image width.
     #[arg(long, default_value_t = 1280)]
@@ -195,6 +210,14 @@ fn main() -> Result<()> {
         },
     );
     let skyglow_enabled = !args.no_skyglow;
+    let (viewpoint, external_viewpoint) = viewpoint_from_args(
+        args.viewpoint,
+        ExternalViewpointOverrides {
+            origin_pc: vec3_arg(&args.external_origin_pc),
+            target_pc: vec3_arg(&args.external_target_pc),
+            up: vec3_arg(&args.external_up),
+        },
+    );
 
     let pixels = pollster::block_on(render_to_pixels(
         observer,
@@ -203,7 +226,8 @@ fn main() -> Result<()> {
         skyglow_enabled,
         !args.no_planets,
         args.projection.into(),
-        args.viewpoint.into(),
+        viewpoint,
+        external_viewpoint,
         limiting_mag,
         args.width,
         args.height,
@@ -220,6 +244,13 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn vec3_arg(values: &Option<Vec<f32>>) -> Option<[f32; 3]> {
+    let [x, y, z] = values.as_deref()? else {
+        return None;
+    };
+    Some([*x, *y, *z])
+}
+
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 #[allow(clippy::too_many_arguments)]
@@ -231,6 +262,7 @@ async fn render_to_pixels(
     planets_enabled: bool,
     projection: renderer::SkyProjection,
     viewpoint: renderer::SkyViewpoint,
+    external_viewpoint: renderer::ExternalViewpoint,
     limiting_mag: f32,
     width: u32,
     height: u32,
@@ -286,6 +318,7 @@ async fn render_to_pixels(
     camera.planets_enabled = planets_enabled;
     camera.projection = projection;
     camera.viewpoint = viewpoint;
+    camera.external_viewpoint = external_viewpoint;
     camera.limiting_magnitude = limiting_mag;
     renderer.update_camera(&queue, &camera, width, height);
 

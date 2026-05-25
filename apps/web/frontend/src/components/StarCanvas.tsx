@@ -80,8 +80,21 @@ export function StarCanvas({
   }, [planets]);
 
   useEffect(() => {
-    handleRef.current?.set_projection(projection.projection);
-    handleRef.current?.set_viewpoint(projection.viewpoint);
+    const handle = handleRef.current;
+    if (!handle) return;
+    handle.set_projection(projection.projection);
+    handle.set_viewpoint(projection.viewpoint);
+    handle.set_external_viewpoint(
+      projection.external.originPc.x,
+      projection.external.originPc.y,
+      projection.external.originPc.z,
+      projection.external.targetPc.x,
+      projection.external.targetPc.y,
+      projection.external.targetPc.z,
+      projection.external.up.x,
+      projection.external.up.y,
+      projection.external.up.z,
+    );
   }, [projection]);
 
   useEffect(() => {
@@ -126,6 +139,17 @@ export function StarCanvas({
       handle.set_planets_enabled(planetsRef.current.enabled);
       handle.set_projection(projectionRef.current.projection);
       handle.set_viewpoint(projectionRef.current.viewpoint);
+      handle.set_external_viewpoint(
+        projectionRef.current.external.originPc.x,
+        projectionRef.current.external.originPc.y,
+        projectionRef.current.external.originPc.z,
+        projectionRef.current.external.targetPc.x,
+        projectionRef.current.external.targetPc.y,
+        projectionRef.current.external.targetPc.z,
+        projectionRef.current.external.up.x,
+        projectionRef.current.external.up.y,
+        projectionRef.current.external.up.z,
+      );
 
       let lastSunAltitudePublish = 0;
       let lastPlanningPublish = -Infinity;
