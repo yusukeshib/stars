@@ -26,7 +26,7 @@ use crate::camera::Camera;
 /// J2000 due to planetary precession of the ecliptic plane — invisible at
 /// Phase 1 naked-eye precision, but worth knowing before this code grows a
 /// citation. Phase 2 should switch to obliquity-of-date once IAU 2006
-/// precession lands; see ROADMAP.
+/// precession lands; see README.
 const OBLIQUITY_RAD: f64 = 0.409_092_804_222_329_3;
 
 /// Rotation matrix rows from J2000 equatorial to IAU galactic coordinates.

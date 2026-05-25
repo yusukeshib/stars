@@ -225,7 +225,7 @@ const ALT_LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.01;
 /// the renderer behave more like a telescope simulator, which Phase 1 is not.
 const MIN_FOV_Y_RAD: f32 = 5.0 * std::f32::consts::PI / 180.0;
 /// Widest supported vertical field of view. Larger values are better served by
-/// a full-sky projection (ROADMAP Phase 4) rather than a perspective camera.
+/// a full-sky projection (README Phase 4) rather than a perspective camera.
 const MAX_FOV_Y_RAD: f32 = 120.0 * std::f32::consts::PI / 180.0;
 
 impl LocalView {
@@ -288,7 +288,7 @@ impl Camera {
 
     /// Rotation that maps a J2000 equatorial direction into the observer's local ENU frame.
     fn equatorial_to_horizontal(&self) -> Mat4 {
-        let lst = lmst_radians(self.observer.julian_date, self.observer.longitude_rad);
+        let lst = lmst_radians(self.observer.time.jd_ut1, self.observer.longitude_rad);
         equatorial_to_horizontal_matrix(self.observer.latitude_rad, lst)
     }
 

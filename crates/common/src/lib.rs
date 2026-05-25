@@ -7,7 +7,7 @@
 //! apps under `apps/` consume it.
 
 use anyhow::{Context, Result};
-use astronomy::julian_date_from_unix_seconds;
+use astronomy::{julian_date_from_unix_seconds, TimeScales};
 use clap::ValueEnum;
 use renderer::{AtmospherePreset, OverlayKind};
 
@@ -77,9 +77,7 @@ impl From<AtmospherePresetArg> for AtmospherePreset {
     }
 }
 
-/// Parse `Some(rfc3339)` (or `None` ⇒ "now") into a Julian Date, sub-second
-/// precision preserved.
-pub fn parse_time_to_jd(time: Option<&str>) -> Result<f64> {
+fn parse_time_to_unix_seconds(time: Option<&str>) -> Result<f64> {
     let unix_seconds = match time {
         Some(s) => {
             let dt = chrono::DateTime::parse_from_rfc3339(s)
@@ -91,7 +89,22 @@ pub fn parse_time_to_jd(time: Option<&str>) -> Result<f64> {
             now.timestamp() as f64 + now.timestamp_subsec_nanos() as f64 * 1e-9
         }
     };
-    Ok(julian_date_from_unix_seconds(unix_seconds))
+    Ok(unix_seconds)
+}
+
+/// Parse `Some(rfc3339)` (or `None` ⇒ "now") into UTC/UT1/TAI/TT/TDB scales.
+pub fn parse_time_to_time_scales(time: Option<&str>) -> Result<TimeScales> {
+    Ok(TimeScales::from_unix_seconds(parse_time_to_unix_seconds(
+        time,
+    )?))
+}
+
+/// Parse `Some(rfc3339)` (or `None` ⇒ "now") into a UTC Julian Date, sub-second
+/// precision preserved.
+pub fn parse_time_to_jd(time: Option<&str>) -> Result<f64> {
+    Ok(julian_date_from_unix_seconds(parse_time_to_unix_seconds(
+        time,
+    )?))
 }
 
 #[cfg(test)]

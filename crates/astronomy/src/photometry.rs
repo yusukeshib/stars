@@ -23,7 +23,7 @@
 //! extinction per Schaefer 1993, diffuse sky background per Leinert et
 //! al. 1998, eye PSF / glare per Spencer et al. 1995, tone reproduction per
 //! Ferwerda et al. 1996 / Pattanaik et al. 1998) sit on top of these
-//! primitives and are scoped in ROADMAP.md Phase 1'.
+//! primitives and are scoped in README Phase 1'.
 
 /// Illuminance at the pupil produced by an unobstructed star of apparent
 /// V-band magnitude `m_v`, in lux (lumen per square metre).

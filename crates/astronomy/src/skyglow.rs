@@ -376,7 +376,7 @@ mod tests {
     /// is the published-spread of the underlying photometry (±0.5 mag/
     /// arcsec²) plus an analytic-fit allowance; tightening this would
     /// require digitising the full 2-D table instead of using a sum of
-    /// Gaussians (see ROADMAP).
+    /// Gaussians (see README).
     #[test]
     fn isl_matches_leinert_reference_points() {
         // (label, l_deg, b_deg, expected μ, tolerance)

@@ -2,8 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use astronomy::{
-    apparent_sun_topocentric, equatorial_to_horizontal, julian_date_from_unix_seconds,
-    lmst_radians, Observer,
+    apparent_sun_topocentric, equatorial_to_horizontal, lmst_radians, Observer, TimeScales,
 };
 use catalog::load_embedded;
 use renderer::{
@@ -137,20 +136,21 @@ impl StarView {
     /// epoch; conversion to Julian Date happens here so the JS side doesn't need
     /// to know the constant.
     pub fn set_observer(&self, lat_deg: f64, lng_deg: f64, time_unix_ms: f64) {
-        let jd = julian_date_from_unix_seconds(time_unix_ms / 1000.0);
-        self.state.borrow_mut().camera.observer = Observer::from_degrees(lat_deg, lng_deg, jd);
+        let time = TimeScales::from_unix_seconds(time_unix_ms / 1000.0);
+        self.state.borrow_mut().camera.observer =
+            Observer::from_degrees_with_time(lat_deg, lng_deg, time);
     }
 
     /// Current apparent topocentric Sun altitude, in degrees.
     ///
     /// The HUD uses this for daylight/twilight labels so the user-visible sky
-    /// state is derived from the same Rust ephemeris and UT1≈UTC convention as
+    /// state is derived from the same Rust ephemeris and `TimeScales` convention as
     /// the renderer's daylight, twilight, and disk inputs. Keeping the formula
     /// here avoids a second, drifting JavaScript solar-position implementation.
     pub fn sun_altitude_deg(&self) -> f64 {
         let observer = self.state.borrow().camera.observer;
         let sun = apparent_sun_topocentric(observer);
-        let lst = lmst_radians(observer.julian_date, observer.longitude_rad);
+        let lst = lmst_radians(observer.time.jd_ut1, observer.longitude_rad);
         equatorial_to_horizontal(
             sun.right_ascension_rad,
             sun.declination_rad,
