@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "appVersion": "0.1.0",
+  "createdBy": "stars-cli",
+  "observer": {
+    "latitudeDeg": 35.68,
+    "longitudeDeg": 139.69
+  },
+  "time": {
+    "jdUtc": 2461212.951388889,
+    "jdUt1": 2461212.951388889,
+    "jdTai": 2461212.9518171297,
+    "jdTt": 2461212.95218963,
+    "jdTdb": 2461212.9521896346,
+    "taiMinusUtcSeconds": 37.0,
+    "dut1Seconds": 0.0
+  },
+  "view": {
+    "azimuthDeg": 295.0,
+    "altitudeDeg": 16.0,
+    "fovDeg": 80.0
+  },
+  "overlays": {
+    "layers": [
+      "horizon",
+      "cardinal-labels",
+      "ecliptic",
+      "constellation-lines"
+    ],
+    "gridStepDeg": 15.0,
+    "opacity": 0.6
+  },
+  "projection": {
+    "projection": "perspective",
+    "viewpoint": "earth",
+    "external": {
+      "originPc": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 30000.0
+      },
+      "targetPc": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "up": {
+        "x": 0.0,
+        "y": 1.0,
+        "z": 0.0
+      }
+    }
+  },
+  "atmosphere": {
+    "enabled": true,
+    "preset": "clear-rural",
+    "turbidity": 2.5,
+    "observerAltitudeM": 0.0,
+    "ozoneDu": 300.0,
+    "visibilityKm": 50.0,
+    "pressureHpa": 1010.0,
+    "temperatureC": 10.0
+  },
+  "planets": {
+    "enabled": true
+  },
+  "eyepiece": {
+    "enabled": false,
+    "apertureMm": 200.0,
+    "focalLengthMm": 2000.0,
+    "eyepieceFocalLengthMm": 25.0,
+    "apparentFovDeg": 50.0,
+    "fieldStopMm": 21.0
+  },
+  "catalog": {
+    "backend": "hyg-csv",
+    "source": "HYG",
+    "version": "4.2",
+    "path": "crates/catalog/data/hyg_v42.csv",
+    "hash": null,
+    "limitingMagnitude": 7.5
+  },
+  "corrections": {
+    "timeScales": true,
+    "precession": true,
+    "nutation": true,
+    "annualAberration": true,
+    "properMotion": true,
+    "atmosphericRefraction": true,
+    "topocentricSolarSystem": true
+  }
+}

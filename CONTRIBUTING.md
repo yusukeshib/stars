@@ -22,6 +22,9 @@ downloads the star catalog into `crates/catalog/data/hyg_v42.csv`.
 make cli       # render a PNG via apps/cli
 make viewer    # run the native desktop viewer
 make web       # build WASM and start the web dev server
+make scene-presets            # export deterministic preset JSON sessions
+make validation-gallery       # render/update validation/demo PNGs
+make validation-gallery-check # opt-in screenshot regression on stable adapters
 make ci        # run the full local check suite
 make clean     # remove build artifacts
 ```
@@ -102,7 +105,7 @@ When a feature changes output appearance, include at least one of:
 
 - a deterministic unit test for the underlying model;
 - a screenshot in the PR description, preferably generated from a named scene
-  preset or `scripts/generate-readme-images.sh` when updating README images;
+  preset, `make validation-gallery`, or `scripts/generate-readme-images.sh` when updating README images;
 - a visual-regression baseline or update when the change affects a covered
   gallery scene;
 - a short before / after explanation;

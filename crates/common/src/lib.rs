@@ -15,7 +15,9 @@ use catalog::load_from_file;
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
+mod presets;
 mod session;
+pub use presets::*;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation,
     OverlayConfig, OverlayKind, SkyProjection, SkyViewpoint, StarInstance,

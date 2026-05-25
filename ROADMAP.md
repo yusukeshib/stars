@@ -66,8 +66,8 @@ illuminants and atmosphere parameters rather than by hard-coded gradients.
 large new data integrations, then continue the remaining visual Phase 4 work in
 small, shippable slices. Phase 1, Phase 1', Phase 2, the core stellar
 apparent-place corrections, full-sky projections, the fixed external galactic
-viewpoint, telescope eyepiece simulation, and custom external viewpoint origins
-are now complete. A row is
+viewpoint, telescope eyepiece simulation, custom external viewpoint origins,
+scene presets, and the validation/demo gallery workflow are now complete. A row is
 `✅ done` only when the model named in its references is implemented,
 documented, tested, and wired into all relevant hosts.
 
@@ -99,17 +99,12 @@ visual polish.
 These items are intentionally ordered before the largest catalog additions so
 future features have stable scenes, source manifests, and review hooks:
 
-1. **Portable reproduction:** deterministic scene presets for common
-   validation/demo skies, built on the shipped schema-versioned JSON sessions.
-2. **Validation visibility:** a validation/demo gallery and visual-regression
-   checks for noon, sunset, twilight, moonlit night, dark sky, all-sky maps, and
-   external galactic viewpoints.
-3. **Citable platform baseline:** `CITATION.cff`, standards-compliance notes,
+1. **Citable platform baseline:** `CITATION.cff`, standards-compliance notes,
    and early notebook examples that can use CLI/session outputs before full
    Python bindings land.
-4. **Catalog scaling design:** document the backend, identifier, LOD,
+2. **Catalog scaling design:** document the backend, identifier, LOD,
    streaming, and WASM-subset plan before Gaia / Tycho / Hipparcos ingest.
-5. **Visual and UX polish:** deep-sky overlays, accessibility, observation
+3. **Visual and UX polish:** deep-sky overlays, accessibility, observation
    planning polish, variable-star light curves, and eyepiece preset provenance.
 
 ---
@@ -177,8 +172,8 @@ Columns:
 | `P3-07` | 3 | **Sharable JSON sessions** | Schema-versioned JSON sessions cover observer, time scales, view, overlays, projection/viewpoint, active corrections, atmosphere, catalog snapshot, eyepiece, and app version across CLI, desktop, and web hosts | ✅ done (`stars_host_common::session`, `apps/{cli,viewer,web}`) |
 | `P3-08` | 3 | **`CITATION.cff` + Zenodo DOI** | Citable per-release artifact; include data/source caveats and preferred citation text | ⏳ next |
 | `P3-09` | 3 | **Standards-compliance doc** | One page listing every IAU resolution / SOFA routine, approximation, and deliberate non-goal the code implements or does not implement | ⏳ next |
-| `P3-10` | 3 | **Scene presets** | Deterministic named scenes for Tokyo tonight, dark sky, noon, sunset, civil/nautical/astronomical twilight, moonlit night, eclipse aid, all-sky maps, and external galactic viewpoints | ⏳ next |
-| `P3-11` | 3 | **Validation / demo gallery + visual regression** | Render preset PNGs with fixed inputs; publish a human gallery and run perceptual or tolerance-based screenshot comparisons where CI can do so reliably | ⏳ next |
+| `P3-10` | 3 | **Scene presets** | Deterministic named scenes for Tokyo tonight, dark sky, noon, sunset, civil/nautical/astronomical twilight, moonlit night, eclipse aid, all-sky maps, and external galactic viewpoints | ✅ done (`stars_host_common::presets`, `apps/{cli,viewer}`) |
+| `P3-11` | 3 | **Validation / demo gallery + visual regression** | Render preset PNGs with fixed inputs; publish a human gallery and run perceptual or tolerance-based screenshot comparisons where CI can do so reliably | ✅ done (`docs/validation-gallery.md`, `scripts/render-validation-gallery.sh`) |
 | `P3-12` | 3 | **Guided education mode** | Cross-host tour content explaining horizon, equator, ecliptic, galactic plane, time motion, twilight, and projection choices | ⬜ |
 | `P3-13` | 3 | **Data provenance manifest** | Machine-readable manifest recording source URL/archive ID, version, license, local path, hash, preprocessing command, and fields used for every data artifact | ⬜ |
 | `P3-14` | 3 | **Notebook examples** | Reproducible examples that load JSON sessions, compare tabular astronomy outputs, and render the same scene as web / CLI | ⬜ |
