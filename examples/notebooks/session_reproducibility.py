@@ -12,6 +12,7 @@ import argparse
 import csv
 import json
 import math
+import re
 import subprocess
 from pathlib import Path
 from typing import Iterable
@@ -20,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOK_DIR = Path(__file__).resolve().parent
 EXPECTED_DIR = NOTEBOOK_DIR / "expected"
 DEFAULT_SESSION_IDS = ("tokyo-tonight", "moonlit-night")
+SESSION_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 NUMERIC_COLUMNS = {
     "jd_utc",
     "ra_deg",
@@ -35,11 +37,21 @@ NUMERIC_COLUMNS = {
 }
 
 
+def validate_session_id(session_id: str) -> str:
+    if not SESSION_ID_RE.fullmatch(session_id):
+        raise ValueError(
+            f"invalid session id {session_id!r}; expected kebab-case preset id"
+        )
+    return session_id
+
+
 def session_path(session_id: str) -> Path:
+    session_id = validate_session_id(session_id)
     return ROOT / "docs" / "presets" / "sessions" / f"{session_id}.json"
 
 
 def expected_table_path(session_id: str) -> Path:
+    session_id = validate_session_id(session_id)
     return EXPECTED_DIR / f"{session_id}-session-table.csv"
 
 
