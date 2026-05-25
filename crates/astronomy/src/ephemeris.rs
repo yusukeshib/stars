@@ -14,9 +14,12 @@ const ARCSEC_TO_RAD: f64 = DEG_TO_RAD / 3600.0;
 /// Apparent geocentric Sun state for rendering.
 #[derive(Debug, Clone, Copy)]
 pub struct SunApparent {
-    /// Apparent right ascension in radians, J2000 mean equator/equinox frame.
+    /// Apparent right ascension in radians, in the low-precision equatorial
+    /// frame used by the Phase-2-start renderer (date-of-observation terms,
+    /// without the final IAU precession/nutation stack).
     pub right_ascension_rad: f64,
-    /// Apparent declination in radians, J2000 mean equator/equinox frame.
+    /// Apparent declination in radians, in the same low-precision equatorial
+    /// frame as [`Self::right_ascension_rad`].
     pub declination_rad: f64,
     /// Apparent ecliptic longitude in radians.
     pub ecliptic_longitude_rad: f64,
@@ -36,9 +39,12 @@ impl SunApparent {
 /// Apparent geocentric Moon state for rendering.
 #[derive(Debug, Clone, Copy)]
 pub struct MoonApparent {
-    /// Apparent right ascension in radians, J2000 mean equator/equinox frame.
+    /// Apparent right ascension in radians, in the low-precision equatorial
+    /// frame used by the Phase-2-start renderer (date-of-observation terms,
+    /// without the final IAU precession/nutation stack).
     pub right_ascension_rad: f64,
-    /// Apparent declination in radians, J2000 mean equator/equinox frame.
+    /// Apparent declination in radians, in the same low-precision equatorial
+    /// frame as [`Self::right_ascension_rad`].
     pub declination_rad: f64,
     /// Approximate geocentric distance in kilometres.
     pub distance_km: f64,
