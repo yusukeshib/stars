@@ -38,7 +38,9 @@ The current engine already includes:
 - telescope eyepiece simulation that derives magnification, plate scale, exit
   pupil, and true field of view from an OTA + eyepiece pair;
 - shareable schema-versioned JSON sessions across CLI, desktop, and web, plus
-  compact web session URLs.
+  compact web session URLs;
+- deterministic validation/demo scene presets and an opt-in generated gallery
+  for screenshot review.
 
 ## CLI-generated gallery
 
@@ -65,11 +67,12 @@ Render a PNG from the CLI:
 make cli ARGS="--lat 35.68 --lng 139.69 --azimuth 180 --altitude 30 -o stars.png"
 ```
 
-Save or replay a portable JSON session:
+Save or replay a portable JSON session, or render a built-in deterministic preset:
 
 ```bash
 make cli ARGS="--lat 35.68 --lng 139.69 --write-session tokyo.json -o stars.png"
 make cli ARGS="--session tokyo.json -o replay.png"
+make cli ARGS="--preset dark-sky -o dark-sky.png"
 ```
 
 Run the web app:
@@ -112,6 +115,10 @@ More detail lives in [`ARCHITECTURE.md`](ARCHITECTURE.md).
   and current model limits.
 - [`DATA_SOURCES.md`](DATA_SOURCES.md) — catalog, constellation, and literature
   data provenance.
+- [`docs/scene-presets.md`](docs/scene-presets.md) — deterministic named scenes
+  and JSON-session export workflow.
+- [`docs/validation-gallery.md`](docs/validation-gallery.md) — generated demo
+  gallery and opt-in screenshot-regression workflow.
 
 ## Current focus
 
@@ -120,12 +127,10 @@ out-of-Earth galactic / custom external viewpoints, and Phase 4 telescope
 eyepiece simulation are implemented. The next best work is to make the app
 easier to reproduce, cite, validate, teach from, and then extend visually:
 
-1. deterministic scene presets built on the JSON session schema;
-2. validation / demo gallery and visual-regression checks for representative skies;
-3. `CITATION.cff`, standards-compliance notes, and early notebook examples;
-4. catalog-backend scaling design before Gaia / Tycho / Hipparcos ingest;
-5. deep-sky overlays for Messier / NGC-style objects;
-6. accessibility, observation-planning polish, and variable-star light curves.
+1. `CITATION.cff`, standards-compliance notes, and early notebook examples;
+2. catalog-backend scaling design before Gaia / Tycho / Hipparcos ingest;
+3. deep-sky overlays for Messier / NGC-style objects;
+4. accessibility, observation-planning polish, and variable-star light curves.
 
 ## Contributing
 

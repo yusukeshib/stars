@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use astronomy::Observer;
 use clap::Parser;
 use renderer::{
@@ -9,10 +9,10 @@ use renderer::{
 };
 use stars_host_common::{
     atmosphere_from_args, eyepiece_from_args, load_session, load_star_instances_from_file,
-    overlay_config_from_args, parse_time_to_time_scales, save_session, viewpoint_from_args,
-    AtmosphereOverrides, AtmospherePresetArg, CatalogSnapshot, CorrectionSnapshot,
-    ExternalViewpointOverrides, EyepieceOverrides, OverlayArg, ProjectionArg, SessionScene,
-    StarSession, ViewpointArg,
+    overlay_config_from_args, parse_time_to_time_scales, save_session, scene_from_preset,
+    scene_preset_infos, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
+    CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides, OverlayArg,
+    ProjectionArg, ScenePresetArg, SessionScene, StarSession, ViewpointArg,
 };
 
 /// Render the night sky as seen from a given observer to a PNG.
@@ -32,9 +32,21 @@ struct Args {
     #[arg(long)]
     session: Option<PathBuf>,
 
+    /// Use a built-in deterministic validation/demo scene. Ignored when --session is supplied.
+    #[arg(long, value_enum)]
+    preset: Option<ScenePresetArg>,
+
+    /// List built-in deterministic validation/demo scene presets and exit.
+    #[arg(long)]
+    list_presets: bool,
+
     /// Write the effective scene to a schema-versioned JSON session file.
     #[arg(long)]
     write_session: Option<PathBuf>,
+
+    /// Exit after writing --write-session. Useful for exporting preset JSON without rendering.
+    #[arg(long, requires = "write_session")]
+    write_session_only: bool,
 
     /// Time as RFC3339 (e.g. 2026-04-26T12:00:00Z). Defaults to "now".
     #[arg(long)]
@@ -206,8 +218,15 @@ fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();
 
+    if args.list_presets {
+        print_scene_presets();
+        return Ok(());
+    }
+
     let scene = if let Some(session_path) = &args.session {
         load_session(session_path)?.to_scene()?
+    } else if let Some(preset) = args.preset {
+        scene_from_preset(preset, &args.catalog, args.limiting_magnitude)?
     } else {
         let lat = args
             .lat
@@ -296,6 +315,11 @@ fn main() -> Result<()> {
         let session = StarSession::from_scene(env!("CARGO_PKG_VERSION"), "stars-cli", &scene);
         save_session(path, &session)?;
         log::info!("Wrote session JSON to {}", path.display());
+    } else if args.write_session_only {
+        bail!("--write-session-only requires --write-session");
+    }
+    if args.write_session_only {
+        return Ok(());
     }
 
     let catalog_path = scene
@@ -333,6 +357,17 @@ fn main() -> Result<()> {
 
     log::info!("Wrote {}", args.output.display());
     Ok(())
+}
+
+fn print_scene_presets() {
+    for info in scene_preset_infos() {
+        println!(
+            "{:<22} {} — {}",
+            info.id.as_kebab_str(),
+            info.title,
+            info.validation_focus
+        );
+    }
 }
 
 fn catalog_snapshot(path: &Path, limiting_magnitude: f32) -> CatalogSnapshot {

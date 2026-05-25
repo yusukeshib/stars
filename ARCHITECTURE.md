@@ -38,9 +38,10 @@ between engine crates and host applications.
 
 `crates/common` is intentionally outside the engine tier even though it lives
 under `crates/`. It contains native-host glue: `clap` mirrors of renderer enums,
-`chrono` time parsing, schema-versioned JSON session conversion, atmosphere /
-overlay argument mapping, and shared catalog-to-renderer conversion for CLI and
-desktop. The web host bypasses it so WASM stays free of native-only dependencies.
+`chrono` time parsing, schema-versioned JSON session conversion, deterministic
+scene preset construction, atmosphere / overlay argument mapping, and shared
+catalog-to-renderer conversion for CLI and desktop. The web host bypasses it so
+WASM stays free of native-only dependencies.
 
 ## Crate boundaries
 
@@ -95,6 +96,7 @@ Owns native-host convenience only:
 - native atmosphere / overlay / eyepiece argument conversion;
 - RFC3339 / now time parsing;
 - schema-versioned JSON session load/save and conversion into native render state;
+- deterministic named scene presets that compile to normal sessions;
 - filesystem catalog loading plus conversion to renderer `StarInstance`s.
 
 Do not put core astronomical or rendering logic here.
@@ -103,9 +105,10 @@ Do not put core astronomical or rendering logic here.
 
 Hosts own platform lifecycle:
 
-- `apps/cli`: create a headless texture, optionally load/write a JSON session,
-  render once, copy padded rows back to CPU memory, and write PNG;
-- `apps/viewer`: optionally load a JSON session, manage a `winit` event loop,
+- `apps/cli`: create a headless texture, optionally load/write a JSON session
+  or built-in preset, render once, copy padded rows back to CPU memory, and
+  write PNG;
+- `apps/viewer`: optionally load a JSON session or built-in preset, manage a `winit` event loop,
   surface resize, input, and frame pacing;
 - `apps/web`: expose a WASM `StarView`, keep JS/UI state, load/copy/download
   JSON sessions, resize the canvas, and call into the shared renderer.

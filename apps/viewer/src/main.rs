@@ -11,9 +11,10 @@ use renderer::{
 };
 use stars_host_common::{
     atmosphere_from_args, eyepiece_from_args, load_session, load_star_instances_from_file,
-    overlay_config_from_args, parse_time_to_time_scales, viewpoint_from_args, AtmosphereOverrides,
-    AtmospherePresetArg, CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides,
-    EyepieceOverrides, OverlayArg, ProjectionArg, SessionScene, ViewpointArg,
+    overlay_config_from_args, parse_time_to_time_scales, scene_from_preset, scene_preset_infos,
+    viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg, CatalogSnapshot,
+    CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides, OverlayArg, ProjectionArg,
+    ScenePresetArg, SessionScene, ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -50,6 +51,14 @@ struct Args {
     /// Load the initial scene from a schema-versioned JSON session.
     #[arg(long)]
     session: Option<PathBuf>,
+
+    /// Use a built-in deterministic validation/demo scene. Ignored when --session is supplied.
+    #[arg(long, value_enum)]
+    preset: Option<ScenePresetArg>,
+
+    /// List built-in deterministic validation/demo scene presets and exit.
+    #[arg(long)]
+    list_presets: bool,
 
     /// Initial time as RFC3339. Defaults to "now". The clock advances in real time.
     #[arg(long)]
@@ -181,8 +190,15 @@ fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();
 
+    if args.list_presets {
+        print_scene_presets();
+        return Ok(());
+    }
+
     let scene = if let Some(session_path) = &args.session {
         load_session(session_path)?.to_scene()?
+    } else if let Some(preset) = args.preset {
+        scene_from_preset(preset, &args.catalog, DEFAULT_SCREEN_LIMITING_MAGNITUDE)?
     } else {
         let time = parse_time_to_time_scales(args.time.as_deref())?;
         let overlays = overlay_config_from_args(
@@ -279,6 +295,17 @@ fn main() -> Result<()> {
     );
     event_loop.run_app(&mut app)?;
     Ok(())
+}
+
+fn print_scene_presets() {
+    for info in scene_preset_infos() {
+        println!(
+            "{:<22} {} — {}",
+            info.id.as_kebab_str(),
+            info.title,
+            info.validation_focus
+        );
+    }
 }
 
 fn catalog_snapshot(path: &Path, limiting_magnitude: f32) -> CatalogSnapshot {

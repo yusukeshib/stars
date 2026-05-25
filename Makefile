@@ -1,4 +1,4 @@
-.PHONY: cli viewer dev web web-build web-install web-dev frontend-check setup fmt clippy test ci clean
+.PHONY: cli viewer dev web web-build web-install web-dev frontend-check setup scene-presets validation-gallery validation-gallery-check fmt clippy test ci clean
 
 # PNG-output CLI (override ARGS, e.g. `make cli ARGS="--lat 35.68 --lng 139.69 -o /tmp/sky.png"`).
 ARGS ?= --lat 35.68 --lng 139.69 --azimuth 180 --altitude 30 -o stars.png
@@ -30,6 +30,18 @@ frontend-check:
 # Download star catalog
 setup: web-build web-install
 	./scripts/download-catalog.sh
+
+# Export deterministic JSON sessions for built-in scene presets.
+scene-presets:
+	./scripts/export-scene-presets.sh
+
+# Render/update the validation/demo gallery PNGs.
+validation-gallery:
+	./scripts/render-validation-gallery.sh --update
+
+# Opt-in exact screenshot regression for pinned GPU/driver environments.
+validation-gallery-check:
+	./scripts/render-validation-gallery.sh --check
 
 # Lint & test
 fmt:

@@ -184,17 +184,18 @@ Current limitation:
 
 ### Reproducible scenes and visual regression
 
-Planned implementation includes:
+Current implementation includes:
 
 - schema-versioned JSON sessions that capture observer, time scales, view,
   overlays, projection/viewpoint, active corrections, atmosphere, catalog
   snapshot, and app version;
-- deterministic scene presets for noon, sunset, civil / nautical / astronomical
-  twilight, moonlit night, dark sky, all-sky maps, and external galactic
-  viewpoints;
-- a validation/demo gallery generated from those presets;
-- visual-regression checks for representative renderer output where the host and
-  CI environment can produce stable images.
+- deterministic scene presets for Tokyo evening, dark sky, noon, sunset, civil /
+  nautical / astronomical twilight, moonlit night, an eclipse aid, all-sky maps,
+  and external galactic viewpoints;
+- a validation/demo gallery generated from those presets by
+  `scripts/render-validation-gallery.sh`;
+- opt-in byte-for-byte visual-regression checks for representative renderer
+  output where the host and CI environment can produce stable images.
 
 Validation expectation:
 
@@ -208,8 +209,10 @@ Validation expectation:
 
 Current limitation:
 
-- The renderer currently has numerical/model tests and manual screenshot review,
-  but no committed gallery or automated visual-regression harness.
+- Screenshot regression is intentionally opt-in rather than part of default
+  `make ci` because adapter/driver differences can change readback bytes. PRs
+  should still regenerate and inspect gallery images for renderer-visible
+  changes, or explain why doing so was not practical.
 
 ## External comparison targets
 

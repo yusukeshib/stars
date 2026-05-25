@@ -16,7 +16,7 @@ Implemented phase groups:
 - Phase 1' physical dark-sky visual pipeline.
 - Phase 2 time systems, apparent-place corrections, atmosphere, solar-system
   bodies, and planning UI.
-- Phase 3 schema-versioned JSON sessions.
+- Phase 3 schema-versioned JSON sessions, deterministic scene presets, and a validation/demo gallery workflow.
 - Phase 4 full-sky projections and external galactic viewpoint.
 
 Still open:
@@ -294,6 +294,43 @@ Primary implementation areas:
 - `apps/viewer/src/main.rs`
 - `apps/web/frontend/src/session.ts`
 - `apps/web/frontend/src/components/StatusBar.tsx`
+
+### Scene presets and validation gallery
+
+Implemented deterministic Phase 3 scene presets for reproducible demos,
+validation screenshots, and bug reports. Native hosts can list or load presets
+with `--list-presets` / `--preset`; the CLI can export any effective preset or
+scene as JSON with `--write-session --write-session-only`.
+
+Preset coverage includes:
+
+- Tokyo evening and high-altitude dark sky;
+- noon, sunset, civil twilight, nautical twilight, and astronomical twilight;
+- moonlit night and a lunar-eclipse aid scene;
+- Hammer and Mollweide all-sky maps;
+- built-in galactic-north and custom external galactic viewpoints.
+
+The validation gallery workflow renders these presets to
+`docs/assets/validation/` and optionally compares regenerated PNGs against
+committed baselines when the rendering adapter is stable enough for screenshot
+CI.
+
+Primary implementation areas:
+
+- `crates/common/src/presets.rs`;
+- native `--preset`, `--list-presets`, and CLI `--write-session-only` wiring in
+  `apps/cli` and `apps/viewer`;
+- `scripts/export-scene-presets.sh`;
+- `scripts/render-validation-gallery.sh`;
+- `docs/scene-presets.md`;
+- `docs/validation-gallery.md`.
+
+Validation:
+
+- host-common tests pin preset metadata uniqueness and JSON session
+  round-trips;
+- the gallery script provides repeatable human screenshots and opt-in exact
+  screenshot regression for pinned GPU/driver environments.
 
 ## Phase 4 — Advanced visual features
 
