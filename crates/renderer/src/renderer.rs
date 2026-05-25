@@ -7,6 +7,7 @@ use crate::camera::{Camera, CameraUniform, PlanetUniforms};
 use crate::overlay::{OverlayConfig, OverlayRenderer};
 use crate::pipeline;
 use crate::skyglow::Skyglow;
+use crate::text::TextRenderer;
 use crate::tonemap::{Tonemap, HDR_FORMAT};
 use crate::vertex::{QuadVertex, StarInstance};
 
@@ -70,6 +71,7 @@ pub struct Renderer {
     skyglow: Skyglow,
     skyglow_enabled: bool,
     overlay: OverlayRenderer,
+    text: TextRenderer,
     tonemap: Tonemap,
     planet_uniform_cache: RefCell<PlanetUniformCache>,
 }
@@ -135,6 +137,7 @@ impl Renderer {
         let pipeline = pipeline::create_pipeline(device, HDR_FORMAT, &camera_bind_group_layout);
         let skyglow = Skyglow::new(device, &camera_bind_group_layout);
         let overlay = OverlayRenderer::new(device, final_format);
+        let text = TextRenderer::new(device, final_format);
         // Tonemap pass borrows the camera buffer directly (it samples
         // `magnitude_zeropoint` for the HDR-flux→cd/m² conversion that
         // drives the mesopic regime split).
@@ -151,6 +154,7 @@ impl Renderer {
             skyglow,
             skyglow_enabled: true,
             overlay,
+            text,
             tonemap,
             planet_uniform_cache: RefCell::new(PlanetUniformCache::default()),
         }
@@ -169,6 +173,7 @@ impl Renderer {
     /// (or simply don't call this) to draw stars only.
     pub fn set_overlays(&mut self, device: &wgpu::Device, config: &OverlayConfig) {
         self.overlay.set_config(device, config);
+        self.text.set_config(config);
     }
 
     /// Resize the internal HDR scene texture to match a new framebuffer
@@ -192,6 +197,8 @@ impl Renderer {
         let uniform = camera.uniform_with_planets(width, height, &planet_uniforms);
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
         self.overlay.update_camera(queue, camera);
+        self.text
+            .update_camera(queue, camera, &uniform, &planet_uniforms, width, height);
     }
 
     /// Render one frame.
@@ -207,8 +214,8 @@ impl Renderer {
     ///      adaptation luminance, picks a CIE-191:2010 mesopic key,
     ///      applies the Reinhard 2002 §3.3 keyed operator. Writes the
     ///      LDR result to `view`.
-    ///   4. **Overlays → swapchain** — LDR alpha-blended UI lines
-    ///      (horizon, cardinals, grids, ecliptic, ...) drawn on top of
+    ///   4. **Overlays → swapchain** — LDR alpha-blended UI lines and text
+    ///      labels (horizon, cardinals, grids, ecliptic, names, ...) drawn on top of
     ///      the tonemapped scene. Bypassing the HDR/tonemap chain is
     ///      what makes the `--overlay-opacity` slider behave intuitively
     ///      — overlays are UI, not physical radiance, and shouldn't
@@ -273,7 +280,7 @@ impl Renderer {
         // Pass 3: tonemap the assembled HDR scene to the swapchain.
         self.tonemap.draw(encoder, view);
 
-        // Pass 4: overlays composite onto the already-tonemapped output.
+        // Pass 4: overlays and labels composite onto the already-tonemapped output.
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Overlay LDR Pass"),
@@ -294,6 +301,7 @@ impl Renderer {
                 multiview_mask: None,
             });
             self.overlay.draw(&mut pass);
+            self.text.draw(&mut pass);
         }
     }
 }

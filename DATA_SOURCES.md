@@ -19,7 +19,9 @@ Used for:
 - magnitudes;
 - B−V colour values;
 - proper motion where available;
-- distance filtering.
+- distance filtering;
+- generated top-50 bright-star labels and bright-star-weighted constellation
+  label anchors in `crates/renderer/build.rs`.
 
 Acquisition:
 
@@ -202,7 +204,8 @@ Some data is transformed at build time or embedded for WASM / single-binary use.
 Current generated / embedded paths:
 
 - `crates/catalog/build.rs` for embedded catalog support;
-- `crates/renderer/build.rs` for compact constellation data.
+- `crates/renderer/build.rs` for compact constellation data and generated
+  label metadata (`label_data.rs` in Cargo `OUT_DIR`).
 
 Rules:
 

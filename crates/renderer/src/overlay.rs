@@ -1,6 +1,6 @@
 //! Sky overlays: horizon, cardinal marks, alt-az grid, equatorial grid,
 //! ecliptic, celestial equator, galactic equator, local meridian,
-//! constellation lines, and IAU constellation boundaries.
+//! constellation lines, IAU constellation boundaries, and text labels.
 //!
 //! Two coordinate frames are supported per-layer:
 //! - **Equatorial** (J2000): geometry rotates with the celestial sphere as time
@@ -74,6 +74,16 @@ pub enum OverlayKind {
     ConstellationLines,
     /// IAU/Delporte constellation boundaries embedded by the renderer crate.
     ConstellationBoundaries,
+    /// Names/designations for the brightest catalogue stars.
+    StarLabels,
+    /// Names for Mercury through Neptune at their apparent positions.
+    PlanetLabels,
+    /// IAU constellation names placed near bright-star centroids.
+    ConstellationLabels,
+    /// Text N/E/S/W cardinal labels on the horizon.
+    CardinalLabels,
+    /// Numeric degree labels for the local alt-az grid.
+    DegreeLabels,
 }
 
 impl OverlayKind {
@@ -94,6 +104,11 @@ impl OverlayKind {
             OverlayKind::GalacticEquator => "galactic-equator",
             OverlayKind::ConstellationLines => "constellation-lines",
             OverlayKind::ConstellationBoundaries => "constellation-boundaries",
+            OverlayKind::StarLabels => "star-labels",
+            OverlayKind::PlanetLabels => "planet-labels",
+            OverlayKind::ConstellationLabels => "constellation-labels",
+            OverlayKind::CardinalLabels => "cardinal-labels",
+            OverlayKind::DegreeLabels => "degree-labels",
         }
     }
 
@@ -111,6 +126,11 @@ impl OverlayKind {
             "galactic-equator" => OverlayKind::GalacticEquator,
             "constellation-lines" => OverlayKind::ConstellationLines,
             "constellation-boundaries" => OverlayKind::ConstellationBoundaries,
+            "star-labels" => OverlayKind::StarLabels,
+            "planet-labels" => OverlayKind::PlanetLabels,
+            "constellation-labels" => OverlayKind::ConstellationLabels,
+            "cardinal-labels" => OverlayKind::CardinalLabels,
+            "degree-labels" => OverlayKind::DegreeLabels,
             _ => return None,
         })
     }
@@ -122,14 +142,18 @@ pub struct OverlayConfig {
     pub layers: Vec<OverlayKind>,
     /// Spacing between grid lines in degrees (for `AltAzGrid` and `EquatorialGrid`).
     pub grid_step_deg: f64,
-    /// Global multiplier on each layer's alpha. 0.0 = invisible, 1.0 = fully opaque.
+    /// Global multiplier on line-overlay alpha. Text labels remain fully opaque for legibility.
     pub opacity: f32,
 }
 
 impl Default for OverlayConfig {
     fn default() -> Self {
         Self {
-            layers: vec![OverlayKind::Horizon, OverlayKind::Cardinals],
+            layers: vec![
+                OverlayKind::Horizon,
+                OverlayKind::Cardinals,
+                OverlayKind::CardinalLabels,
+            ],
             grid_step_deg: 15.0,
             opacity: 0.6,
         }
@@ -438,6 +462,11 @@ fn build_layer(
             segments_to_vertices(&constellation_boundaries()),
             [0.45, 0.45, 0.55],
         ),
+        OverlayKind::StarLabels
+        | OverlayKind::PlanetLabels
+        | OverlayKind::ConstellationLabels
+        | OverlayKind::CardinalLabels
+        | OverlayKind::DegreeLabels => (OverlayFrame::Horizontal, Vec::new(), [1.0, 1.0, 1.0]),
     }
 }
 
@@ -749,6 +778,11 @@ mod tests {
             OverlayKind::GalacticEquator,
             OverlayKind::ConstellationLines,
             OverlayKind::ConstellationBoundaries,
+            OverlayKind::StarLabels,
+            OverlayKind::PlanetLabels,
+            OverlayKind::ConstellationLabels,
+            OverlayKind::CardinalLabels,
+            OverlayKind::DegreeLabels,
         ] {
             let s = kind.as_kebab_str();
             assert_eq!(

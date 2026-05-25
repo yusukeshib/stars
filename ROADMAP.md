@@ -61,11 +61,10 @@ illuminants and atmosphere parameters rather than by hard-coded gradients.
 
 **Current highest priority:** continue the remaining visual Phase 4 work in a
 small, shippable sequence: out-of-Earth / galactic viewpoints, deep-sky
-overlays, and telescope eyepiece simulation. Text labels from Phase 1 are also
-still open. Phase 1', Phase 2, the core stellar apparent-place corrections, and
-full-sky projections are now complete. A row is `✅ done` only when the model
-named in its references is implemented, documented, tested, and wired into all
-relevant hosts.
+overlays, and telescope eyepiece simulation. Phase 1, Phase 1', Phase 2, the
+core stellar apparent-place corrections, and full-sky projections are now
+complete. A row is `✅ done` only when the model named in its references is
+implemented, documented, tested, and wired into all relevant hosts.
 
 ### Atmosphere implementation ladder
 
@@ -115,8 +114,8 @@ Columns:
 | `P1-08` | 1 | **Galactic equator overlay** | Same line pipeline as ecliptic; uses the transform from Phase 1' | ✅ done (`renderer::overlay`) |
 | `P1-09` | 1 | **Constellation lines** — modern western stick figures | `crates/renderer/data/constellation_lines.csv`, derived from BSD-licensed d3-celestial line data, compacted by the renderer build script, and drawn by `renderer::overlay` | ✅ done (`renderer::constellations`, `renderer::overlay`) |
 | `P1-10` | 1 | **Constellation boundaries** — IAU/Delporte regions | `crates/renderer/data/constellation_boundaries.csv`, derived from CDS VI/49 / Delporte 1930 B1875 boundary vertices precessed to J2000 and compacted by the renderer build script | ✅ done (`renderer::constellations`, `renderer::overlay`) |
-| `P1-11` | 1 | **Star / planet / constellation labels** — star proper names + Bayer / Flamsteed for top ~50 stars, planet names, and constellation names | Needs a font atlas and label-placement pass | ⬜ |
-| `P1-12` | 1 | **N / E / S / W and degree labels** | Text rendering from the same font atlas as sky labels | ⬜ |
+| `P1-11` | 1 | **Star / planet / constellation labels** — star proper names + Bayer / Flamsteed for top ~50 stars, planet names, and constellation names | Built-in bitmap font atlas + screen-space label-placement pass; top-50 star labels and constellation label anchors are generated from HYG v4.2, solar-system labels use renderer apparent Sun/Moon/planet positions | ✅ done (`renderer::text`, `renderer::overlay`) |
+| `P1-12` | 1 | **N / E / S / W and degree labels** | Same text atlas draws default cardinal labels and optional alt-az degree labels | ✅ done (`renderer::text`, `apps/{cli,viewer,web}`) |
 | `P1P-01` | 1' | **Photometric zeropoint** — `magnitude → illuminance (lux)` so the whole pipeline runs in physical units | Schaefer, B. E. 1990, PASP 102, 212 | ✅ done (`astronomy::photometry`) |
 | `P1P-02` | 1' | **Mesopic chromatic-fidelity weight** — log-linear blend over the 0.005–5 cd/m² mesopic range, applied per-star so only bright stars retain B-V colour | CIE 191:2010, *Recommended System for Mesopic Photometry Based on Visual Performance* | ✅ done (`astronomy::photometry`) |
 | `P1P-03` | 1' | **Purkinje-shifted scotopic desaturation** — faint stars collapse toward a rod-weighted (~507 nm peak) grey rather than a flat luma | CIE 1951 V'(λ); Bowmaker & Dartnall 1980, J. Physiol. 298, 501 | ✅ done (`astronomy::photometry`) |
@@ -168,8 +167,9 @@ Columns:
   cardinal markers + an overlay system controllable from a single
   settings panel, with the seven sky-reference circles (horizon,
   cardinals, alt-az grid, equatorial grid, ecliptic, celestial equator,
-  meridian), the galactic equator, constellation lines, and constellation
-  boundaries selectable per host.
+  meridian), the galactic equator, constellation lines, constellation
+  boundaries, star/planet/constellation labels, and cardinal/degree labels
+  selectable per host.
 - **Phase 1'.** Default-on rendering with a dark observer shows a visible
   Milky Way band, atmospheric reddening near the horizon, and a clear
   chromatic / achromatic split between bright and faint stars, with every

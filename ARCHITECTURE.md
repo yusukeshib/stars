@@ -24,7 +24,7 @@ between engine crates and host applications.
                     │ crates/renderer         │
                     │  Camera / LocalView     │
                     │  StarInstance           │
-                    │  overlays               │
+                    │  overlays + text labels │
                     │  skyglow + atmosphere   │
                     │  HDR + tonemap          │
                     │  Renderer::render       │
@@ -80,8 +80,8 @@ Owns GPU-facing rendering state:
 - `Renderer` lifecycle and render passes;
 - `Camera`, `LocalView`, `SkyProjection`, and GPU camera uniforms;
 - `StarInstance` and `build_star_instance`;
-- overlay geometry and `OverlayKind` / `OverlayConfig`;
-- HDR target, skyglow pass, tonemap pass, star shader, and atmosphere uniforms.
+- overlay geometry, text labels, and `OverlayKind` / `OverlayConfig`;
+- HDR target, skyglow pass, tonemap pass, star shader, text shader, and atmosphere uniforms.
 
 The renderer is platform-agnostic. It expects the host to provide a `wgpu::Device`,
 queue, target format, target `TextureView`, and resize / surface management.
@@ -143,8 +143,9 @@ A typical frame is:
 5. `Camera` combines `Observer`, `LocalView`, aspect ratio, `SkyProjection`,
    correction terms, solar-system apparent directions, and atmosphere settings
    into GPU uniforms.
-6. `Renderer::render` draws skyglow / bodies / stars / overlays into an HDR
-   target and tonemaps to the output view.
+6. `Renderer::render` draws skyglow / bodies / stars into an HDR target,
+   tonemaps to the output view, then composites overlay lines and labels in
+   LDR screen space.
 7. Host presents the surface or copies the headless texture to an image file.
 
 ## Renderer pipeline responsibilities
@@ -161,7 +162,8 @@ The exact pass layout can change, but responsibilities should stay separated:
 - **Star pass**: per-star proper motion, corrections, refraction, extinction,
   projection, PSF/glare, and HDR accumulation.
 - **Overlay pass**: reference circles, grids, constellation lines, boundaries,
-  projection, and future label/deep-sky overlays.
+  projection, and LDR text labels from the shared bitmap font atlas /
+  label-placement pass.
 - **Tonemap pass**: local adaptation, mesopic / scotopic split, and conversion
   from HDR radiance-like values to display output.
 

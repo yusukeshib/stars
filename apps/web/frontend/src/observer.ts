@@ -23,6 +23,11 @@ export const OVERLAY_LAYERS = [
   "galactic-equator",
   "constellation-lines",
   "constellation-boundaries",
+  "star-labels",
+  "planet-labels",
+  "constellation-labels",
+  "cardinal-labels",
+  "degree-labels",
 ] as const;
 export type OverlayLayer = (typeof OVERLAY_LAYERS)[number];
 
@@ -33,7 +38,7 @@ export type OverlayConfig = {
 };
 
 export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
-  layers: ["horizon"],
+  layers: ["horizon", "cardinal-labels"],
   gridStepDeg: 15,
   opacity: 0.6,
 };
@@ -140,6 +145,11 @@ export const OVERLAY_LABELS: Record<OverlayLayer, string> = {
   "galactic-equator": "Galactic equator",
   "constellation-lines": "Constellation lines",
   "constellation-boundaries": "Constellation boundaries (IAU)",
+  "star-labels": "Bright star labels",
+  "planet-labels": "Sun/Moon/planet labels",
+  "constellation-labels": "Constellation names",
+  "cardinal-labels": "Cardinal labels (N/E/S/W)",
+  "degree-labels": "Degree labels",
 };
 
 export const isOverlayLayer = (s: unknown): s is OverlayLayer =>
