@@ -7,10 +7,10 @@ use astronomy::Observer;
 use catalog::load_from_file;
 use clap::Parser;
 use renderer::{
-    build_star_instance, Atmosphere, Camera, LocalView, OverlayConfig, OverlayKind, Renderer,
-    StarInstance, NAKED_EYE_LIMITING_MAGNITUDE,
+    build_star_instance, Atmosphere, AtmospherePreset, Camera, LocalView, OverlayConfig,
+    OverlayKind, Renderer, StarInstance, NAKED_EYE_LIMITING_MAGNITUDE,
 };
-use stars_host_common::{parse_time_to_jd, OverlayArg};
+use stars_host_common::{parse_time_to_jd, AtmospherePresetArg, OverlayArg};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
@@ -74,13 +74,17 @@ struct Args {
     #[arg(long)]
     no_extinction: bool,
 
-    /// Aerosol / haze turbidity for sunlit sky scattering.
-    #[arg(long, default_value_t = 2.5)]
-    turbidity: f32,
+    /// Atmosphere preset used as the base for extinction and sky colour.
+    #[arg(long, default_value_t = AtmospherePresetArg::ClearRural)]
+    atmosphere_preset: AtmospherePresetArg,
 
-    /// Observer altitude above sea level in metres.
-    #[arg(long, default_value_t = 0.0)]
-    observer_altitude_m: f32,
+    /// Override aerosol / haze turbidity for sunlit sky scattering.
+    #[arg(long)]
+    turbidity: Option<f32>,
+
+    /// Override observer altitude above sea level in metres.
+    #[arg(long)]
+    observer_altitude_m: Option<f32>,
 }
 
 fn main() -> Result<()> {
@@ -122,11 +126,15 @@ fn main() -> Result<()> {
     let atmosphere = if args.no_extinction {
         Atmosphere::OFF
     } else {
-        Atmosphere {
-            turbidity: args.turbidity,
-            observer_altitude_m: args.observer_altitude_m,
-            ..Atmosphere::default()
+        let mut atmosphere =
+            Atmosphere::from_preset(AtmospherePreset::from(args.atmosphere_preset));
+        if let Some(turbidity) = args.turbidity {
+            atmosphere.turbidity = turbidity;
         }
+        if let Some(observer_altitude_m) = args.observer_altitude_m {
+            atmosphere.observer_altitude_m = observer_altitude_m;
+        }
+        atmosphere
     };
 
     let event_loop = EventLoop::new()?;

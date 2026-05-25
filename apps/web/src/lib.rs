@@ -4,8 +4,8 @@ use std::rc::Rc;
 use astronomy::{julian_date_from_unix_seconds, Observer};
 use catalog::load_embedded;
 use renderer::{
-    build_star_instance, Atmosphere, Camera, LocalView, OverlayConfig, OverlayKind, Renderer,
-    StarInstance, NAKED_EYE_LIMITING_MAGNITUDE,
+    build_star_instance, Atmosphere, AtmospherePreset, Camera, LocalView, OverlayConfig,
+    OverlayKind, Renderer, StarInstance, NAKED_EYE_LIMITING_MAGNITUDE,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -196,6 +196,18 @@ impl StarView {
                 observer_altitude_m,
                 ..Atmosphere::default()
             }
+        } else {
+            Atmosphere::OFF
+        };
+    }
+
+    /// Select one of the renderer's serializable atmosphere presets by kebab
+    /// name: `clear-rural`, `hazy-urban`, or `high-altitude`.
+    pub fn set_atmosphere_preset(&self, enabled: bool, preset: String) {
+        self.state.borrow_mut().camera.atmosphere = if enabled {
+            AtmospherePreset::from_kebab_str(&preset)
+                .map(Atmosphere::from_preset)
+                .unwrap_or_default()
         } else {
             Atmosphere::OFF
         };

@@ -52,6 +52,35 @@ pub struct CameraUniform {
     pub solar_rgb: [f32; 4],
 }
 
+/// Named atmosphere presets shared by CLI, native viewer, and web hosts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AtmospherePreset {
+    ClearRural,
+    HazyUrban,
+    HighAltitude,
+}
+
+impl AtmospherePreset {
+    pub const ALL: &'static [Self] = &[Self::ClearRural, Self::HazyUrban, Self::HighAltitude];
+
+    pub const fn as_kebab_str(self) -> &'static str {
+        match self {
+            Self::ClearRural => "clear-rural",
+            Self::HazyUrban => "hazy-urban",
+            Self::HighAltitude => "high-altitude",
+        }
+    }
+
+    pub fn from_kebab_str(s: &str) -> Option<Self> {
+        match s {
+            "clear-rural" => Some(Self::ClearRural),
+            "hazy-urban" => Some(Self::HazyUrban),
+            "high-altitude" => Some(Self::HighAltitude),
+            _ => None,
+        }
+    }
+}
+
 /// Observer-local atmosphere state that the renderer applies to the star and
 /// sky-background pipelines.
 #[derive(Debug, Clone, Copy)]
@@ -77,7 +106,7 @@ pub struct Atmosphere {
 impl Atmosphere {
     /// Clean sea-level dark site — the default model.
     /// See [`astronomy::photometry::DEFAULT_EXTINCTION_K_RGB`].
-    pub const DEFAULT: Self = Self {
+    pub const CLEAR_RURAL: Self = Self {
         extinction_k_rgb: [
             DEFAULT_EXTINCTION_K_RGB[0] as f32,
             DEFAULT_EXTINCTION_K_RGB[1] as f32,
@@ -87,6 +116,30 @@ impl Atmosphere {
         observer_altitude_m: 0.0,
         sunlit_scattering: true,
     };
+
+    pub const HAZY_URBAN: Self = Self {
+        extinction_k_rgb: [0.18, 0.28, 0.45],
+        turbidity: 5.0,
+        observer_altitude_m: 0.0,
+        sunlit_scattering: true,
+    };
+
+    pub const HIGH_ALTITUDE: Self = Self {
+        extinction_k_rgb: [0.06, 0.10, 0.18],
+        turbidity: 2.0,
+        observer_altitude_m: 2500.0,
+        sunlit_scattering: true,
+    };
+
+    pub const DEFAULT: Self = Self::CLEAR_RURAL;
+
+    pub const fn from_preset(preset: AtmospherePreset) -> Self {
+        match preset {
+            AtmospherePreset::ClearRural => Self::CLEAR_RURAL,
+            AtmospherePreset::HazyUrban => Self::HAZY_URBAN,
+            AtmospherePreset::HighAltitude => Self::HIGH_ALTITUDE,
+        }
+    }
 
     /// No atmosphere — every star renders at its catalogue magnitude
     /// regardless of altitude, and no daylight/twilight scattering is added.

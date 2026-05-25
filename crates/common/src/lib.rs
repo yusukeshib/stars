@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use astronomy::julian_date_from_unix_seconds;
 use clap::ValueEnum;
-use renderer::OverlayKind;
+use renderer::{AtmospherePreset, OverlayKind};
 
 /// CLI-facing mirror of [`OverlayKind`] that derives [`ValueEnum`] so `clap`
 /// can render kebab-case help text and parse user input. Kept in this crate
@@ -49,6 +49,30 @@ impl From<OverlayArg> for OverlayKind {
             OverlayArg::CelestialEquator => OverlayKind::CelestialEquator,
             OverlayArg::Meridian => OverlayKind::Meridian,
             OverlayArg::GalacticEquator => OverlayKind::GalacticEquator,
+        }
+    }
+}
+
+/// CLI-facing mirror of [`AtmospherePreset`] for `clap` parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
+pub enum AtmospherePresetArg {
+    ClearRural,
+    HazyUrban,
+    HighAltitude,
+}
+
+impl std::fmt::Display for AtmospherePresetArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(AtmospherePreset::from(*self).as_kebab_str())
+    }
+}
+
+impl From<AtmospherePresetArg> for AtmospherePreset {
+    fn from(p: AtmospherePresetArg) -> Self {
+        match p {
+            AtmospherePresetArg::ClearRural => AtmospherePreset::ClearRural,
+            AtmospherePresetArg::HazyUrban => AtmospherePreset::HazyUrban,
+            AtmospherePresetArg::HighAltitude => AtmospherePreset::HighAltitude,
         }
     }
 }
@@ -97,6 +121,20 @@ mod tests {
                 "kebab round-trip broken for {arg:?}"
             );
             // Display matches the canonical kebab name.
+            assert_eq!(format!("{arg}"), s);
+        }
+    }
+
+    #[test]
+    fn atmosphere_preset_arg_round_trips() {
+        for arg in [
+            AtmospherePresetArg::ClearRural,
+            AtmospherePresetArg::HazyUrban,
+            AtmospherePresetArg::HighAltitude,
+        ] {
+            let preset: AtmospherePreset = arg.into();
+            let s = preset.as_kebab_str();
+            assert_eq!(AtmospherePreset::from_kebab_str(s), Some(preset));
             assert_eq!(format!("{arg}"), s);
         }
     }
