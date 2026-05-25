@@ -94,14 +94,23 @@ struct Args {
     #[arg(long, default_value_t = DEFAULT_LIMITING_MAGNITUDE)]
     limiting_magnitude: f32,
 
-    /// Disable atmospheric extinction (Schaefer 1993). With the default
-    /// (extinction on), stars near the horizon dim and redden according to
-    /// the Kasten-Young 1989 airmass and Hardie 1962 / Schaefer 1993
-    /// per-channel coefficients. This flag turns the atmosphere off, so
-    /// every star renders at its catalogue magnitude regardless of
-    /// altitude — useful for debugging or for views from outside Earth.
+    /// Disable atmospheric extinction and sunlit sky scattering. With the
+    /// default atmosphere on, stars near the horizon dim/redden and daylight
+    /// or twilight sky colour is driven by the Sun position. This flag turns
+    /// the atmosphere off, so every star renders at catalogue magnitude and
+    /// the sky background contains only non-atmospheric components.
     #[arg(long)]
     no_extinction: bool,
+
+    /// Aerosol / haze turbidity for sunlit sky scattering. Around 2–3 is a
+    /// clear rural sky; larger values whiten and brighten the horizon.
+    #[arg(long, default_value_t = 2.5)]
+    turbidity: f32,
+
+    /// Observer altitude above sea level in metres for the sunlit scattering
+    /// optical-depth approximation.
+    #[arg(long, default_value_t = 0.0)]
+    observer_altitude_m: f32,
 
     /// Disable the diffuse-sky (integrated starlight + diffuse galactic
     /// light) skyglow pass. With the default (skyglow on), the sky
@@ -156,7 +165,11 @@ fn main() -> Result<()> {
     let atmosphere = if args.no_extinction {
         Atmosphere::OFF
     } else {
-        Atmosphere::default()
+        Atmosphere {
+            turbidity: args.turbidity,
+            observer_altitude_m: args.observer_altitude_m,
+            ..Atmosphere::default()
+        }
     };
     let skyglow_enabled = !args.no_skyglow;
 

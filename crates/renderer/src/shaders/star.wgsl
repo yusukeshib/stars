@@ -14,6 +14,12 @@ struct CameraUniform {
     // Per-channel extinction coefficients (mag per airmass). All zero
     // disables extinction.
     extinction_k_rgb: vec4<f32>,
+    // Apparent Sun direction in equatorial coordinates. `w` is angular radius.
+    sun_eq_radius: vec4<f32>,
+    // [turbidity, observer_altitude_m, solar_illuminance_lux, scattering_enabled].
+    atmosphere_params: vec4<f32>,
+    // D65-like top-of-atmosphere solar RGB; `w` reserved for moonlight.
+    solar_rgb: vec4<f32>,
 };
 
 fn viewport_size() -> vec2<f32> {

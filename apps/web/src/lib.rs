@@ -4,8 +4,8 @@ use std::rc::Rc;
 use astronomy::{julian_date_from_unix_seconds, Observer};
 use catalog::load_embedded;
 use renderer::{
-    build_star_instance, Camera, LocalView, OverlayConfig, OverlayKind, Renderer, StarInstance,
-    NAKED_EYE_LIMITING_MAGNITUDE,
+    build_star_instance, Atmosphere, Camera, LocalView, OverlayConfig, OverlayKind, Renderer,
+    StarInstance, NAKED_EYE_LIMITING_MAGNITUDE,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -184,6 +184,21 @@ impl StarView {
             fov_y_rad,
         }
         .clamped();
+    }
+
+    /// Update atmosphere controls from the web UI. `enabled=false` matches the
+    /// native `--no-extinction` flag and disables both extinction and sunlit
+    /// scattering.
+    pub fn set_atmosphere(&self, enabled: bool, turbidity: f32, observer_altitude_m: f32) {
+        self.state.borrow_mut().camera.atmosphere = if enabled {
+            Atmosphere {
+                turbidity,
+                observer_altitude_m,
+                ..Atmosphere::default()
+            }
+        } else {
+            Atmosphere::OFF
+        };
     }
 
     pub fn resize(&self, width: u32, height: u32) {

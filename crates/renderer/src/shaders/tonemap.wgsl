@@ -46,6 +46,9 @@ struct CameraUniform {
     viewport_pixel_sr_zeropoint: vec4<f32>,
     zenith_eq: vec4<f32>,
     extinction_k_rgb: vec4<f32>,
+    sun_eq_radius: vec4<f32>,
+    atmosphere_params: vec4<f32>,
+    solar_rgb: vec4<f32>,
 };
 
 @group(0) @binding(0) var hdr_texture: texture_2d<f32>;

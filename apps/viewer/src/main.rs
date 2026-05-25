@@ -7,8 +7,8 @@ use astronomy::Observer;
 use catalog::load_from_file;
 use clap::Parser;
 use renderer::{
-    build_star_instance, Camera, LocalView, OverlayConfig, OverlayKind, Renderer, StarInstance,
-    NAKED_EYE_LIMITING_MAGNITUDE,
+    build_star_instance, Atmosphere, Camera, LocalView, OverlayConfig, OverlayKind, Renderer,
+    StarInstance, NAKED_EYE_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{parse_time_to_jd, OverlayArg};
 use winit::application::ApplicationHandler;
@@ -69,6 +69,18 @@ struct Args {
     /// Opacity of overlay lines (0..=1).
     #[arg(long, default_value_t = 0.6)]
     overlay_opacity: f32,
+
+    /// Disable atmospheric extinction and sunlit sky scattering.
+    #[arg(long)]
+    no_extinction: bool,
+
+    /// Aerosol / haze turbidity for sunlit sky scattering.
+    #[arg(long, default_value_t = 2.5)]
+    turbidity: f32,
+
+    /// Observer altitude above sea level in metres.
+    #[arg(long, default_value_t = 0.0)]
+    observer_altitude_m: f32,
 }
 
 fn main() -> Result<()> {
@@ -107,6 +119,16 @@ fn main() -> Result<()> {
         opacity: args.overlay_opacity.clamp(0.0, 1.0),
     };
 
+    let atmosphere = if args.no_extinction {
+        Atmosphere::OFF
+    } else {
+        Atmosphere {
+            turbidity: args.turbidity,
+            observer_altitude_m: args.observer_altitude_m,
+            ..Atmosphere::default()
+        }
+    };
+
     let event_loop = EventLoop::new()?;
     let mut app = App::new(
         instances,
@@ -116,6 +138,7 @@ fn main() -> Result<()> {
         initial_view,
         overlays,
         limiting_mag,
+        atmosphere,
     );
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -140,6 +163,7 @@ struct App {
     initial_view: LocalView,
     overlays: OverlayConfig,
     limiting_magnitude: f32,
+    atmosphere: Atmosphere,
     sky_clock: SkyClock,
     mouse_pressed: bool,
     last_mouse: Option<(f64, f64)>,
@@ -203,6 +227,7 @@ impl App {
         initial_view: LocalView,
         overlays: OverlayConfig,
         limiting_magnitude: f32,
+        atmosphere: Atmosphere,
     ) -> Self {
         Self {
             gpu: None,
@@ -213,6 +238,7 @@ impl App {
             initial_view,
             overlays,
             limiting_magnitude,
+            atmosphere,
             sky_clock: SkyClock::new(start_jd),
             mouse_pressed: false,
             last_mouse: None,
@@ -276,6 +302,7 @@ impl ApplicationHandler for App {
             size.width as f32 / size.height as f32,
         );
         camera.limiting_magnitude = self.limiting_magnitude;
+        camera.atmosphere = self.atmosphere;
 
         self.gpu = Some(GpuState {
             surface,

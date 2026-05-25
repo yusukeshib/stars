@@ -1,5 +1,7 @@
 use astronomy::photometry::DEFAULT_EXTINCTION_K_RGB;
-use astronomy::{equatorial_to_horizontal_matrix, lmst_radians, Observer};
+use astronomy::{
+    apparent_sun, equatorial_to_horizontal_matrix, illuminants, lmst_radians, Observer,
+};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
@@ -39,12 +41,19 @@ pub struct CameraUniform {
     /// Per-channel atmospheric extinction coefficients (mag per airmass).
     /// Set to `[0, 0, 0, 0]` to disable extinction. `w` is unused.
     pub extinction_k_rgb: [f32; 4],
+    /// Apparent Sun direction in equatorial coordinates. `w` is the apparent
+    /// solar angular radius in radians.
+    pub sun_eq_radius: [f32; 4],
+    /// Atmosphere controls for the sunlit-scattering shader:
+    /// `[turbidity, observer_altitude_m, solar_illuminance_lux, enabled]`.
+    pub atmosphere_params: [f32; 4],
+    /// Top-of-atmosphere solar RGB illuminant, normalised around D65. `w` is
+    /// reserved for moonlight intensity once the Moon ephemeris lands.
+    pub solar_rgb: [f32; 4],
 }
 
-/// Observer-local atmosphere state that the renderer applies to the star
-/// pipeline. Currently captures the per-channel extinction coefficients
-/// (Schaefer 1993). A future PR may grow this to include refraction,
-/// aerosol scattering, sky brightness, etc. — see ROADMAP Phase 1'.
+/// Observer-local atmosphere state that the renderer applies to the star and
+/// sky-background pipelines.
 #[derive(Debug, Clone, Copy)]
 pub struct Atmosphere {
     /// Per-channel extinction coefficients `[k_R, k_G, k_B]` in magnitudes
@@ -53,6 +62,16 @@ pub struct Atmosphere {
     /// channel, where `X` is the Kasten-Young 1989 airmass at the star's
     /// altitude.
     pub extinction_k_rgb: [f32; 3],
+    /// Aerosol / haze control for sunlit sky colour. Values around 2–3 are
+    /// clear rural skies; larger values whiten and brighten the horizon via
+    /// the Mie component.
+    pub turbidity: f32,
+    /// Observer altitude above sea level in metres. The first-order shader
+    /// uses this to thin the optical depth exponentially with scale height.
+    pub observer_altitude_m: f32,
+    /// Whether direct solar scattering is enabled. `Atmosphere::OFF` disables
+    /// both extinction and daylight/twilight scattering.
+    pub sunlit_scattering: bool,
 }
 
 impl Atmosphere {
@@ -64,13 +83,19 @@ impl Atmosphere {
             DEFAULT_EXTINCTION_K_RGB[1] as f32,
             DEFAULT_EXTINCTION_K_RGB[2] as f32,
         ],
+        turbidity: 2.5,
+        observer_altitude_m: 0.0,
+        sunlit_scattering: true,
     };
 
     /// No atmosphere — every star renders at its catalogue magnitude
-    /// regardless of altitude. Useful for debugging or for views from
-    /// outside the Earth's atmosphere.
+    /// regardless of altitude, and no daylight/twilight scattering is added.
+    /// Useful for debugging or for views from outside the Earth's atmosphere.
     pub const OFF: Self = Self {
         extinction_k_rgb: [0.0, 0.0, 0.0],
+        turbidity: 0.0,
+        observer_altitude_m: 0.0,
+        sunlit_scattering: false,
     };
 }
 
@@ -257,6 +282,15 @@ impl Camera {
     pub fn uniform(&self, width: u32, height: u32) -> CameraUniform {
         let zenith = self.zenith_in_equatorial();
         let k = self.atmosphere.extinction_k_rgb;
+        let sun = apparent_sun(self.observer.julian_date);
+        let sun_dir = sun.direction_equatorial();
+        let solar_lux = illuminants::solar_illuminance_lux(sun.distance_au) as f32;
+        let solar_rgb = illuminants::SOLAR_LINEAR_RGB;
+        let scattering_enabled = if self.atmosphere.sunlit_scattering {
+            1.0
+        } else {
+            0.0
+        };
         let view_proj = self.view_proj();
         let inv_view_proj = view_proj.inverse();
         CameraUniform {
@@ -270,6 +304,24 @@ impl Camera {
             ],
             zenith_eq: [zenith.x, zenith.y, zenith.z, 0.0],
             extinction_k_rgb: [k[0], k[1], k[2], 0.0],
+            sun_eq_radius: [
+                sun_dir.x,
+                sun_dir.y,
+                sun_dir.z,
+                sun.angular_radius_rad as f32,
+            ],
+            atmosphere_params: [
+                self.atmosphere.turbidity.max(0.0),
+                self.atmosphere.observer_altitude_m.max(0.0),
+                solar_lux,
+                scattering_enabled,
+            ],
+            solar_rgb: [
+                solar_rgb[0] as f32,
+                solar_rgb[1] as f32,
+                solar_rgb[2] as f32,
+                0.0,
+            ],
         }
     }
 
