@@ -78,7 +78,8 @@ window size, camera state, or UI labels.
 Owns GPU-facing rendering state:
 
 - `Renderer` lifecycle and render passes;
-- `Camera`, `LocalView`, `SkyProjection`, `SkyViewpoint`, and GPU camera uniforms;
+- `Camera`, `LocalView`, `SkyProjection`, `SkyViewpoint`, `EyepieceSimulation`,
+  and GPU camera uniforms;
 - `StarInstance` and `build_star_instance`;
 - overlay geometry, text labels, and `OverlayKind` / `OverlayConfig`;
 - HDR target, skyglow pass, tonemap pass, star shader, text shader, and atmosphere uniforms.
@@ -91,7 +92,7 @@ queue, target format, target `TextureView`, and resize / surface management.
 Owns native-host convenience only:
 
 - CLI-facing mirrors of renderer enums;
-- native atmosphere / overlay argument conversion;
+- native atmosphere / overlay / eyepiece argument conversion;
 - RFC3339 / now time parsing;
 - filesystem catalog loading plus conversion to renderer `StarInstance`s.
 
@@ -144,14 +145,17 @@ All crates should preserve these conventions:
 A typical frame is:
 
 1. Host parses UI / CLI state into observer, time, view, overlays, atmosphere,
-   and optional planning settings.
+   optional telescope eyepiece optics, and optional planning settings.
 2. Catalog stars are loaded into `catalog::Star` records.
 3. Host or `crates/common` converts each star into `renderer::StarInstance`
    with perceptual radius, brightness, colour, and proper-motion fields.
 4. Host creates or resizes the `wgpu` surface / target texture.
 5. `Camera` combines `Observer`, `LocalView`, aspect ratio, `SkyProjection`,
-   `SkyViewpoint`, optional `ExternalViewpoint`, correction terms,
-   solar-system apparent directions, and atmosphere settings into GPU uniforms.
+   `SkyViewpoint`, optional `ExternalViewpoint`, optional `EyepieceSimulation`,
+   correction terms, solar-system apparent directions, and atmosphere settings
+   into GPU uniforms. When eyepiece mode is enabled for an Earth-centred
+   perspective view, the camera uses the derived true field of view instead of
+   the free FoV slider.
 6. `Renderer::render` draws skyglow / bodies / stars into an HDR target,
    tonemaps to the output view, then composites overlay lines and labels in
    LDR screen space.
@@ -162,7 +166,7 @@ A typical frame is:
 The exact pass layout can change, but responsibilities should stay separated:
 
 - **Camera/uniform preparation**: CPU-side apparent-date, observer-dependent,
-  and projection data that the GPU needs for a frame.
+  eyepiece true-field, and projection data that the GPU needs for a frame.
 - **Skyglow / atmosphere**: diffuse night sky, zodiacal light, airglow, dust,
   sunlit scattering, twilight, moonlit sky, and solar-system disks. Perspective
   reconstructs rays through the inverse view-projection matrix; all-sky modes

@@ -7,8 +7,13 @@ import {
   SKY_PROJECTIONS,
   SKY_VIEWPOINT_LABELS,
   SKY_VIEWPOINTS,
+  eyepieceExitPupilMm,
+  eyepieceMagnification,
+  eyepiecePlateScaleArcsecPerMm,
+  eyepieceTrueFieldDeg,
   type AtmosphereConfig,
   type AtmospherePreset,
+  type EyepieceConfig,
   type Observer,
   type OverlayConfig,
   type PlanetsConfig,
@@ -30,6 +35,7 @@ type Props = {
   atmosphere: AtmosphereConfig;
   planets: PlanetsConfig;
   projection: ProjectionConfig;
+  eyepiece: EyepieceConfig;
   planning: PlanningTable | null;
   onSetObserver: (next: Observer) => void;
   onSetTime: (timeMs: number) => void;
@@ -37,6 +43,7 @@ type Props = {
   onSetAtmosphere: (next: AtmosphereConfig) => void;
   onSetPlanets: (next: PlanetsConfig) => void;
   onSetProjection: (next: ProjectionConfig) => void;
+  onSetEyepiece: (next: EyepieceConfig) => void;
   onCopySessionUrl: () => void | Promise<void>;
   onUseGeolocation: () => void;
 };
@@ -142,6 +149,7 @@ export function StatusBar({
   atmosphere,
   planets,
   projection,
+  eyepiece,
   planning,
   onSetObserver,
   onSetTime,
@@ -149,6 +157,7 @@ export function StatusBar({
   onSetAtmosphere,
   onSetPlanets,
   onSetProjection,
+  onSetEyepiece,
   onCopySessionUrl,
   onUseGeolocation,
 }: Props) {
@@ -418,11 +427,13 @@ export function StatusBar({
             atmosphere={atmosphere}
             planets={planets}
             projection={projection}
+            eyepiece={eyepiece}
             planning={planning}
             onSetOverlays={onSetOverlays}
             onSetAtmosphere={onSetAtmosphere}
             onSetPlanets={onSetPlanets}
             onSetProjection={onSetProjection}
+            onSetEyepiece={onSetEyepiece}
             onCopySessionUrl={onCopySessionUrl}
           />
         </PopoverPanel>
@@ -483,7 +494,9 @@ export function StatusBar({
           <span style={mutedStyle}>FOV </span>
           {projection.viewpoint === "earth" && projection.projection !== "perspective"
             ? "full sky"
-            : fmtDeg(view.fovDeg)}
+            : eyepiece.enabled && projection.viewpoint === "earth" && projection.projection === "perspective"
+              ? `${eyepieceTrueFieldDeg(eyepiece).toFixed(2)}° eyepiece`
+              : fmtDeg(view.fovDeg)}
           <span style={separatorStyle}>  ·  </span>
           <span style={mutedStyle}>Projection </span>
           {SKY_PROJECTION_LABELS[projection.projection]}
@@ -537,11 +550,13 @@ type SettingsPanelProps = Pick<
   | "atmosphere"
   | "planets"
   | "projection"
+  | "eyepiece"
   | "planning"
   | "onSetOverlays"
   | "onSetAtmosphere"
   | "onSetPlanets"
   | "onSetProjection"
+  | "onSetEyepiece"
   | "onCopySessionUrl"
 >;
 
@@ -550,11 +565,13 @@ function SettingsPanel({
   atmosphere,
   planets,
   projection,
+  eyepiece,
   planning,
   onSetOverlays,
   onSetAtmosphere,
   onSetPlanets,
   onSetProjection,
+  onSetEyepiece,
   onCopySessionUrl,
 }: SettingsPanelProps) {
   const setAtmospherePreset = (preset: AtmospherePreset) => {
@@ -647,6 +664,90 @@ function SettingsPanel({
         </select>
         <p style={helperTextStyle}>
           Earth full-sky maps ignore FOV but still rotate with azimuth/altitude. External viewpoints use a perspective parsec-scale camera in IAU galactic Cartesian coordinates (Sun at 0,0,0; +X l=0°; +Y l=90°; +Z north galactic pole) and hide Earth-local overlays.
+        </p>
+      </SettingCard>
+
+      <SettingCard
+        title="Telescope eyepiece"
+        description="Derive plate scale and true field of view from an OTA + eyepiece pair. Active only for Earth perspective views."
+      >
+        <label style={{ ...checkboxRowStyle, marginBottom: 10 }}>
+          <input
+            type="checkbox"
+            checked={eyepiece.enabled}
+            onChange={(e) => onSetEyepiece({ ...eyepiece, enabled: e.target.checked })}
+            style={{ accentColor: "#8fb1ff" }}
+          />
+          Enable eyepiece simulation
+        </label>
+        <div style={advancedControlGridStyle}>
+          <SliderNumberRow
+            id="eyepiece-aperture"
+            label="OTA aperture (mm)"
+            value={eyepiece.apertureMm}
+            min={10}
+            max={2000}
+            step={10}
+            decimals={0}
+            onChange={(apertureMm) =>
+              onSetEyepiece({ ...eyepiece, enabled: true, apertureMm: clamp(apertureMm, 10, 2000) })
+            }
+          />
+          <SliderNumberRow
+            id="eyepiece-focal-length"
+            label="OTA focal length (mm)"
+            value={eyepiece.focalLengthMm}
+            min={50}
+            max={20000}
+            step={50}
+            decimals={0}
+            onChange={(focalLengthMm) =>
+              onSetEyepiece({ ...eyepiece, enabled: true, focalLengthMm: clamp(focalLengthMm, 50, 20000) })
+            }
+          />
+          <SliderNumberRow
+            id="eyepiece-ocular-focal"
+            label="Eyepiece focal length (mm)"
+            value={eyepiece.eyepieceFocalLengthMm}
+            min={1}
+            max={100}
+            step={0.5}
+            decimals={1}
+            onChange={(eyepieceFocalLengthMm) =>
+              onSetEyepiece({
+                ...eyepiece,
+                enabled: true,
+                eyepieceFocalLengthMm: clamp(eyepieceFocalLengthMm, 1, 100),
+              })
+            }
+          />
+          <SliderNumberRow
+            id="eyepiece-afov"
+            label="Apparent field (°)"
+            value={eyepiece.apparentFovDeg}
+            min={1}
+            max={120}
+            step={1}
+            decimals={0}
+            onChange={(apparentFovDeg) =>
+              onSetEyepiece({ ...eyepiece, enabled: true, apparentFovDeg: clamp(apparentFovDeg, 1, 120) })
+            }
+          />
+          <SliderNumberRow
+            id="eyepiece-field-stop"
+            label="Field stop (mm, 0 = AFOV estimate)"
+            value={eyepiece.fieldStopMm}
+            min={0}
+            max={120}
+            step={0.5}
+            decimals={1}
+            onChange={(fieldStopMm) =>
+              onSetEyepiece({ ...eyepiece, enabled: true, fieldStopMm: clamp(fieldStopMm, 0, 120) })
+            }
+          />
+        </div>
+        <p style={helperTextStyle}>
+          {eyepieceMagnification(eyepiece).toFixed(1)}× · {eyepieceTrueFieldDeg(eyepiece).toFixed(3)}° true field · {eyepiecePlateScaleArcsecPerMm(eyepiece).toFixed(1)}″/mm plate scale · {eyepieceExitPupilMm(eyepiece).toFixed(1)} mm exit pupil
         </p>
       </SettingCard>
 

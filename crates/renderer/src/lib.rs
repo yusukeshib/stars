@@ -9,7 +9,8 @@ mod tonemap;
 mod vertex;
 
 pub use camera::{
-    Atmosphere, AtmospherePreset, Camera, ExternalViewpoint, LocalView, SkyProjection, SkyViewpoint,
+    Atmosphere, AtmospherePreset, Camera, ExternalViewpoint, EyepieceSimulation, LocalView,
+    SkyProjection, SkyViewpoint,
 };
 pub use overlay::{OverlayConfig, OverlayKind};
 pub use renderer::Renderer;

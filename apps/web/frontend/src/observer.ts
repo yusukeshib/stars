@@ -61,6 +61,15 @@ export type PlanetsConfig = {
   enabled: boolean;
 };
 
+export type EyepieceConfig = {
+  enabled: boolean;
+  apertureMm: number;
+  focalLengthMm: number;
+  eyepieceFocalLengthMm: number;
+  apparentFovDeg: number;
+  fieldStopMm: number;
+};
+
 export const SKY_PROJECTIONS = ["perspective", "mollweide", "aitoff", "hammer"] as const;
 export type SkyProjection = (typeof SKY_PROJECTIONS)[number];
 
@@ -99,6 +108,15 @@ export const DEFAULT_PROJECTION_CONFIG: ProjectionConfig = {
 
 export const DEFAULT_PLANETS_CONFIG: PlanetsConfig = {
   enabled: true,
+};
+
+export const DEFAULT_EYEPIECE_CONFIG: EyepieceConfig = {
+  enabled: false,
+  apertureMm: 200,
+  focalLengthMm: 2000,
+  eyepieceFocalLengthMm: 25,
+  apparentFovDeg: 50,
+  fieldStopMm: 21,
 };
 
 export type PlanningRow = {
@@ -191,7 +209,7 @@ export const isOverlayLayer = (s: unknown): s is OverlayLayer =>
 
 export const MIN_ALTITUDE_DEG = -89.5;
 export const MAX_ALTITUDE_DEG = 89.5;
-export const MIN_FOV_DEG = 5;
+export const MIN_FOV_DEG = 0.05;
 export const MAX_FOV_DEG = 120;
 
 export const clampAltitude = (deg: number): number =>
@@ -206,4 +224,39 @@ export const clampFov = (deg: number): number =>
   Math.max(MIN_FOV_DEG, Math.min(MAX_FOV_DEG, deg));
 
 const DEG = Math.PI / 180;
+const RAD = 180 / Math.PI;
 export const toRad = (d: number) => d * DEG;
+
+const positiveOr = (value: number, fallback: number): number =>
+  Number.isFinite(value) && value > 0 ? value : fallback;
+
+export const sanitizedEyepiece = (eyepiece: EyepieceConfig): EyepieceConfig => ({
+  enabled: eyepiece.enabled,
+  apertureMm: positiveOr(eyepiece.apertureMm, DEFAULT_EYEPIECE_CONFIG.apertureMm),
+  focalLengthMm: positiveOr(eyepiece.focalLengthMm, DEFAULT_EYEPIECE_CONFIG.focalLengthMm),
+  eyepieceFocalLengthMm: positiveOr(
+    eyepiece.eyepieceFocalLengthMm,
+    DEFAULT_EYEPIECE_CONFIG.eyepieceFocalLengthMm,
+  ),
+  apparentFovDeg: positiveOr(eyepiece.apparentFovDeg, DEFAULT_EYEPIECE_CONFIG.apparentFovDeg),
+  fieldStopMm: Number.isFinite(eyepiece.fieldStopMm) ? Math.max(0, eyepiece.fieldStopMm) : DEFAULT_EYEPIECE_CONFIG.fieldStopMm,
+});
+
+export const eyepieceMagnification = (eyepiece: EyepieceConfig): number => {
+  const e = sanitizedEyepiece(eyepiece);
+  return e.focalLengthMm / e.eyepieceFocalLengthMm;
+};
+
+export const eyepiecePlateScaleArcsecPerMm = (eyepiece: EyepieceConfig): number =>
+  206264.806 / sanitizedEyepiece(eyepiece).focalLengthMm;
+
+export const eyepieceExitPupilMm = (eyepiece: EyepieceConfig): number =>
+  sanitizedEyepiece(eyepiece).apertureMm / eyepieceMagnification(eyepiece);
+
+export const eyepieceTrueFieldDeg = (eyepiece: EyepieceConfig): number => {
+  const e = sanitizedEyepiece(eyepiece);
+  const trueFieldRad = e.fieldStopMm > 0
+    ? 2 * Math.atan(e.fieldStopMm / (2 * e.focalLengthMm))
+    : (e.apparentFovDeg * DEG) / eyepieceMagnification(e);
+  return clampFov(trueFieldRad * RAD);
+};

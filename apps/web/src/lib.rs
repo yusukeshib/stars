@@ -7,9 +7,9 @@ use astronomy::{
 };
 use catalog::load_embedded;
 use renderer::{
-    build_star_instance, Atmosphere, AtmospherePreset, Camera, ExternalViewpoint, LocalView,
-    OverlayConfig, OverlayKind, Renderer, SkyProjection, SkyViewpoint, StarInstance,
-    DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    build_star_instance, Atmosphere, AtmospherePreset, Camera, ExternalViewpoint,
+    EyepieceSimulation, LocalView, OverlayConfig, OverlayKind, Renderer, SkyProjection,
+    SkyViewpoint, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -240,6 +240,27 @@ impl StarView {
 
     pub fn set_planets_enabled(&self, enabled: bool) {
         self.state.borrow_mut().camera.planets_enabled = enabled;
+    }
+
+    /// Update the telescope eyepiece simulator. When enabled, the renderer
+    /// overrides the perspective FoV with the true field from these optics.
+    pub fn set_eyepiece_simulation(
+        &self,
+        enabled: bool,
+        aperture_mm: f32,
+        focal_length_mm: f32,
+        eyepiece_focal_length_mm: f32,
+        apparent_fov_deg: f32,
+        field_stop_mm: f32,
+    ) {
+        self.state.borrow_mut().camera.eyepiece = EyepieceSimulation {
+            enabled,
+            aperture_mm,
+            focal_length_mm,
+            eyepiece_focal_length_mm,
+            apparent_fov_deg,
+            field_stop_mm,
+        };
     }
 
     /// Select the active screen projection by kebab-case name: `perspective`,

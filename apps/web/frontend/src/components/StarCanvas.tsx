@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { StarView } from "stars-web";
-import { toRad, type AtmosphereConfig, type Observer, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type View } from "../observer";
+import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type EyepieceConfig, type Observer, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type View } from "../observer";
 
 type Props = {
   observer: Observer;
@@ -11,6 +11,7 @@ type Props = {
   atmosphere: AtmosphereConfig;
   planets: PlanetsConfig;
   projection: ProjectionConfig;
+  eyepiece: EyepieceConfig;
   onDrag: (deltaAzDeg: number, deltaAltDeg: number) => void;
   onWheel: (zoomFactor: number) => void;
   onSunAltitude: (sunAltitudeDeg: number) => void;
@@ -37,6 +38,7 @@ export function StarCanvas({
   atmosphere,
   planets,
   projection,
+  eyepiece,
   onDrag,
   onWheel,
   onSunAltitude,
@@ -57,6 +59,7 @@ export function StarCanvas({
   const atmosphereRef = useRef(atmosphere);
   const planetsRef = useRef(planets);
   const projectionRef = useRef(projection);
+  const eyepieceRef = useRef(eyepiece);
   observerRef.current = observer;
   viewRef.current = view;
   timeRef.current = timeMs;
@@ -64,6 +67,7 @@ export function StarCanvas({
   atmosphereRef.current = atmosphere;
   planetsRef.current = planets;
   projectionRef.current = projection;
+  eyepieceRef.current = eyepiece;
 
   // Push overlays to wasm whenever the config changes. Geometry is rebuilt on
   // the GPU side, so we don't want to do it every frame -- a useEffect keyed
@@ -78,6 +82,17 @@ export function StarCanvas({
   useEffect(() => {
     handleRef.current?.set_planets_enabled(planets.enabled);
   }, [planets]);
+
+  useEffect(() => {
+    handleRef.current?.set_eyepiece_simulation(
+      eyepiece.enabled,
+      eyepiece.apertureMm,
+      eyepiece.focalLengthMm,
+      eyepiece.eyepieceFocalLengthMm,
+      eyepiece.apparentFovDeg,
+      eyepiece.fieldStopMm,
+    );
+  }, [eyepiece]);
 
   useEffect(() => {
     const handle = handleRef.current;
@@ -137,6 +152,15 @@ export function StarCanvas({
         at.temperatureC,
       );
       handle.set_planets_enabled(planetsRef.current.enabled);
+      const ep = eyepieceRef.current;
+      handle.set_eyepiece_simulation(
+        ep.enabled,
+        ep.apertureMm,
+        ep.focalLengthMm,
+        ep.eyepieceFocalLengthMm,
+        ep.apparentFovDeg,
+        ep.fieldStopMm,
+      );
       handle.set_projection(projectionRef.current.projection);
       handle.set_viewpoint(projectionRef.current.viewpoint);
       handle.set_external_viewpoint(
@@ -259,7 +283,10 @@ export function StarCanvas({
         d.y = e.clientY;
         // Drag distance in degrees scales with the current FOV so the feel stays
         // constant whether the user is zoomed wide or tight.
-        const scale = view.fovDeg / canvasRef.current!.clientHeight;
+        const effectiveFovDeg = eyepiece.enabled && projection.viewpoint === "earth" && projection.projection === "perspective"
+          ? eyepieceTrueFieldDeg(eyepiece)
+          : view.fovDeg;
+        const scale = effectiveFovDeg / canvasRef.current!.clientHeight;
         onDrag(-dx * scale, dy * scale);
       }}
       onPointerUp={(e) => {

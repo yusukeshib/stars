@@ -419,6 +419,114 @@ impl Default for LocalView {
     }
 }
 
+/// Telescope optical train used to derive an eyepiece true field of view.
+///
+/// The model intentionally stays geometric: plate scale is `206264.806 /
+/// focal_length_mm` arcsec/mm, magnification is OTA focal length divided by
+/// eyepiece focal length, and the true field is either the eyepiece field-stop
+/// angle or the apparent-field / magnification approximation when no physical
+/// field stop is provided.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EyepieceSimulation {
+    /// Whether the optical train should override [`LocalView::fov_y_rad`].
+    pub enabled: bool,
+    /// OTA clear aperture in millimetres. Used for exit-pupil reporting.
+    pub aperture_mm: f32,
+    /// OTA focal length in millimetres. Sets plate scale and true field.
+    pub focal_length_mm: f32,
+    /// Eyepiece focal length in millimetres.
+    pub eyepiece_focal_length_mm: f32,
+    /// Eyepiece apparent field of view in degrees, used when `field_stop_mm`
+    /// is zero or non-finite.
+    pub apparent_fov_deg: f32,
+    /// Eyepiece field-stop diameter in millimetres. Values `<= 0` select the
+    /// apparent-field / magnification estimate.
+    pub field_stop_mm: f32,
+}
+
+impl EyepieceSimulation {
+    pub const OFF: Self = Self {
+        enabled: false,
+        aperture_mm: 200.0,
+        focal_length_mm: 2000.0,
+        eyepiece_focal_length_mm: 25.0,
+        apparent_fov_deg: 50.0,
+        field_stop_mm: 21.0,
+    };
+
+    pub const DEFAULT_ENABLED: Self = Self {
+        enabled: true,
+        ..Self::OFF
+    };
+
+    fn finite_positive(value: f32, fallback: f32) -> f32 {
+        if value.is_finite() && value > 0.0 {
+            value
+        } else {
+            fallback
+        }
+    }
+
+    fn sanitized(self) -> Self {
+        Self {
+            enabled: self.enabled,
+            aperture_mm: Self::finite_positive(self.aperture_mm, Self::OFF.aperture_mm),
+            focal_length_mm: Self::finite_positive(self.focal_length_mm, Self::OFF.focal_length_mm),
+            eyepiece_focal_length_mm: Self::finite_positive(
+                self.eyepiece_focal_length_mm,
+                Self::OFF.eyepiece_focal_length_mm,
+            ),
+            apparent_fov_deg: Self::finite_positive(
+                self.apparent_fov_deg,
+                Self::OFF.apparent_fov_deg,
+            ),
+            field_stop_mm: if self.field_stop_mm.is_finite() {
+                self.field_stop_mm.max(0.0)
+            } else {
+                Self::OFF.field_stop_mm
+            },
+        }
+    }
+
+    /// Plate scale at the OTA focal plane in arcseconds per millimetre.
+    pub fn plate_scale_arcsec_per_mm(self) -> f32 {
+        206_264.81 / self.sanitized().focal_length_mm
+    }
+
+    /// Eyepiece magnification (`OTA focal length / eyepiece focal length`).
+    pub fn magnification(self) -> f32 {
+        let s = self.sanitized();
+        s.focal_length_mm / s.eyepiece_focal_length_mm
+    }
+
+    /// Exit-pupil diameter in millimetres.
+    pub fn exit_pupil_mm(self) -> f32 {
+        self.sanitized().aperture_mm / self.magnification()
+    }
+
+    /// Geometric true field of view in radians.
+    pub fn true_field_rad(self) -> f32 {
+        let s = self.sanitized();
+        let field_rad = if s.field_stop_mm > 0.0 {
+            2.0 * (s.field_stop_mm / (2.0 * s.focal_length_mm)).atan()
+        } else {
+            s.apparent_fov_deg.to_radians() / s.magnification()
+        };
+        field_rad.clamp(MIN_FOV_Y_RAD, MAX_FOV_Y_RAD)
+    }
+
+    /// Geometric true field of view in degrees.
+    pub fn true_field_deg(self) -> f32 {
+        self.true_field_rad().to_degrees()
+    }
+}
+
+impl Default for EyepieceSimulation {
+    fn default() -> Self {
+        Self::OFF
+    }
+}
+
 /// How close to the zenith / nadir the camera is allowed to tilt before the
 /// clamp engages, in radians. The clamp exists because `Mat4::look_at_rh`
 /// uses `forward × up` to build the right-axis: when `forward` aligns with
@@ -429,10 +537,10 @@ impl Default for LocalView {
 /// gimbal-lock-free representation (quaternion) rather than widening this.
 const ALT_LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.01;
 
-/// Narrowest supported vertical field of view. Below ≈5° the current single-
-/// precision view-projection matrices and fixed-size point-spread sprites make
-/// the renderer behave more like a telescope simulator, which Phase 1 is not.
-const MIN_FOV_Y_RAD: f32 = 5.0 * std::f32::consts::PI / 180.0;
+/// Narrowest supported vertical field of view. Phase 4's eyepiece simulator
+/// intentionally enters sub-degree fields, so the clamp is now set by
+/// practical matrix / input sanity rather than naked-eye ergonomics.
+const MIN_FOV_Y_RAD: f32 = 0.05 * std::f32::consts::PI / 180.0;
 /// Widest supported vertical field of view. Larger values are better served by
 /// a full-sky projection (ROADMAP Phase 4) rather than a perspective camera.
 const MAX_FOV_Y_RAD: f32 = 120.0 * std::f32::consts::PI / 180.0;
@@ -587,6 +695,10 @@ pub struct Camera {
     /// Whether Mercury through Neptune are rendered as apparent solar-system
     /// disks/points from the VSOP87 ephemeris.
     pub planets_enabled: bool,
+    /// Telescope/eyepiece optical train. When enabled for the Earth-centred
+    /// perspective view, its true field of view overrides [`LocalView::fov_y_rad`]
+    /// while keeping the same azimuth/altitude pointing.
+    pub eyepiece: EyepieceSimulation,
     /// Faintest magnitude the simulated observer should be able to detect.
     /// Anchors the linear-flux brightness scale used by both the star pass
     /// and the skyglow surface-brightness pass; see
@@ -608,6 +720,7 @@ impl Camera {
             viewpoint: SkyViewpoint::default(),
             external_viewpoint: ExternalViewpoint::default(),
             planets_enabled: true,
+            eyepiece: EyepieceSimulation::default(),
             limiting_magnitude: NAKED_EYE_LIMITING_MAGNITUDE,
         }
     }
@@ -627,7 +740,20 @@ impl Camera {
     }
 
     fn effective_view(&self) -> LocalView {
-        self.view.clamped()
+        let mut view = self.view.clamped();
+        if self.eyepiece.enabled && !self.viewpoint.is_external() && !self.projection.is_full_sky()
+        {
+            view.fov_y_rad = self.eyepiece.true_field_rad();
+        }
+        view
+    }
+
+    /// Vertical field of view actually used for perspective rendering.
+    ///
+    /// Interactive hosts use this to keep drag sensitivity matched to the
+    /// visible field when eyepiece simulation overrides the free FoV slider.
+    pub fn effective_fov_y_rad(&self) -> f32 {
+        self.effective_view().fov_y_rad
     }
 
     /// Forward direction (in local ENU) the camera is looking at.
@@ -1126,6 +1252,48 @@ mod tests {
         assert!((0.0..std::f32::consts::TAU).contains(&cam.view.azimuth_rad));
         assert!(cam.view.altitude_rad <= ALT_LIMIT);
         assert_eq!(cam.view.fov_y_rad, MIN_FOV_Y_RAD);
+    }
+
+    #[test]
+    fn eyepiece_optics_pin_plate_scale_and_true_field() {
+        let sim = EyepieceSimulation {
+            enabled: true,
+            aperture_mm: 200.0,
+            focal_length_mm: 2000.0,
+            eyepiece_focal_length_mm: 25.0,
+            apparent_fov_deg: 50.0,
+            field_stop_mm: 21.0,
+        };
+        assert!((sim.plate_scale_arcsec_per_mm() - 103.1324).abs() < 1e-3);
+        assert!((sim.magnification() - 80.0).abs() < 1e-6);
+        assert!((sim.exit_pupil_mm() - 2.5).abs() < 1e-6);
+        assert!((sim.true_field_deg() - 0.6016).abs() < 1e-3);
+
+        let afov_only = EyepieceSimulation {
+            field_stop_mm: 0.0,
+            ..sim
+        };
+        assert!((afov_only.true_field_deg() - 0.625).abs() < 1e-3);
+    }
+
+    #[test]
+    fn eyepiece_overrides_perspective_fov_only() {
+        let mut cam = Camera::new(observer_at(0.0), LocalView::default(), 1.0);
+        cam.eyepiece = EyepieceSimulation::DEFAULT_ENABLED;
+        assert!((cam.effective_view().fov_y_rad.to_degrees() - 0.6016).abs() < 1e-3);
+
+        cam.projection = SkyProjection::Mollweide;
+        assert_eq!(
+            cam.effective_view().fov_y_rad,
+            LocalView::default().fov_y_rad
+        );
+
+        cam.projection = SkyProjection::Perspective;
+        cam.viewpoint = SkyViewpoint::GalacticNorth;
+        assert_eq!(
+            cam.effective_view().fov_y_rad,
+            LocalView::default().fov_y_rad
+        );
     }
 
     /// The third row of the equatorial→ENU matrix — which `zenith_in_equatorial`
