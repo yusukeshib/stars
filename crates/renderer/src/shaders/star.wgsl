@@ -29,6 +29,25 @@ fn viewport_size() -> vec2<f32> {
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
 
+const DEG_TO_RAD: f32 = 0.017453292519943295;
+
+fn smoothstep01(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+fn dark_sky_visibility() -> f32 {
+    if camera.atmosphere_params.w <= 0.0 {
+        return 1.0;
+    }
+    let sun_dir = normalize(camera.sun_eq_radius.xyz);
+    let sun_alt = asin(clamp(dot(sun_dir, camera.zenith_eq.xyz), -1.0, 1.0));
+    // Full stellar visibility after astronomical twilight; almost no stellar
+    // visibility by civil twilight. Bright planets will get their own Phase-2
+    // rendering path instead of piggybacking on catalogue-star sprites.
+    return 1.0 - smoothstep01(-18.0 * DEG_TO_RAD, -6.0 * DEG_TO_RAD, sun_alt);
+}
+
 // Kasten & Young 1989 airmass (relative slant-path length through the
 // atmosphere). See `astronomy::photometry::airmass_kasten_young` for the
 // reference and tolerances; this is a literal WGSL port.
@@ -100,7 +119,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
     out.uv = input.quad_pos;
     out.color = attenuated_color;
-    out.brightness = input.star_brightness;
+    out.brightness = input.star_brightness * dark_sky_visibility();
     out.sprite_half_px = input.star_size;
     return out;
 }

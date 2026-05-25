@@ -108,6 +108,21 @@ fn smoothstep01(edge0: f32, edge1: f32, x: f32) -> f32 {
     return t * t * (3.0 - 2.0 * t);
 }
 
+fn sun_altitude_rad() -> f32 {
+    let sun_dir = normalize(camera.sun_eq_radius.xyz);
+    return asin(clamp(dot(sun_dir, camera.zenith_eq.xyz), -1.0, 1.0));
+}
+
+fn dark_sky_visibility() -> f32 {
+    if camera.atmosphere_params.w <= 0.0 {
+        return 1.0;
+    }
+    // Astronomical twilight (-18°) is where the sky is conventionally dark;
+    // civil twilight (-6°) is bright enough that the diffuse dark-sky terms
+    // should no longer be visible. Blend smoothly through nautical twilight.
+    return 1.0 - smoothstep01(-18.0 * DEG_TO_RAD, -6.0 * DEG_TO_RAD, sun_altitude_rad());
+}
+
 fn hdr_flux_from_cd_m2(luminance_cd_m2: vec3<f32>, zeropoint: f32) -> vec3<f32> {
     let zp_illum = exp(-0.4 * (zeropoint + 13.99) * LN10);
     let zp_luminance = zp_illum / EYE_PSF_SOLID_ANGLE_SR;
@@ -137,8 +152,7 @@ fn xyy_to_linear_rgb(xyy: vec3<f32>) -> vec3<f32> {
 
 fn preetham_sky_luminance_rgb(ray_dir: vec3<f32>, sin_alt: f32) -> vec3<f32> {
     let sun_dir = normalize(camera.sun_eq_radius.xyz);
-    let sun_sin_alt = dot(sun_dir, camera.zenith_eq.xyz);
-    let sun_alt = asin(clamp(sun_sin_alt, -1.0, 1.0));
+    let sun_alt = sun_altitude_rad();
     let twilight = smoothstep01(-18.0 * DEG_TO_RAD, 0.0, sun_alt);
     if twilight <= 0.0 {
         return vec3<f32>(0.0);
@@ -307,7 +321,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Ballesteros blackbody pipeline.
     let tint = vec3<f32>(0.92, 0.94, 1.00);
 
-    let night_radiance = tint * flux_per_pixel * attenuation;
+    let night_radiance = tint * flux_per_pixel * attenuation * dark_sky_visibility();
     let day_radiance = sunlit_scattering_radiance(ray_dir, sin_alt, zeropoint);
     return vec4<f32>(night_radiance + day_radiance, 1.0);
 }
