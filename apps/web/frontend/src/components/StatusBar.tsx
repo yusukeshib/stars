@@ -3,12 +3,16 @@ import {
   ATMOSPHERE_PRESET_DEFAULTS,
   ATMOSPHERE_PRESET_LABELS,
   ATMOSPHERE_PRESETS,
+  SKY_PROJECTION_LABELS,
+  SKY_PROJECTIONS,
   type AtmosphereConfig,
   type AtmospherePreset,
   type Observer,
   type OverlayConfig,
   type PlanetsConfig,
   type PlanningTable,
+  type ProjectionConfig,
+  type SkyProjection,
   type View,
 } from "../observer";
 import { OverlayToggles } from "./OverlayToggles";
@@ -21,12 +25,14 @@ type Props = {
   overlays: OverlayConfig;
   atmosphere: AtmosphereConfig;
   planets: PlanetsConfig;
+  projection: ProjectionConfig;
   planning: PlanningTable | null;
   onSetObserver: (next: Observer) => void;
   onSetTime: (timeMs: number) => void;
   onSetOverlays: (next: OverlayConfig) => void;
   onSetAtmosphere: (next: AtmosphereConfig) => void;
   onSetPlanets: (next: PlanetsConfig) => void;
+  onSetProjection: (next: ProjectionConfig) => void;
   onCopySessionUrl: () => void | Promise<void>;
   onUseGeolocation: () => void;
 };
@@ -88,12 +94,14 @@ export function StatusBar({
   overlays,
   atmosphere,
   planets,
+  projection,
   planning,
   onSetObserver,
   onSetTime,
   onSetOverlays,
   onSetAtmosphere,
   onSetPlanets,
+  onSetProjection,
   onCopySessionUrl,
   onUseGeolocation,
 }: Props) {
@@ -249,6 +257,28 @@ export function StatusBar({
               Mercury → Neptune
             </label>
           </Section>
+          <Section label="PROJECTION">
+            <label htmlFor="sky-projection" style={labelStyle}>
+              Screen projection
+            </label>
+            <select
+              id="sky-projection"
+              value={projection.projection}
+              onChange={(e) =>
+                onSetProjection({ projection: e.target.value as SkyProjection })
+              }
+              style={{ ...inputStyle, width: "100%" }}
+            >
+              {SKY_PROJECTIONS.map((p) => (
+                <option key={p} value={p}>
+                  {SKY_PROJECTION_LABELS[p]}
+                </option>
+              ))}
+            </select>
+            <p style={{ margin: "8px 0 0", fontSize: 11, opacity: 0.55 }}>
+              Full-sky maps ignore FOV but still rotate with azimuth/altitude.
+            </p>
+          </Section>
           {planning && <PlanningPanel planning={planning} />}
           <Section label="ATMOSPHERE">
             <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
@@ -401,7 +431,10 @@ export function StatusBar({
           {fmtDeg(view.altitudeDeg)}
           <span style={separatorStyle}>  ·  </span>
           <span style={mutedStyle}>FOV </span>
-          {fmtDeg(view.fovDeg)}
+          {projection.projection === "perspective" ? fmtDeg(view.fovDeg) : "full sky"}
+          <span style={separatorStyle}>  ·  </span>
+          <span style={mutedStyle}>Projection </span>
+          {SKY_PROJECTION_LABELS[projection.projection]}
           <span style={separatorStyle}>  ·  </span>
           <span style={mutedStyle}>Sky </span>
           {twilight}
@@ -608,6 +641,9 @@ const popoverStyle: React.CSSProperties = {
   left: 0,
   bottom: "calc(100% + 10px)",
   width: "min(360px, calc(100vw - 28px))",
+  maxHeight: "calc(100vh - 110px)",
+  overflowY: "auto",
+  overscrollBehavior: "contain",
   padding: "12px 14px 14px",
   background: "rgba(14, 18, 30, 0.96)",
   borderRadius: 12,

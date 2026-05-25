@@ -32,8 +32,11 @@ struct CameraUniform {
     // Apparent Moon direction in equatorial coordinates. `w` is approximate
     // moonlight illuminance in lux before local horizon/airmass attenuation.
     moon_eq_illuminance: vec4<f32>,
-    // [angular_radius_rad, illuminated_fraction, phase_angle_rad, unused].
+    // [angular_radius_rad, illuminated_fraction, phase_angle_rad, earth_shadow_fraction].
     moon_disk: vec4<f32>,
+    // [projection_mode, full_sky_scale_x, full_sky_scale_y, full_sky_flag].
+    // mode: 0=perspective, 1=Mollweide, 2=Aitoff, 3=Hammer.
+    projection_params: vec4<f32>,
 };
 
 fn viewport_size() -> vec2<f32> {
@@ -42,6 +45,71 @@ fn viewport_size() -> vec2<f32> {
 
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
+
+const PI: f32 = 3.14159265359;
+const HALF_PI: f32 = 1.57079632679;
+
+fn all_sky_lon_lat_from_view_dir(view_dir: vec3<f32>) -> vec2<f32> {
+    let d = normalize(view_dir);
+    return vec2<f32>(atan2(d.x, -d.z), asin(clamp(d.y, -1.0, 1.0)));
+}
+
+fn mollweide_project(lon: f32, lat: f32) -> vec2<f32> {
+    // Solve 2θ + sin(2θ) = π sin φ with a fixed Newton iteration. θ stays in
+    // [-π/2, π/2]; the polar cases converge safely under the clamp.
+    var theta = lat;
+    for (var i = 0; i < 6; i = i + 1) {
+        let f = 2.0 * theta + sin(2.0 * theta) - PI * sin(lat);
+        let fp = 2.0 + 2.0 * cos(2.0 * theta);
+        theta = theta - f / max(fp, 1e-4);
+        theta = clamp(theta, -HALF_PI, HALF_PI);
+    }
+    return vec2<f32>((lon / PI) * cos(theta), sin(theta));
+}
+
+fn aitoff_project(lon: f32, lat: f32) -> vec2<f32> {
+    let half_lon = 0.5 * lon;
+    let alpha = acos(clamp(cos(lat) * cos(half_lon), -1.0, 1.0));
+    let sinc = select(sin(alpha) / max(alpha, 1e-6), 1.0, abs(alpha) < 1e-6);
+    return vec2<f32>(2.0 * cos(lat) * sin(half_lon) / (PI * sinc), sin(lat) / (HALF_PI * sinc));
+}
+
+fn hammer_project(lon: f32, lat: f32) -> vec2<f32> {
+    let half_lon = 0.5 * lon;
+    let denom = sqrt(max(1.0 + cos(lat) * cos(half_lon), 1e-6));
+    return vec2<f32>(cos(lat) * sin(half_lon) / denom, sin(lat) / denom);
+}
+
+fn all_sky_project_from_view_dir(view_dir: vec3<f32>) -> vec4<f32> {
+    let lon_lat = all_sky_lon_lat_from_view_dir(view_dir);
+    let lon = lon_lat.x;
+    let lat = lon_lat.y;
+    let mode = camera.projection_params.x;
+    var p = mollweide_project(lon, lat);
+    if mode >= 2.5 {
+        p = hammer_project(lon, lat);
+    } else if mode >= 1.5 {
+        p = aitoff_project(lon, lat);
+    }
+    let scaled = p * camera.projection_params.yz;
+    return vec4<f32>(scaled, 0.5, 1.0);
+}
+
+fn project_equatorial_direction(direction: vec3<f32>, local_direction: vec3<f32>, atmosphere_active: bool) -> vec4<f32> {
+    if camera.projection_params.w > 0.5 {
+        let view_dir = select(
+            (camera.view_proj * vec4<f32>(direction, 0.0)).xyz,
+            (camera.view_proj_local * vec4<f32>(local_direction, 0.0)).xyz,
+            atmosphere_active,
+        );
+        return all_sky_project_from_view_dir(view_dir);
+    }
+    return select(
+        camera.view_proj * vec4<f32>(direction, 1.0),
+        camera.view_proj_local * vec4<f32>(local_direction, 1.0),
+        atmosphere_active,
+    );
+}
 
 // Kasten & Young 1989 airmass (relative slant-path length through the
 // atmosphere). See `astronomy::photometry::airmass_kasten_young` for the
@@ -129,11 +197,8 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     let atmosphere_active = k_rgb.x + k_rgb.y + k_rgb.z > 0.0;
     let corrected_j2000 = corrected_j2000_direction(input.star_pos, input.proper_motion);
     let corrected_date = (camera.j2000_to_date * vec4<f32>(corrected_j2000, 0.0)).xyz;
-    let clip = select(
-        camera.view_proj * vec4<f32>(corrected_j2000, 1.0),
-        camera.view_proj_local * vec4<f32>(refract_equatorial_direction(corrected_date), 1.0),
-        atmosphere_active,
-    );
+    let local_or_refracted = refract_equatorial_direction(corrected_date);
+    let clip = project_equatorial_direction(corrected_j2000, local_or_refracted, atmosphere_active);
 
     let pixel_offset = input.quad_pos * input.star_size;
     let ndc_offset = pixel_offset / viewport_size() * 2.0;

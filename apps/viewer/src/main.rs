@@ -11,7 +11,7 @@ use renderer::{
 };
 use stars_host_common::{
     atmosphere_from_args, load_star_instances_from_file, overlay_config_from_args,
-    parse_time_to_time_scales, AtmosphereOverrides, AtmospherePresetArg, OverlayArg,
+    parse_time_to_time_scales, AtmosphereOverrides, AtmospherePresetArg, OverlayArg, ProjectionArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -57,9 +57,13 @@ struct Args {
     #[arg(long, default_value_t = 30.0, allow_hyphen_values = true)]
     altitude: f64,
 
-    /// Initial vertical field of view, degrees.
+    /// Initial vertical field of view, degrees. Ignored by all-sky projections.
     #[arg(long, default_value_t = 70.0)]
     fov: f64,
+
+    /// Screen projection: perspective, mollweide, aitoff, or hammer.
+    #[arg(long, default_value_t = ProjectionArg::Perspective)]
+    projection: ProjectionArg,
 
     /// Path to the HYG-format star catalog CSV.
     #[arg(long, default_value = "crates/catalog/data/hyg_v42.csv")]
@@ -168,6 +172,7 @@ fn main() -> Result<()> {
         limiting_mag,
         atmosphere,
         !args.no_planets,
+        args.projection.into(),
     );
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -194,6 +199,7 @@ struct App {
     limiting_magnitude: f32,
     atmosphere: Atmosphere,
     planets_enabled: bool,
+    projection: renderer::SkyProjection,
     sky_clock: SkyClock,
     mouse_pressed: bool,
     last_mouse: Option<(f64, f64)>,
@@ -259,6 +265,7 @@ impl App {
         limiting_magnitude: f32,
         atmosphere: Atmosphere,
         planets_enabled: bool,
+        projection: renderer::SkyProjection,
     ) -> Self {
         Self {
             gpu: None,
@@ -271,6 +278,7 @@ impl App {
             limiting_magnitude,
             atmosphere,
             planets_enabled,
+            projection,
             sky_clock: SkyClock::new(start_jd),
             mouse_pressed: false,
             last_mouse: None,
@@ -367,6 +375,7 @@ impl ApplicationHandler for App {
         camera.limiting_magnitude = self.limiting_magnitude;
         camera.atmosphere = self.atmosphere;
         camera.planets_enabled = self.planets_enabled;
+        camera.projection = self.projection;
 
         self.gpu = Some(GpuState {
             surface,

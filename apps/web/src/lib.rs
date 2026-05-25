@@ -8,7 +8,7 @@ use astronomy::{
 use catalog::load_embedded;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, LocalView, OverlayConfig,
-    OverlayKind, Renderer, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    OverlayKind, Renderer, SkyProjection, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -236,6 +236,15 @@ impl StarView {
 
     pub fn set_planets_enabled(&self, enabled: bool) {
         self.state.borrow_mut().camera.planets_enabled = enabled;
+    }
+
+    /// Select the active screen projection by kebab-case name: `perspective`,
+    /// `mollweide`, `aitoff`, or `hammer`. Unknown names fall back to the
+    /// perspective camera so older JavaScript cannot leave the renderer in an
+    /// invalid state.
+    pub fn set_projection(&self, projection: String) {
+        self.state.borrow_mut().camera.projection =
+            SkyProjection::from_kebab_str(&projection).unwrap_or_default();
     }
 
     /// Return the current local-evening rise/transit/set table and twilight

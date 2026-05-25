@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { StarView } from "stars-web";
-import { toRad, type AtmosphereConfig, type Observer, type OverlayConfig, type PlanetsConfig, type PlanningTable, type View } from "../observer";
+import { toRad, type AtmosphereConfig, type Observer, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type View } from "../observer";
 
 type Props = {
   observer: Observer;
@@ -10,6 +10,7 @@ type Props = {
   overlays: OverlayConfig;
   atmosphere: AtmosphereConfig;
   planets: PlanetsConfig;
+  projection: ProjectionConfig;
   onDrag: (deltaAzDeg: number, deltaAltDeg: number) => void;
   onWheel: (zoomFactor: number) => void;
   onSunAltitude: (sunAltitudeDeg: number) => void;
@@ -35,6 +36,7 @@ export function StarCanvas({
   overlays,
   atmosphere,
   planets,
+  projection,
   onDrag,
   onWheel,
   onSunAltitude,
@@ -54,12 +56,14 @@ export function StarCanvas({
   const overlaysRef = useRef(overlays);
   const atmosphereRef = useRef(atmosphere);
   const planetsRef = useRef(planets);
+  const projectionRef = useRef(projection);
   observerRef.current = observer;
   viewRef.current = view;
   timeRef.current = timeMs;
   overlaysRef.current = overlays;
   atmosphereRef.current = atmosphere;
   planetsRef.current = planets;
+  projectionRef.current = projection;
 
   // Push overlays to wasm whenever the config changes. Geometry is rebuilt on
   // the GPU side, so we don't want to do it every frame -- a useEffect keyed
@@ -74,6 +78,10 @@ export function StarCanvas({
   useEffect(() => {
     handleRef.current?.set_planets_enabled(planets.enabled);
   }, [planets]);
+
+  useEffect(() => {
+    handleRef.current?.set_projection(projection.projection);
+  }, [projection]);
 
   useEffect(() => {
     handleRef.current?.set_atmosphere_config(
@@ -115,6 +123,7 @@ export function StarCanvas({
         at.temperatureC,
       );
       handle.set_planets_enabled(planetsRef.current.enabled);
+      handle.set_projection(projectionRef.current.projection);
 
       let lastSunAltitudePublish = 0;
       let lastPlanningPublish = -Infinity;

@@ -60,12 +60,12 @@ topocentric positions. The goal is for sky colour to be driven by physical
 illuminants and atmosphere parameters rather than by hard-coded gradients.
 
 **Current highest priority:** continue the remaining visual Phase 4 work in a
-small, shippable sequence: full-sky projections, out-of-Earth / galactic
-viewpoints, deep-sky overlays, and telescope eyepiece simulation. Text labels
-from Phase 1 are also still open. Phase 1', Phase 2, and the core stellar
-apparent-place corrections are now complete. A row is `✅ done` only when the
-model named in its references is implemented, documented, tested, and wired
-into all relevant hosts.
+small, shippable sequence: out-of-Earth / galactic viewpoints, deep-sky
+overlays, and telescope eyepiece simulation. Text labels from Phase 1 are also
+still open. Phase 1', Phase 2, the core stellar apparent-place corrections, and
+full-sky projections are now complete. A row is `✅ done` only when the model
+named in its references is implemented, documented, tested, and wired into all
+relevant hosts.
 
 ### Atmosphere implementation ladder
 
@@ -143,7 +143,7 @@ Columns:
 | `P2-13` | 2 | **Moon phase + Earth-shadow** | Moon disk phase is renderer-driven and lunar-eclipse umbral contact is exposed as a darkening aid | ✅ done (`astronomy::ephemeris`, `shaders/skyglow.wgsl`) |
 | `P2-14` | 2 | **Rise / transit / set tables** — per object, per evening | Local-evening Sun/Moon/planet rise-transit-set table in the web settings panel | ✅ done (`astronomy::planning`, `apps/web/frontend`) |
 | `P2-15` | 2 | **Twilight indicators** — civil / nautical / astronomical bands | Solar-depression twilight labels plus planning-panel band intervals | ✅ done (`astronomy::planning`, `apps/web/frontend`) |
-| `P2-16` | 2 | **Session URL** — encode (lat, lng, jd, az, alt, fov, overlays, planets, atmosphere preset) | Schema-versioned `starsSession=2` URL load/copy path | ✅ done (`apps/web/frontend`) |
+| `P2-16` | 2 | **Session URL** — encode (lat, lng, jd, az, alt, fov, overlays, planets, projection, atmosphere preset) | URL load/copy path using plain query parameters; no version gate | ✅ done (`apps/web/frontend`) |
 | `P3-01` | 3 | **Hipparcos / Tycho-2 / Gaia DR3 ingest** | Pluggable catalog backend; keep HYG for the embedded WASM build | ⬜ |
 | `P3-02` | 3 | **Identifier preservation** — Hipparcos / HD / TYC / Gaia source_id passed through the renderer | For hover / click-to-copy | ⬜ |
 | `P3-03` | 3 | **SIMBAD / VizieR deep links** | Hover a star → external link with the right query | ⬜ |
@@ -153,7 +153,7 @@ Columns:
 | `P3-07` | 3 | **Sharable JSON sessions** | Schema-versioned: observer + time + overlays + active corrections + catalog snapshot | ⬜ |
 | `P3-08` | 3 | **`CITATION.cff` + Zenodo DOI** | Citable per-release artifact | ⬜ |
 | `P3-09` | 3 | **Standards-compliance doc** | One page listing every IAU resolution / SOFA routine the code implements | ⬜ |
-| `P4-01` | 4 | **Full-sky projections** | Mollweide, Aitoff, Hammer; required to show galactic / extragalactic structure | ⬜ |
+| `P4-01` | 4 | **Full-sky projections** | Mollweide, Aitoff, and Hammer all-sky maps selectable in CLI, desktop, and web; perspective remains the default | ✅ done (`renderer::SkyProjection`, `shaders/{star,skyglow,overlay}.wgsl`, `apps/{cli,viewer,web}`) |
 | `P4-02` | 4 | **Out-of-Earth viewpoint** | Camera not centered on Earth; render the Milky Way disc from above | ⬜ |
 | `P4-03` | 4 | **Deep-sky overlay** (Messier, NGC) | Light catalogs first; full NGC/IC is large | ⬜ |
 | `P4-04` | 4 | **Variable star light curves** | Pull AAVSO; show on the side panel for a hovered variable | ⬜ |

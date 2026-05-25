@@ -3,39 +3,35 @@ import {
   MIN_FOV_DEG,
   isAtmospherePreset,
   isOverlayLayer,
+  isSkyProjection,
   DEFAULT_ATMOSPHERE_CONFIG,
   type AtmosphereConfig,
   type Observer,
   type OverlayConfig,
   type PlanetsConfig,
+  type ProjectionConfig,
   type View,
 } from "./observer";
 
 const STORAGE_KEY = "stars:config";
-const CURRENT_VERSION = 1;
 
-/// Schema for everything that survives a page reload. Bump `version` when the
-/// shape changes in an incompatible way; `loadConfig` returns `null` for any
-/// version it doesn't recognize so callers fall back to defaults cleanly.
-///
-/// We've kept `version: 1` while adding new optional fields so older saves
-/// (lat/lng + view only) still hydrate. Individual fields go through their
-/// own type guard, so a corrupt entry only drops that one field rather than
-/// the whole config.
+/// Schema for everything that survives a page reload. Individual fields go
+/// through their own type guard, so a corrupt entry only drops that one field
+/// rather than the whole config.
 export type PersistedConfig = {
-  version: 1;
   observer: Observer;
   view: View;
   overlays?: OverlayConfig;
   atmosphere?: AtmosphereConfig;
   planets?: PlanetsConfig;
+  projection?: ProjectionConfig;
 };
 
-export type PartialPersistedConfig = Partial<Omit<PersistedConfig, "version">>;
+export type PartialPersistedConfig = Partial<PersistedConfig>;
 
-/// Best-effort load. Returns `null` if nothing is stored, the JSON is malformed,
-/// or the version is unknown. Individual fields are validated so a broken entry
-/// can never crash the app.
+/// Best-effort load. Returns `null` if nothing is stored or the JSON is
+/// malformed. Individual fields are validated so a broken entry can never crash
+/// the app.
 export function loadConfig(): PartialPersistedConfig | null {
   if (typeof localStorage === "undefined") return null;
   const raw = localStorage.getItem(STORAGE_KEY);
@@ -44,14 +40,13 @@ export function loadConfig(): PartialPersistedConfig | null {
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object") return null;
     const obj = parsed as {
-      version?: unknown;
       observer?: unknown;
       view?: unknown;
       overlays?: unknown;
       atmosphere?: unknown;
       planets?: unknown;
+      projection?: unknown;
     };
-    if (obj.version !== CURRENT_VERSION) return null;
     const out: PartialPersistedConfig = {};
     if (isObserver(obj.observer)) out.observer = obj.observer;
     if (isView(obj.view)) out.view = obj.view;
@@ -60,6 +55,8 @@ export function loadConfig(): PartialPersistedConfig | null {
     if (atmosphere) out.atmosphere = atmosphere;
     const planets = parsePlanetsConfig(obj.planets);
     if (planets) out.planets = planets;
+    const projection = parseProjectionConfig(obj.projection);
+    if (projection) out.projection = projection;
     return out;
   } catch {
     return null;
@@ -68,11 +65,10 @@ export function loadConfig(): PartialPersistedConfig | null {
 
 /// Fire-and-forget save. localStorage exceptions (quota, private mode) are
 /// swallowed; persistence is a nicety, not a correctness requirement.
-export function saveConfig(config: Omit<PersistedConfig, "version">): void {
+export function saveConfig(config: PersistedConfig): void {
   if (typeof localStorage === "undefined") return;
   try {
-    const payload: PersistedConfig = { version: CURRENT_VERSION, ...config };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
   } catch {
     // Ignore: storage may be full, disabled, or unavailable in private mode.
   }
@@ -130,6 +126,12 @@ function parsePlanetsConfig(v: unknown): PlanetsConfig | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Partial<PlanetsConfig>;
   return typeof o.enabled === "boolean" ? { enabled: o.enabled } : null;
+}
+
+function parseProjectionConfig(v: unknown): ProjectionConfig | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Partial<ProjectionConfig>;
+  return isSkyProjection(o.projection) ? { projection: o.projection } : null;
 }
 
 function parseAtmosphereConfig(v: unknown): AtmosphereConfig | null {

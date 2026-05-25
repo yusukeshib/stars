@@ -78,7 +78,7 @@ window size, camera state, or UI labels.
 Owns GPU-facing rendering state:
 
 - `Renderer` lifecycle and render passes;
-- `Camera`, `LocalView`, and GPU camera uniforms;
+- `Camera`, `LocalView`, `SkyProjection`, and GPU camera uniforms;
 - `StarInstance` and `build_star_instance`;
 - overlay geometry and `OverlayKind` / `OverlayConfig`;
 - HDR target, skyglow pass, tonemap pass, star shader, and atmosphere uniforms.
@@ -140,8 +140,9 @@ A typical frame is:
 3. Host or `crates/common` converts each star into `renderer::StarInstance`
    with perceptual radius, brightness, colour, and proper-motion fields.
 4. Host creates or resizes the `wgpu` surface / target texture.
-5. `Camera` combines `Observer`, `LocalView`, aspect ratio, correction terms,
-   solar-system apparent directions, and atmosphere settings into GPU uniforms.
+5. `Camera` combines `Observer`, `LocalView`, aspect ratio, `SkyProjection`,
+   correction terms, solar-system apparent directions, and atmosphere settings
+   into GPU uniforms.
 6. `Renderer::render` draws skyglow / bodies / stars / overlays into an HDR
    target and tonemaps to the output view.
 7. Host presents the surface or copies the headless texture to an image file.
@@ -150,19 +151,19 @@ A typical frame is:
 
 The exact pass layout can change, but responsibilities should stay separated:
 
-- **Camera/uniform preparation**: CPU-side apparent-date and observer-dependent
-  data that the GPU needs for a frame.
+- **Camera/uniform preparation**: CPU-side apparent-date, observer-dependent,
+  and projection data that the GPU needs for a frame.
 - **Skyglow / atmosphere**: diffuse night sky, zodiacal light, airglow, dust,
-  sunlit scattering, twilight, moonlit sky, and solar-system disks.
+  sunlit scattering, twilight, moonlit sky, and solar-system disks. Perspective
+  reconstructs rays through the inverse view-projection matrix; all-sky modes
+  invert the selected Mollweide / Aitoff / Hammer map before rotating the ray
+  back to equatorial coordinates.
 - **Star pass**: per-star proper motion, corrections, refraction, extinction,
-  PSF/glare, and HDR accumulation.
+  projection, PSF/glare, and HDR accumulation.
 - **Overlay pass**: reference circles, grids, constellation lines, boundaries,
-  and future label/deep-sky overlays.
+  projection, and future label/deep-sky overlays.
 - **Tonemap pass**: local adaptation, mesopic / scotopic split, and conversion
   from HDR radiance-like values to display output.
-
-Future full-sky projections should be added as an explicit projection mode,
-not as ad-hoc special cases inside unrelated shaders.
 
 ## Adding a new host
 
@@ -187,7 +188,7 @@ cannot reliably read them.
 
 ```rust
 use astronomy::{julian_date_from_unix_seconds, Observer};
-use renderer::{Camera, LocalView};
+use renderer::{Camera, LocalView, SkyProjection};
 
 let jd = julian_date_from_unix_seconds(unix_seconds);
 let observer = Observer::from_degrees(35.68, 139.69, jd);
@@ -196,7 +197,8 @@ let view = LocalView {
     altitude_rad: 30_f32.to_radians(),
     fov_y_rad: 70_f32.to_radians(),
 };
-let camera = Camera::new(observer, view, width as f32 / height as f32);
+let mut camera = Camera::new(observer, view, width as f32 / height as f32);
+camera.projection = SkyProjection::Perspective; // or Mollweide / Aitoff / Hammer
 ```
 
 Interactive hosts should refresh time every frame, or expose an explicit pause /
@@ -295,5 +297,6 @@ Renderer::render(&mut encoder, &TextureView)
 Camera::new(observer, LocalView, aspect) -> Camera
 Camera::rotate_view(daz_rad, dalt_rad)
 Camera::zoom_fov(factor)
+SkyProjection::{Perspective, Mollweide, Aitoff, Hammer}
 OverlayConfig { layers, grid_step_deg, opacity }
 ```

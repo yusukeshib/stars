@@ -44,6 +44,9 @@ struct CameraUniform {
     moon_eq_illuminance: vec4<f32>,
     // [angular_radius_rad, illuminated_fraction, phase_angle_rad, earth_shadow_fraction].
     moon_disk: vec4<f32>,
+    // [projection_mode, full_sky_scale_x, full_sky_scale_y, full_sky_flag].
+    // mode: 0=perspective, 1=Mollweide, 2=Aitoff, 3=Hammer.
+    projection_params: vec4<f32>,
     // Mercury through Neptune: xyz = direction, w = angular radius.
     planet_eq_radius: array<vec4<f32>, 7>,
     // xyz = display colour, w = apparent visual magnitude.
@@ -83,6 +86,7 @@ const NEG_OH_FOUR_LN10: f32 = -0.9210340371976184; // -0.4 · ln(10)
 // 1 sr = (180·3600/π)² arcsec² ≈ 4.2545e10.
 const ARCSEC2_PER_SR: f32 = 4.2545e10;
 const PI: f32 = 3.14159265359;
+const HALF_PI: f32 = 1.57079632679;
 const DEG_TO_RAD: f32 = 0.017453292519943295;
 const LN10: f32 = 2.30258509299;
 // Mean obliquity of the ecliptic at J2000.0, IAU 2006 value
@@ -455,6 +459,100 @@ struct VertexOutput {
     @location(0) ndc: vec2<f32>,
 };
 
+fn view_dir_from_lon_lat(lon: f32, lat: f32) -> vec3<f32> {
+    let cos_lat = cos(lat);
+    return normalize(vec3<f32>(sin(lon) * cos_lat, sin(lat), -cos(lon) * cos_lat));
+}
+
+fn inverse_mollweide(p: vec2<f32>) -> vec4<f32> {
+    let y = p.y;
+    if abs(y) > 1.0 {
+        return vec4<f32>(0.0, 0.0, -1.0, 0.0);
+    }
+    let theta = asin(clamp(y, -1.0, 1.0));
+    let cos_theta = cos(theta);
+    if abs(p.x) > cos_theta + 1e-4 {
+        return vec4<f32>(0.0, 0.0, -1.0, 0.0);
+    }
+    let lat = asin(clamp((2.0 * theta + sin(2.0 * theta)) / PI, -1.0, 1.0));
+    let lon = PI * p.x / max(cos_theta, 1e-6);
+    return vec4<f32>(view_dir_from_lon_lat(lon, lat), 1.0);
+}
+
+fn aitoff_project_base(lon: f32, lat: f32) -> vec2<f32> {
+    let half_lon = 0.5 * lon;
+    let alpha = acos(clamp(cos(lat) * cos(half_lon), -1.0, 1.0));
+    let sinc = select(sin(alpha) / max(alpha, 1e-6), 1.0, abs(alpha) < 1e-6);
+    return vec2<f32>(2.0 * cos(lat) * sin(half_lon) / (PI * sinc), sin(lat) / (HALF_PI * sinc));
+}
+
+fn inverse_aitoff(p: vec2<f32>) -> vec4<f32> {
+    // The Aitoff projection has no compact inverse. Newton iteration seeded
+    // from the normalized map coordinates is stable for this bounded all-sky
+    // domain and runs only in the fullscreen background pass.
+    if p.x * p.x + p.y * p.y > 1.0 + 1e-4 {
+        return vec4<f32>(0.0, 0.0, -1.0, 0.0);
+    }
+    var lon = clamp(PI * p.x, -PI, PI);
+    var lat = clamp(HALF_PI * p.y, -HALF_PI, HALF_PI);
+    for (var i = 0; i < 6; i = i + 1) {
+        let f = aitoff_project_base(lon, lat) - p;
+        if dot(f, f) < 1e-10 {
+            break;
+        }
+        let eps = 1e-3;
+        let dlon = (aitoff_project_base(clamp(lon + eps, -PI, PI), lat) - aitoff_project_base(clamp(lon - eps, -PI, PI), lat)) / (2.0 * eps);
+        let dlat = (aitoff_project_base(lon, clamp(lat + eps, -HALF_PI, HALF_PI)) - aitoff_project_base(lon, clamp(lat - eps, -HALF_PI, HALF_PI))) / (2.0 * eps);
+        let det = dlon.x * dlat.y - dlon.y * dlat.x;
+        if abs(det) < 1e-6 {
+            break;
+        }
+        let delta = vec2<f32>(( f.x * dlat.y - f.y * dlat.x) / det,
+                              (-f.x * dlon.y + f.y * dlon.x) / det);
+        lon = clamp(lon - delta.x, -PI, PI);
+        lat = clamp(lat - delta.y, -HALF_PI, HALF_PI);
+    }
+    let residual = aitoff_project_base(lon, lat) - p;
+    if dot(residual, residual) > 1e-4 {
+        return vec4<f32>(0.0, 0.0, -1.0, 0.0);
+    }
+    return vec4<f32>(view_dir_from_lon_lat(lon, lat), 1.0);
+}
+
+fn inverse_hammer(p: vec2<f32>) -> vec4<f32> {
+    let x = p.x * 2.0 * sqrt(2.0);
+    let y = p.y * sqrt(2.0);
+    let under = 1.0 - (x * x) / 16.0 - (y * y) / 4.0;
+    if under < -1e-5 {
+        return vec4<f32>(0.0, 0.0, -1.0, 0.0);
+    }
+    let z = sqrt(max(under, 0.0));
+    let lon = 2.0 * atan2(z * x, 2.0 * (2.0 * z * z - 1.0));
+    let lat = asin(clamp(z * y, -1.0, 1.0));
+    return vec4<f32>(view_dir_from_lon_lat(lon, lat), 1.0);
+}
+
+fn ray_dir_from_ndc(ndc: vec2<f32>) -> vec4<f32> {
+    if camera.projection_params.w <= 0.5 {
+        let clip = vec4<f32>(ndc.x, ndc.y, 0.5, 1.0);
+        let world = camera.inv_view_proj * clip;
+        return vec4<f32>(normalize(world.xyz / world.w), 1.0);
+    }
+
+    let p = ndc / max(camera.projection_params.yz, vec2<f32>(1e-6));
+    let mode = camera.projection_params.x;
+    var view = inverse_mollweide(p);
+    if mode >= 2.5 {
+        view = inverse_hammer(p);
+    } else if mode >= 1.5 {
+        view = inverse_aitoff(p);
+    }
+    if view.w <= 0.0 {
+        return view;
+    }
+    return vec4<f32>(normalize((camera.inv_view_proj * vec4<f32>(view.xyz, 0.0)).xyz), 1.0);
+}
+
 // Fullscreen triangle (big-triangle trick, no vertex buffer).
 @vertex
 fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
@@ -471,13 +569,14 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Reconstruct the camera ray direction in equatorial coordinates. The
-    // camera looks from the origin (the renderer's view matrix has no
-    // translation for an infinite-distance celestial sphere), so a point
-    // anywhere along the ray unprojects to the same direction once
-    // normalised.
-    let clip = vec4<f32>(input.ndc.x, input.ndc.y, 0.5, 1.0);
-    let world = camera.inv_view_proj * clip;
-    let ray_dir = normalize(world.xyz / world.w);
+    // perspective path unprojects through the inverse view-projection matrix;
+    // all-sky maps invert the selected spherical projection first and then
+    // rotate that camera-space direction back into equatorial coordinates.
+    let ray = ray_dir_from_ndc(input.ndc);
+    if ray.w <= 0.0 {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    let ray_dir = ray.xyz;
 
     // Equatorial → galactic, then (l, b).
     let v_gal = EQ_TO_GAL * ray_dir;

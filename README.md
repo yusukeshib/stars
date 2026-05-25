@@ -31,7 +31,8 @@ The current engine already includes:
 - Sun, Moon, Mercury through Neptune, moon phase / eclipse darkening, daylight
   and twilight sky colour;
 - web planning helpers for rise / transit / set and twilight intervals;
-- schema-versioned web session URLs.
+- perspective plus Mollweide, Aitoff, and Hammer full-sky projections;
+- shareable web session URLs.
 
 See [`PROGRESS.md`](PROGRESS.md) for the implementation log and
 [`ROADMAP.md`](ROADMAP.md) for remaining work.
@@ -92,13 +93,13 @@ More detail lives in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Current focus
 
-The core Phase 1, Phase 1', and Phase 2 work is implemented. The most useful
-remaining visual work is now Phase 4 rendering polish, in this order:
+The core Phase 1, Phase 1', Phase 2, and Phase 4 full-sky projection work is
+implemented. The most useful remaining visual work is now Phase 4 rendering
+polish, in this order:
 
-1. full-sky projections such as Mollweide, Aitoff, and Hammer;
-2. out-of-Earth / galactic viewpoint experiments;
-3. deep-sky overlays for Messier / NGC-style objects;
-4. telescope eyepiece simulation.
+1. out-of-Earth / galactic viewpoint experiments;
+2. deep-sky overlays for Messier / NGC-style objects;
+3. telescope eyepiece simulation.
 
 Text labels for stars, planets, constellations, cardinal directions, and degree
 marks are also still open from Phase 1.
