@@ -1,8 +1,5 @@
 use astronomy::photometry::DEFAULT_EXTINCTION_K_RGB;
-use astronomy::{
-    apparent_moon_topocentric, apparent_sun_topocentric, equatorial_to_horizontal_matrix,
-    illuminants, lmst_radians, Observer,
-};
+use astronomy::{equatorial_to_horizontal_matrix, illuminants, lmst_radians, Observer, SunMoonApparent};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
@@ -58,9 +55,15 @@ pub struct CameraUniform {
     /// Top-of-atmosphere solar RGB illuminant, normalised around D65. `w` is
     /// currently unused.
     pub solar_rgb: [f32; 4],
+    /// Additional atmospheric optics controls: `[ozone_du, visibility_km,
+    /// unused, unused]`.
+    pub atmosphere_optics: [f32; 4],
     /// Apparent Moon direction in equatorial coordinates. `w` is approximate
     /// moonlight illuminance in lux before local horizon/airmass attenuation.
     pub moon_eq_illuminance: [f32; 4],
+    /// Lunar disk inputs: `[angular_radius_rad, illuminated_fraction,
+    /// phase_angle_rad, unused]`.
+    pub moon_disk: [f32; 4],
 }
 
 /// Named atmosphere presets shared by CLI, native viewer, and web hosts.
@@ -109,6 +112,13 @@ pub struct Atmosphere {
     /// Observer altitude above sea level in metres. The first-order shader
     /// uses this to thin the optical depth exponentially with scale height.
     pub observer_altitude_m: f32,
+    /// Total ozone column in Dobson units. Around 300 DU is a mid-latitude
+    /// clear-sky default; larger values suppress orange/red sunset light more
+    /// strongly through a Chappuis-band approximation in the shader.
+    pub ozone_du: f32,
+    /// Meteorological visibility in kilometres. This controls Mie/aerosol haze
+    /// independently from the named turbidity presets.
+    pub visibility_km: f32,
     /// Whether direct solar scattering is enabled. `Atmosphere::OFF` disables
     /// both extinction and daylight/twilight scattering.
     pub sunlit_scattering: bool,
@@ -125,6 +135,8 @@ impl Atmosphere {
         ],
         turbidity: 2.5,
         observer_altitude_m: 0.0,
+        ozone_du: 300.0,
+        visibility_km: 50.0,
         sunlit_scattering: true,
     };
 
@@ -132,6 +144,8 @@ impl Atmosphere {
         extinction_k_rgb: [0.18, 0.28, 0.45],
         turbidity: 5.0,
         observer_altitude_m: 0.0,
+        ozone_du: 325.0,
+        visibility_km: 12.0,
         sunlit_scattering: true,
     };
 
@@ -139,6 +153,8 @@ impl Atmosphere {
         extinction_k_rgb: [0.06, 0.10, 0.18],
         turbidity: 2.0,
         observer_altitude_m: 2500.0,
+        ozone_du: 275.0,
+        visibility_km: 80.0,
         sunlit_scattering: true,
     };
 
@@ -159,6 +175,8 @@ impl Atmosphere {
         extinction_k_rgb: [0.0, 0.0, 0.0],
         turbidity: 0.0,
         observer_altitude_m: 0.0,
+        ozone_du: 0.0,
+        visibility_km: 0.0,
         sunlit_scattering: false,
     };
 }
@@ -359,14 +377,28 @@ impl Camera {
         } else {
             Atmosphere::DEFAULT.observer_altitude_m
         };
-        let sun = apparent_sun_topocentric(self.observer);
+        let ozone_du = if self.atmosphere.ozone_du.is_finite() {
+            self.atmosphere.ozone_du.clamp(0.0, 600.0)
+        } else {
+            Atmosphere::DEFAULT.ozone_du
+        };
+        let visibility_km = if self.atmosphere.visibility_km.is_finite() {
+            self.atmosphere.visibility_km.clamp(1.0, 200.0)
+        } else {
+            Atmosphere::DEFAULT.visibility_km
+        };
+        let disks = SunMoonApparent::for_observer(self.observer);
+        let sun = disks.sun;
         let sun_dir = sun.direction_equatorial();
         let solar_lux = illuminants::solar_illuminance_lux(sun.distance_au) as f32;
         let solar_rgb = illuminants::SOLAR_LINEAR_RGB;
-        let moon = apparent_moon_topocentric(self.observer);
+        let moon = disks.moon;
         let moon_dir = moon.direction_equatorial();
-        let moon_lux =
-            illuminants::lunar_illuminance_lux(moon.illuminated_fraction, moon.distance_km) as f32;
+        let moon_lux = illuminants::lunar_illuminance_lux(
+            moon.illuminated_fraction,
+            moon.distance_km,
+            moon.phase_angle_rad,
+        ) as f32;
         let scattering_enabled = if self.atmosphere.sunlit_scattering {
             1.0
         } else {
@@ -407,7 +439,14 @@ impl Camera {
                 solar_rgb[2] as f32,
                 0.0,
             ],
+            atmosphere_optics: [ozone_du, visibility_km, 0.0, 0.0],
             moon_eq_illuminance: [moon_dir.x, moon_dir.y, moon_dir.z, moon_lux],
+            moon_disk: [
+                moon.angular_radius_rad as f32,
+                moon.illuminated_fraction as f32,
+                moon.phase_angle_rad as f32,
+                0.0,
+            ],
         }
     }
 
@@ -548,6 +587,8 @@ mod tests {
         cam.atmosphere.extinction_k_rgb = [f32::NAN, -1.0, 0.3];
         cam.atmosphere.turbidity = f32::NAN;
         cam.atmosphere.observer_altitude_m = f32::NAN;
+        cam.atmosphere.ozone_du = f32::NAN;
+        cam.atmosphere.visibility_km = f32::NAN;
         let uniform = cam.uniform(800, 600);
         assert_eq!(uniform.extinction_k_rgb, [0.0, 0.0, 0.3, 0.0]);
         assert_eq!(uniform.atmosphere_params[0], Atmosphere::DEFAULT.turbidity);
@@ -555,6 +596,8 @@ mod tests {
             uniform.atmosphere_params[1],
             Atmosphere::DEFAULT.observer_altitude_m
         );
+        assert_eq!(uniform.atmosphere_optics[0], Atmosphere::DEFAULT.ozone_du);
+        assert_eq!(uniform.atmosphere_optics[1], Atmosphere::DEFAULT.visibility_km);
     }
 
     #[test]

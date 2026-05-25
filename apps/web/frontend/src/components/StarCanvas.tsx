@@ -10,6 +10,8 @@ type StarViewHandle = {
     preset: string,
     turbidity: number,
     observerAltitudeM: number,
+    ozoneDu: number,
+    visibilityKm: number,
   ) => void;
   resize: (w: number, h: number) => void;
   render_frame: () => void;
@@ -74,6 +76,8 @@ export function StarCanvas({ observer, view, timeMs, overlays, atmosphere, onDra
       atmosphere.preset,
       atmosphere.turbidity,
       atmosphere.observerAltitudeM,
+      atmosphere.ozoneDu,
+      atmosphere.visibilityKm,
     );
   }, [atmosphere]);
 
@@ -93,7 +97,14 @@ export function StarCanvas({ observer, view, timeMs, overlays, atmosphere, onDra
       const ov = overlaysRef.current;
       handle.set_overlays(ov.layers, ov.gridStepDeg, ov.opacity);
       const at = atmosphereRef.current;
-      handle.set_atmosphere_config(at.enabled, at.preset, at.turbidity, at.observerAltitudeM);
+      handle.set_atmosphere_config(
+        at.enabled,
+        at.preset,
+        at.turbidity,
+        at.observerAltitudeM,
+        at.ozoneDu,
+        at.visibilityKm,
+      );
 
       const tick = () => {
         if (cancelled) return;

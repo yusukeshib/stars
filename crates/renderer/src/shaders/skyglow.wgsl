@@ -32,9 +32,13 @@ struct CameraUniform {
     atmosphere_params: vec4<f32>,
     // D65-like top-of-atmosphere solar RGB; `w` currently unused.
     solar_rgb: vec4<f32>,
+    // [ozone_du, visibility_km, unused, unused].
+    atmosphere_optics: vec4<f32>,
     // Apparent Moon direction in equatorial coordinates. `w` is approximate
     // moonlight illuminance in lux before local horizon/airmass attenuation.
     moon_eq_illuminance: vec4<f32>,
+    // [angular_radius_rad, illuminated_fraction, phase_angle_rad, unused].
+    moon_disk: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -203,7 +207,18 @@ fn preetham_sky_luminance_rgb(ray_dir: vec3<f32>, sin_alt: f32) -> vec3<f32> {
     // Preetham assumes mean solar irradiance at sea level; retain the small
     // Earth-Sun distance modulation from the ephemeris/illuminant pipeline.
     let solar_scale = max(camera.atmosphere_params.z, 0.0) / 127000.0;
-    return xyy_to_linear_rgb(vec3<f32>(x, y, Y * twilight * solar_scale));
+    let altitude_scale = exp(-max(camera.atmosphere_params.y, 0.0) / 8000.0);
+    let visibility_km = clamp(camera.atmosphere_optics.y, 1.0, 200.0);
+    let haze = clamp(50.0 / visibility_km, 0.25, 4.0);
+    let ozone = clamp(camera.atmosphere_optics.x, 0.0, 600.0) / 300.0;
+    // Compact Chappuis-band approximation: ozone absorbs broad green/orange
+    // light on long slant paths, deepening blue zeniths and red sunsets.
+    let slant = 1.0 / max(sin_alt + 0.08, 0.08);
+    let ozone_transmission = exp(-0.035 * ozone * slant * vec3<f32>(0.30, 0.62, 0.18));
+    let haze_whitening = mix(vec3<f32>(1.0), vec3<f32>(1.04, 1.02, 0.96), clamp((haze - 1.0) / 3.0, 0.0, 1.0));
+    return xyy_to_linear_rgb(vec3<f32>(x, y, Y * twilight * solar_scale * altitude_scale))
+        * ozone_transmission
+        * haze_whitening;
 }
 
 // Artistic exposure compression for the daytime/twilight atmosphere layer.

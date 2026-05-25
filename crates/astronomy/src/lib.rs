@@ -16,7 +16,7 @@ mod time;
 
 pub use ephemeris::{
     apparent_moon, apparent_moon_topocentric, apparent_sun, apparent_sun_topocentric, MoonApparent,
-    SunApparent,
+    SunApparent, SunMoonApparent,
 };
 pub use horizontal::{equatorial_to_horizontal, equatorial_to_horizontal_matrix, AltAz};
 pub use observer::Observer;

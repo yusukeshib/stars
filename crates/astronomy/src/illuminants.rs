@@ -40,21 +40,49 @@ pub const FULL_MOON_ILLUMINANCE_LUX: f64 = 0.25;
 /// moonlight brightness before the final ELP2000 / photometric phase law lands.
 pub const MEAN_MOON_DISTANCE_KM: f64 = 384_400.0;
 
-/// Approximate moonlight illuminance for a given illuminated fraction and
-/// geocentric distance.
+/// CIE 1931 XYZ chromaticity/luminance-like weights for the top-of-atmosphere
+/// solar illuminant, normalised to `Y=1`. This is the same D65 daylight white
+/// as [`SOLAR_LINEAR_RGB`], exposed in XYZ so renderers that work spectrally or
+/// colourimetrically do not need to reverse-engineer the RGB convenience value.
+pub const SOLAR_XYZ_Y_NORMALIZED: [f64; 3] = [0.95047, 1.0, 1.08883];
+
+/// Approximate full-Moon XYZ colour, normalised to `Y=1`. Moonlight is slightly
+/// warmer than D65 after reflecting from the lunar regolith; the absolute scale
+/// comes from [`lunar_illuminance_lux`].
+pub const FULL_MOON_XYZ_Y_NORMALIZED: [f64; 3] = [1.01, 1.0, 0.82];
+
+/// Approximate moonlight illuminance for a given illuminated fraction,
+/// geocentric distance, and phase angle.
 ///
-/// This deliberately stays conservative: the illuminated fraction already
-/// handles new/full Moon endpoints, and the `phase^1.5` term is a compact
-/// stand-in for the opposition surge and crescent darkening until the renderer
-/// adopts the Krisciunas & Schaefer 1991 lunar sky-brightness model.
-pub fn lunar_illuminance_lux(illuminated_fraction: f64, distance_km: f64) -> f64 {
-    let phase = illuminated_fraction.clamp(0.0, 1.0);
+/// The phase term follows the widely used Krisciunas & Schaefer 1991 full-Moon
+/// relative magnitude polynomial, normalised so `phase_angle_rad = 0` preserves
+/// [`FULL_MOON_ILLUMINANCE_LUX`]. The illuminated fraction remains an endpoint
+/// guard for callers that only know the geometric disk fraction.
+pub fn lunar_illuminance_lux(
+    illuminated_fraction: f64,
+    distance_km: f64,
+    phase_angle_rad: f64,
+) -> f64 {
+    let fraction = illuminated_fraction.clamp(0.0, 1.0);
     let distance = if distance_km.is_finite() && distance_km > 0.0 {
         distance_km
     } else {
         MEAN_MOON_DISTANCE_KM
     };
-    FULL_MOON_ILLUMINANCE_LUX * phase.powf(1.5) * (MEAN_MOON_DISTANCE_KM / distance).powi(2)
+    let phase_deg = if phase_angle_rad.is_finite() {
+        phase_angle_rad.to_degrees().clamp(0.0, 180.0)
+    } else {
+        180.0
+    };
+    // Krisciunas & Schaefer 1991 Eq. 8: phase darkening relative to full Moon
+    // in magnitudes, valid for visual sky-brightness estimates outside the
+    // innermost lunar aureole.
+    let phase_mag = 0.026 * phase_deg + 4.0e-9 * phase_deg.powi(4);
+    let phase_scale = 10_f64.powf(-0.4 * phase_mag);
+    FULL_MOON_ILLUMINANCE_LUX
+        * fraction.sqrt()
+        * phase_scale
+        * (MEAN_MOON_DISTANCE_KM / distance).powi(2)
 }
 
 #[cfg(test)]
@@ -75,10 +103,10 @@ mod tests {
 
     #[test]
     fn lunar_illuminance_tracks_phase_and_distance() {
-        let full = lunar_illuminance_lux(1.0, MEAN_MOON_DISTANCE_KM);
+        let full = lunar_illuminance_lux(1.0, MEAN_MOON_DISTANCE_KM, 0.0);
         assert!((full - FULL_MOON_ILLUMINANCE_LUX).abs() < 1e-12);
-        assert_eq!(lunar_illuminance_lux(0.0, MEAN_MOON_DISTANCE_KM), 0.0);
-        assert!(lunar_illuminance_lux(0.5, MEAN_MOON_DISTANCE_KM) < full * 0.5);
-        assert!(lunar_illuminance_lux(1.0, MEAN_MOON_DISTANCE_KM * 0.9) > full);
+        assert_eq!(lunar_illuminance_lux(0.0, MEAN_MOON_DISTANCE_KM, 0.0), 0.0);
+        assert!(lunar_illuminance_lux(0.5, MEAN_MOON_DISTANCE_KM, 90_f64.to_radians()) < full * 0.5);
+        assert!(lunar_illuminance_lux(1.0, MEAN_MOON_DISTANCE_KM * 0.9, 0.0) > full);
     }
 }

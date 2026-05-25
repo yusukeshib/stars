@@ -103,6 +103,8 @@ const GRID_STEP_RANGE: [number, number] = [1, 90];
 const OPACITY_RANGE: [number, number] = [0, 1];
 const TURBIDITY_RANGE: [number, number] = [1.7, 10];
 const OBSERVER_ALTITUDE_RANGE: [number, number] = [0, 9000];
+const OZONE_RANGE: [number, number] = [0, 600];
+const VISIBILITY_RANGE: [number, number] = [1, 200];
 
 function isOverlayConfig(v: unknown): v is OverlayConfig {
   if (!v || typeof v !== "object") return false;
@@ -122,6 +124,8 @@ function isAtmosphereConfig(v: unknown): v is AtmosphereConfig {
     typeof o.enabled === "boolean" &&
     isAtmospherePreset(o.preset) &&
     inRange(o.turbidity, TURBIDITY_RANGE) &&
-    inRange(o.observerAltitudeM, OBSERVER_ALTITUDE_RANGE)
+    inRange(o.observerAltitudeM, OBSERVER_ALTITUDE_RANGE) &&
+    inRange(o.ozoneDu, OZONE_RANGE) &&
+    inRange(o.visibilityKm, VISIBILITY_RANGE)
   );
 }

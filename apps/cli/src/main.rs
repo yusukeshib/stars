@@ -116,6 +116,14 @@ struct Args {
     #[arg(long)]
     observer_altitude_m: Option<f32>,
 
+    /// Override total ozone column in Dobson units for sunset/twilight colour.
+    #[arg(long)]
+    ozone_du: Option<f32>,
+
+    /// Override meteorological visibility in kilometres for aerosol haze.
+    #[arg(long)]
+    visibility_km: Option<f32>,
+
     /// Disable the diffuse-sky (integrated starlight + diffuse galactic
     /// light) skyglow pass. With the default (skyglow on), the sky
     /// background includes the analytic Leinert et al. 1998 model so the
@@ -176,6 +184,12 @@ fn main() -> Result<()> {
         }
         if let Some(observer_altitude_m) = args.observer_altitude_m {
             atmosphere.observer_altitude_m = observer_altitude_m;
+        }
+        if let Some(ozone_du) = args.ozone_du {
+            atmosphere.ozone_du = ozone_du;
+        }
+        if let Some(visibility_km) = args.visibility_km {
+            atmosphere.visibility_km = visibility_km;
         }
         atmosphere
     };

@@ -53,7 +53,9 @@ function loadAtmosphereFromUrl(): AtmosphereConfig | null {
     !params.has("atmosphere") &&
     !params.has("atmospherePreset") &&
     !params.has("turbidity") &&
-    !params.has("observerAltitudeM")
+    !params.has("observerAltitudeM") &&
+    !params.has("ozoneDu") &&
+    !params.has("visibilityKm")
   ) {
     return null;
   }
@@ -72,6 +74,14 @@ function loadAtmosphereFromUrl(): AtmosphereConfig | null {
       0,
       9000,
     ),
+    ozoneDu: numberParam(params, "ozoneDu", DEFAULT_ATMOSPHERE_CONFIG.ozoneDu, 0, 600),
+    visibilityKm: numberParam(
+      params,
+      "visibilityKm",
+      DEFAULT_ATMOSPHERE_CONFIG.visibilityKm,
+      1,
+      200,
+    ),
   };
 }
 
@@ -82,6 +92,8 @@ function saveAtmosphereToUrl(atmosphere: AtmosphereConfig): void {
   url.searchParams.set("atmospherePreset", atmosphere.preset);
   url.searchParams.set("turbidity", atmosphere.turbidity.toFixed(1));
   url.searchParams.set("observerAltitudeM", String(Math.round(atmosphere.observerAltitudeM)));
+  url.searchParams.set("ozoneDu", String(Math.round(atmosphere.ozoneDu)));
+  url.searchParams.set("visibilityKm", atmosphere.visibilityKm.toFixed(0));
   window.history.replaceState(null, "", url);
 }
 
