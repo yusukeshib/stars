@@ -179,7 +179,7 @@ impl Renderer {
             }
         }
 
-        // Pass 2: stars + overlays load the skyglow background and add.
+        // Pass 2: stars load the skyglow background and add their HDR flux.
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Scene HDR Pass"),

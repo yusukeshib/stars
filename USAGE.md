@@ -40,6 +40,11 @@ If you just want to read the existing hosts as templates:
    (PNG output)          (winit window)         (WASM + canvas)
 ```
 
+`crates/common` is deliberately outside the engine tier despite living under
+`crates/`: native hosts use it for `clap`/`chrono` parsing and shared
+catalog→renderer adapter helpers, while `apps/web` talks to the engine crates
+directly to keep the WASM path free of native-only dependencies.
+
 Coordinate conventions (all crates agree):
 
 - Time is represented by `astronomy::TimeScales`: UTC for civil input, UT1
@@ -111,7 +116,7 @@ clock you can reuse.
 
 ```rust
 use catalog::{load_from_file /* or load_embedded */};
-use renderer::{magnitude_to_render_params, StarInstance, NAKED_EYE_LIMITING_MAGNITUDE};
+use renderer::{build_star_instance, StarInstance, NAKED_EYE_LIMITING_MAGNITUDE};
 
 let stars = load_from_file("crates/catalog/data/hyg_v42.csv")?;
 //   or:  let stars = catalog::load_embedded();           // embedded feature
@@ -124,17 +129,14 @@ let limiting_magnitude = NAKED_EYE_LIMITING_MAGNITUDE + 1.5;
 
 let instances: Vec<StarInstance> = stars
     .iter()
-    .map(|s| {
-        let p = magnitude_to_render_params(s.magnitude, limiting_magnitude);
-        StarInstance {
-            position:   s.position.into(),
-            size:       p.radius_px,
-            color:      s.color,
-            brightness: p.brightness,
-        }
-    })
+    .map(|s| build_star_instance(s.position.into(), s.color, s.magnitude, limiting_magnitude))
     .collect();
 ```
+
+Native reference hosts use `stars_host_common::load_star_instances_from_file`
+for this catalog→renderer bridge so their filesystem catalog loading and
+perceptual star-instance conversion cannot drift. New non-native hosts can do
+the explicit conversion above with whichever catalog backend they own.
 
 Catalog filtering happens inside `catalog`: rows fainter than magnitude 8 and
 rows whose `dist` (parsecs) is HYG's `100000` sentinel-for-unknown-parallax
@@ -286,5 +288,6 @@ DEFAULT_SCREEN_LIMITING_MAGNITUDE: f32 // 7.5; screen-host default
 // Overlays (all routed through OverlayKind::as_kebab_str / from_kebab_str)
 OverlayConfig { layers: Vec<OverlayKind>, grid_step_deg: f64, opacity: f32 }
 enum OverlayKind { Horizon, Cardinals, AltAzGrid, EquatorialGrid,
-                   Ecliptic, CelestialEquator, Meridian, GalacticEquator }
+                   Ecliptic, CelestialEquator, Meridian, GalacticEquator,
+                   ConstellationLines, ConstellationBoundaries }
 ```

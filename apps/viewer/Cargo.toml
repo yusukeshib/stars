@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 renderer = { path = "../../crates/renderer" }
-catalog = { path = "../../crates/catalog", features = ["filesystem"] }
 astronomy = { path = "../../crates/astronomy" }
 stars-host-common = { path = "../../crates/common" }
 wgpu = { workspace = true }

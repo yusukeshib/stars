@@ -192,10 +192,9 @@ pub fn magnitude_to_render_params(mag: f32, limiting_magnitude: f32) -> RenderPa
 /// This is the zeropoint solved out of
 /// `10^(-0.4 · (limiting_mag - zeropoint)) = SHADER_INTENSITY_CUTOFF`, so
 /// a star at the limiting magnitude lands on the soft tonemap visibility
-/// threshold. Exposed so passes other than the star pass (e.g. the
-/// skyglow surface-brightness pass) can produce HDR values on the same
-/// brightness scale.
-pub fn limiting_magnitude_to_zeropoint(limiting_magnitude: f32) -> f32 {
+/// threshold. Internal passes use it to keep skyglow surface brightness on
+/// the same HDR scale as point-source stars.
+pub(crate) fn limiting_magnitude_to_zeropoint(limiting_magnitude: f32) -> f32 {
     limiting_magnitude + SHADER_INTENSITY_CUTOFF.log10() / 0.4
 }
 

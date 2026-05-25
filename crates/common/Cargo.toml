@@ -11,6 +11,7 @@ edition = "2021"
 
 [dependencies]
 astronomy = { path = "../astronomy" }
+catalog = { path = "../catalog", features = ["filesystem"] }
 renderer = { path = "../renderer" }
 clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

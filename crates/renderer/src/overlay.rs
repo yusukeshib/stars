@@ -14,11 +14,11 @@
 //! matrix and the layer's RGBA color so a single shader handles every overlay.
 
 use bytemuck::{Pod, Zeroable};
-use catalog::{constellation_boundaries, constellation_lines, ConstellationSegment};
 use std::f64::consts::{PI, TAU};
 use wgpu::util::DeviceExt;
 
 use crate::camera::Camera;
+use crate::constellations::{constellation_boundaries, constellation_lines, ConstellationSegment};
 
 /// Mean obliquity of the ecliptic **at J2000.0**, IAU 2006 value
 /// (ε₀ = 84381.406″ = 23.4392911°), in radians.
@@ -70,9 +70,9 @@ pub enum OverlayKind {
     Meridian,
     /// Great circle at galactic latitude b = 0 (the Milky Way mid-plane).
     GalacticEquator,
-    /// Modern western constellation stick figures from the catalog crate.
+    /// Modern western constellation stick figures embedded by the renderer crate.
     ConstellationLines,
-    /// IAU/Delporte constellation boundaries from the catalog crate.
+    /// IAU/Delporte constellation boundaries embedded by the renderer crate.
     ConstellationBoundaries,
 }
 

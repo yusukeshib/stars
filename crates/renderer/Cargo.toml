@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 astronomy = { path = "../astronomy" }
-catalog = { path = "../catalog", default-features = false }
 wgpu = { workspace = true }
 bytemuck = { workspace = true }
 glam = { workspace = true }

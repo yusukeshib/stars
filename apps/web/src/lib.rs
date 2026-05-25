@@ -164,7 +164,8 @@ impl StarView {
     /// Update the active overlay layers. `layers` is a list of kebab-case names
     /// that match the CLI's `--overlays` flag: "horizon", "cardinals",
     /// "alt-az-grid", "equatorial-grid", "ecliptic", "celestial-equator",
-    /// "meridian", "galactic-equator". Unknown names are ignored with a
+    /// "meridian", "galactic-equator", "constellation-lines", and
+    /// "constellation-boundaries". Unknown names are ignored with a
     /// warning so the JS layer can evolve without breaking older builds.
     ///
     /// `grid_step_deg` and `opacity` are passed through to the renderer, which
