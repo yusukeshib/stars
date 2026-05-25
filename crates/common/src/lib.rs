@@ -15,7 +15,7 @@ use catalog::load_from_file;
 use clap::ValueEnum;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, OverlayConfig, OverlayKind, SkyProjection,
-    StarInstance,
+    SkyViewpoint, StarInstance,
 };
 
 /// CLI-facing mirror of [`OverlayKind`] that derives [`ValueEnum`] so `clap`
@@ -96,6 +96,28 @@ impl From<ProjectionArg> for SkyProjection {
             ProjectionArg::Mollweide => SkyProjection::Mollweide,
             ProjectionArg::Aitoff => SkyProjection::Aitoff,
             ProjectionArg::Hammer => SkyProjection::Hammer,
+        }
+    }
+}
+
+/// CLI-facing mirror of [`SkyViewpoint`] for `clap` parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
+pub enum ViewpointArg {
+    Earth,
+    GalacticNorth,
+}
+
+impl std::fmt::Display for ViewpointArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(SkyViewpoint::from(*self).as_kebab_str())
+    }
+}
+
+impl From<ViewpointArg> for SkyViewpoint {
+    fn from(v: ViewpointArg) -> Self {
+        match v {
+            ViewpointArg::Earth => SkyViewpoint::Earth,
+            ViewpointArg::GalacticNorth => SkyViewpoint::GalacticNorth,
         }
     }
 }
@@ -218,6 +240,7 @@ pub fn load_star_instances_from_file(
                 s.color,
                 s.magnitude,
                 limiting_magnitude,
+                s.distance_pc,
             )
         })
         .collect())
@@ -308,6 +331,16 @@ mod tests {
             let projection: SkyProjection = arg.into();
             let s = projection.as_kebab_str();
             assert_eq!(SkyProjection::from_kebab_str(s), Some(projection));
+            assert_eq!(format!("{arg}"), s);
+        }
+    }
+
+    #[test]
+    fn viewpoint_arg_round_trips() {
+        for arg in [ViewpointArg::Earth, ViewpointArg::GalacticNorth] {
+            let viewpoint: SkyViewpoint = arg.into();
+            let s = viewpoint.as_kebab_str();
+            assert_eq!(SkyViewpoint::from_kebab_str(s), Some(viewpoint));
             assert_eq!(format!("{arg}"), s);
         }
     }

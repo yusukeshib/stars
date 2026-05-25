@@ -20,6 +20,7 @@
 - 太陽、月、水星から海王星までの惑星、月相 / 月食時の暗化補助、昼光・薄明の空色。
 - Web UI の観測計画機能、つまり出・南中・入り、薄明時間帯の表示。
 - perspective に加えて Mollweide / Aitoff / Hammer の全天投影。
+- 地球外の `galactic-north` 視点による、上から見た局所的な天の川円盤表示。
 - 共有可能な Web セッション URL。
 
 実装済み機能の記録は [`PROGRESS.md`](PROGRESS.md)、今後の計画は [`ROADMAP.md`](ROADMAP.md) を見てください。
@@ -75,11 +76,10 @@ scripts            カタログ取得・WASM build helper
 
 ## 現在の開発フォーカス
 
-Phase 1、Phase 1'、Phase 2、Phase 4 の全天投影は実装済みです。今後の見た目に関わる大きな作業は、以下の順番で進めるのが自然です。
+Phase 1、Phase 1'、Phase 2、Phase 4 の全天投影、そして Phase 4 の地球外・銀河視点は実装済みです。今後の見た目に関わる大きな作業は、以下の順番で進めるのが自然です。
 
-1. 地球外視点・銀河視点の実験。
-2. Messier / NGC などの deep-sky overlay。
-3. 望遠鏡の接眼レンズシミュレーション。
+1. Messier / NGC などの deep-sky overlay。
+2. 望遠鏡の接眼レンズシミュレーション。
 
 ## 開発に参加する場合
 

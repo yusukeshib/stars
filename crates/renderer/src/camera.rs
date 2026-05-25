@@ -64,6 +64,56 @@ impl SkyProjection {
     }
 }
 
+/// Where the camera is located. The default is the Earth-centred celestial
+/// sphere; Phase-4 galactic mode moves the camera above the local Milky Way
+/// plane and projects catalogue stars using their HYG parsec distances.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SkyViewpoint {
+    /// Observer-centred sky dome with atmosphere, refraction, ephemerides, and
+    /// the regular horizontal/equatorial overlay stack.
+    #[default]
+    Earth,
+    /// External top-down map of the local Milky Way disc from the north
+    /// galactic pole. The Sun is at the origin, +X points to l=0°, +Y to
+    /// l=90°, and +Z to the north galactic pole.
+    GalacticNorth,
+}
+
+impl SkyViewpoint {
+    pub const ALL: &'static [Self] = &[Self::Earth, Self::GalacticNorth];
+
+    pub const fn as_kebab_str(self) -> &'static str {
+        match self {
+            Self::Earth => "earth",
+            Self::GalacticNorth => "galactic-north",
+        }
+    }
+
+    pub fn from_kebab_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "earth" => Self::Earth,
+            "galactic-north" => Self::GalacticNorth,
+            _ => return None,
+        })
+    }
+
+    pub(crate) const fn shader_mode(self) -> f32 {
+        match self {
+            Self::Earth => 0.0,
+            Self::GalacticNorth => 1.0,
+        }
+    }
+
+    pub(crate) const fn is_external(self) -> bool {
+        !matches!(self, Self::Earth)
+    }
+}
+
+/// Height of the external galactic camera above the Sun in parsecs. With the
+/// regular 60° default FoV this shows a ∼35 kpc-wide neighbourhood, enough for
+/// the HYG local stars plus the analytic Milky Way disc context.
+const GALACTIC_CAMERA_HEIGHT_PC: f32 = 30_000.0;
+
 /// GPU-side camera + atmosphere state. WGSL layout requires `vec3` fields to
 /// be 16-byte aligned, so the per-channel extinction coefficients and the
 /// equatorial "zenith" direction are stored as `vec4` with an unused `w`
@@ -137,6 +187,10 @@ pub(crate) struct CameraUniform {
     /// Mollweide, Aitoff, and Hammer all-sky maps. The scale terms fit the
     /// natural 2:1 map ellipse into the current framebuffer without stretching.
     pub projection_params: [f32; 4],
+    /// Viewpoint controls: `[mode, external_eye_x_pc, external_eye_y_pc,
+    /// external_eye_z_pc]`. `mode = 0` is the Earth-centred sky dome; `1` is
+    /// the external north-galactic-pole camera.
+    pub viewpoint_params: [f32; 4],
     /// Planet directions in equatorial coordinates. `w` is angular radius.
     pub planet_eq_radius: PlanetEqRadiusUniform,
     /// Planet display colour in linear RGB. `w` is apparent visual magnitude.
@@ -476,6 +530,10 @@ pub struct Camera {
     /// all-sky projections ignore FoV but keep azimuth/altitude as the map
     /// centre so users can rotate the seam away from the structure of interest.
     pub projection: SkyProjection,
+    /// Camera location. [`SkyViewpoint::Earth`] keeps the historical sky-dome
+    /// path; [`SkyViewpoint::GalacticNorth`] renders a top-down Milky Way disc
+    /// map from outside Earth.
+    pub viewpoint: SkyViewpoint,
     /// Whether Mercury through Neptune are rendered as apparent solar-system
     /// disks/points from the VSOP87 ephemeris.
     pub planets_enabled: bool,
@@ -497,6 +555,7 @@ impl Camera {
             aspect,
             atmosphere: Atmosphere::default(),
             projection: SkyProjection::default(),
+            viewpoint: SkyViewpoint::default(),
             planets_enabled: true,
             limiting_magnitude: NAKED_EYE_LIMITING_MAGNITUDE,
         }
@@ -544,8 +603,25 @@ impl Camera {
         self.view_matrix_local() * self.equatorial_to_horizontal() * self.j2000_to_date()
     }
 
+    /// View matrix for the external Milky Way map. Coordinates are parsecs in
+    /// the IAU galactic frame; the Sun is at the origin and the camera sits
+    /// above the north galactic pole looking down at the disc.
+    fn galactic_view_matrix(&self) -> Mat4 {
+        let eye = self.external_eye_pc();
+        Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y)
+    }
+
     fn projection_matrix(&self) -> Mat4 {
-        Mat4::perspective_rh(self.effective_view().fov_y_rad, self.aspect, 0.01, 10.0)
+        let far = if self.viewpoint.is_external() {
+            GALACTIC_CAMERA_HEIGHT_PC * 3.0
+        } else {
+            10.0
+        };
+        Mat4::perspective_rh(self.effective_view().fov_y_rad, self.aspect, 0.01, far)
+    }
+
+    fn external_eye_pc(&self) -> Vec3 {
+        Vec3::new(0.0, 0.0, GALACTIC_CAMERA_HEIGHT_PC)
     }
 
     /// NDC half-extents that fit a natural 2:1 all-sky map ellipse into the
@@ -568,12 +644,20 @@ impl Camera {
         ]
     }
 
+    fn viewpoint_params(&self) -> [f32; 4] {
+        let eye = self.external_eye_pc();
+        [self.viewpoint.shader_mode(), eye.x, eye.y, eye.z]
+    }
+
     /// Matrix stored in `CameraUniform::view_proj`.
     ///
     /// Perspective mode keeps the historical view-projection matrix. All-sky
     /// projections are non-linear, so the shader needs the pre-projection view
     /// matrix and performs the spherical map itself.
     fn shader_view_proj(&self) -> Mat4 {
+        if self.viewpoint.is_external() {
+            return self.view_proj();
+        }
         if self.projection.is_full_sky() {
             self.view_matrix()
         } else {
@@ -582,6 +666,9 @@ impl Camera {
     }
 
     fn shader_view_proj_local(&self) -> Mat4 {
+        if self.viewpoint.is_external() {
+            return self.view_proj();
+        }
         if self.projection.is_full_sky() {
             self.view_matrix_local()
         } else {
@@ -595,7 +682,11 @@ impl Camera {
 
     /// View-projection for J2000 equatorial-frame geometry. Alias kept for backward compat.
     pub fn view_proj(&self) -> Mat4 {
-        self.projection_matrix() * self.view_matrix()
+        if self.viewpoint.is_external() {
+            self.projection_matrix() * self.galactic_view_matrix()
+        } else {
+            self.projection_matrix() * self.view_matrix()
+        }
     }
 
     /// View-projection for local ENU-frame geometry.
@@ -612,7 +703,14 @@ impl Camera {
     }
 
     pub(crate) fn overlay_projection_params(&self) -> [f32; 4] {
-        self.projection_params()
+        if self.viewpoint.is_external() {
+            // Earth-local reference overlays do not have a meaningful position
+            // in the parsec-scale galactic map. A negative mode tells overlay
+            // and label projectors to skip their geometry for this viewpoint.
+            [-1.0, 0.0, 0.0, -1.0]
+        } else {
+            self.projection_params()
+        }
     }
 
     /// Local zenith direction expressed in J2000 equatorial coordinates.
@@ -640,6 +738,10 @@ impl Camera {
     /// FoVs; wide-FoV edge fall-off would need a per-fragment computation,
     /// scoped for a future PR).
     fn pixel_solid_angle_sr(&self, width_pixels: u32, height_pixels: u32) -> f32 {
+        if self.viewpoint.is_external() {
+            let pixel_size_rad = self.effective_view().fov_y_rad / height_pixels.max(1) as f32;
+            return pixel_size_rad * pixel_size_rad;
+        }
         if self.projection.is_full_sky() {
             let [sx, sy] = self.full_sky_map_scale();
             let width = width_pixels.max(1) as f32;
@@ -833,6 +935,7 @@ impl Camera {
                 moon.earth_shadow_fraction as f32,
             ],
             projection_params: self.projection_params(),
+            viewpoint_params: self.viewpoint_params(),
             planet_eq_radius: planet_uniforms.eq_radius,
             planet_rgb_magnitude: planet_uniforms.rgb_magnitude,
             planet_params: planet_uniforms.params,
@@ -1020,6 +1123,27 @@ mod tests {
             assert_eq!(SkyProjection::from_kebab_str(s), Some(*projection));
         }
         assert_eq!(SkyProjection::from_kebab_str("unknown"), None);
+    }
+
+    #[test]
+    fn sky_viewpoint_kebab_round_trips() {
+        for viewpoint in SkyViewpoint::ALL {
+            let s = viewpoint.as_kebab_str();
+            assert_eq!(SkyViewpoint::from_kebab_str(s), Some(*viewpoint));
+        }
+        assert_eq!(SkyViewpoint::from_kebab_str("unknown"), None);
+    }
+
+    #[test]
+    fn galactic_viewpoint_uses_external_parsec_camera() {
+        let mut cam = Camera::new(observer_at(0.0), LocalView::default(), 1.0);
+        cam.viewpoint = SkyViewpoint::GalacticNorth;
+        let uniform = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
+        assert_eq!(uniform.viewpoint_params[0], 1.0);
+        assert_eq!(uniform.viewpoint_params[1], 0.0);
+        assert_eq!(uniform.viewpoint_params[2], 0.0);
+        assert_eq!(uniform.viewpoint_params[3], GALACTIC_CAMERA_HEIGHT_PC);
+        assert_eq!(cam.overlay_projection_params()[0], -1.0);
     }
 
     #[test]

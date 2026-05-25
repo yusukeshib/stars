@@ -50,7 +50,10 @@ pub struct StarInstance {
     /// applies `position + proper_motion * years_since_j2000` before the
     /// precession/nutation/aberration/refraction stack.
     pub proper_motion: [f32; 3],
-    pub _pad0: f32,
+    /// Heliocentric catalogue distance in parsecs. Earth-centred rendering
+    /// treats stars as directions at infinity; external galactic viewpoints
+    /// use this field to place the same catalogue rows as 3D points.
+    pub distance_pc: f32,
 }
 
 impl StarInstance {
@@ -62,6 +65,7 @@ impl StarInstance {
     const OFFSET_COLOR: u64 = std::mem::offset_of!(Self, color) as u64;
     const OFFSET_BRIGHTNESS: u64 = std::mem::offset_of!(Self, brightness) as u64;
     const OFFSET_PROPER_MOTION: u64 = std::mem::offset_of!(Self, proper_motion) as u64;
+    const OFFSET_DISTANCE_PC: u64 = std::mem::offset_of!(Self, distance_pc) as u64;
 
     pub(crate) fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
@@ -92,6 +96,11 @@ impl StarInstance {
                     offset: Self::OFFSET_PROPER_MOTION,
                     shader_location: 5,
                     format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: Self::OFFSET_DISTANCE_PC,
+                    shader_location: 6,
+                    format: wgpu::VertexFormat::Float32,
                 },
             ],
         }
@@ -238,6 +247,7 @@ pub fn build_star_instance(
     photopic_color: [f32; 3],
     magnitude: f32,
     limiting_magnitude: f32,
+    distance_pc: f32,
 ) -> StarInstance {
     let params = magnitude_to_render_params(magnitude, limiting_magnitude);
     let w = astronomy::photometry::chromatic_weight_for_magnitude(magnitude as f64) as f32;
@@ -248,7 +258,11 @@ pub fn build_star_instance(
         color: perceived_color,
         brightness: params.brightness,
         proper_motion,
-        _pad0: 0.0,
+        distance_pc: if distance_pc.is_finite() {
+            distance_pc.max(0.0)
+        } else {
+            0.0
+        },
     }
 }
 
@@ -312,7 +326,7 @@ mod tests {
         let red = [1.0_f32, 0.3, 0.1];
         let lim = NAKED_EYE_LIMITING_MAGNITUDE;
 
-        let bright = build_star_instance([1.0, 0.0, 0.0], [0.0; 3], red, 0.0, lim);
+        let bright = build_star_instance([1.0, 0.0, 0.0], [0.0; 3], red, 0.0, lim, 10.0);
         // Bright star: photopic, colour preserved within float error.
         for (got, want) in bright.color.iter().zip(red.iter()) {
             assert!(
@@ -323,7 +337,7 @@ mod tests {
             );
         }
 
-        let faint = build_star_instance([1.0, 0.0, 0.0], [0.0; 3], red, 6.0, lim);
+        let faint = build_star_instance([1.0, 0.0, 0.0], [0.0; 3], red, 6.0, lim, 10.0);
         // Faint star: mid-mesopic, channels pulled toward the scotopic grey
         // of the input. The red channel must drop (rods don't see red);
         // the blue channel must rise (rod sensitivity peak near 507 nm).
@@ -337,6 +351,7 @@ mod tests {
             "faint blue channel did not pick up rod response: {:?}",
             faint.color
         );
+        assert_eq!(faint.distance_pc, 10.0);
     }
 
     /// The shader applies a smooth apodization window to the PSF so the

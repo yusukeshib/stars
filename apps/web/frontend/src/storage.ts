@@ -4,7 +4,9 @@ import {
   isAtmospherePreset,
   isOverlayLayer,
   isSkyProjection,
+  isSkyViewpoint,
   DEFAULT_ATMOSPHERE_CONFIG,
+  DEFAULT_PROJECTION_CONFIG,
   type AtmosphereConfig,
   type Observer,
   type OverlayConfig,
@@ -131,7 +133,11 @@ function parsePlanetsConfig(v: unknown): PlanetsConfig | null {
 function parseProjectionConfig(v: unknown): ProjectionConfig | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Partial<ProjectionConfig>;
-  return isSkyProjection(o.projection) ? { projection: o.projection } : null;
+  if (!isSkyProjection(o.projection)) return null;
+  return {
+    projection: o.projection,
+    viewpoint: isSkyViewpoint(o.viewpoint) ? o.viewpoint : DEFAULT_PROJECTION_CONFIG.viewpoint,
+  };
 }
 
 function parseAtmosphereConfig(v: unknown): AtmosphereConfig | null {

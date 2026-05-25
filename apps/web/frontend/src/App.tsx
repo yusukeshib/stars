@@ -12,6 +12,7 @@ import {
   isAtmospherePreset,
   isOverlayLayer,
   isSkyProjection,
+  isSkyViewpoint,
   type AtmosphereConfig,
   type Observer,
   type OverlayConfig,
@@ -128,6 +129,7 @@ function loadSessionFromUrl(): UrlSession | null {
     "overlayOpacity",
     "planets",
     "projection",
+    "viewpoint",
     "atmosphere",
     "atmospherePreset",
     "turbidity",
@@ -158,6 +160,7 @@ function loadSessionFromUrl(): UrlSession | null {
   };
   const jd = Number(params.get("jd"));
   const projectionParam = params.get("projection");
+  const viewpointParam = params.get("viewpoint");
   return {
     observer,
     view,
@@ -168,6 +171,9 @@ function loadSessionFromUrl(): UrlSession | null {
       projection: isSkyProjection(projectionParam)
         ? projectionParam
         : DEFAULT_PROJECTION_CONFIG.projection,
+      viewpoint: isSkyViewpoint(viewpointParam)
+        ? viewpointParam
+        : DEFAULT_PROJECTION_CONFIG.viewpoint,
     },
     timeMs: Number.isFinite(jd) ? (jd - 2440587.5) * 86400000 : undefined,
   };
@@ -195,6 +201,7 @@ function sessionUrl({ observer, view, overlays, atmosphere, planets, projection,
   url.searchParams.set("overlayOpacity", overlays.opacity.toFixed(2));
   url.searchParams.set("planets", planets.enabled ? "on" : "off");
   url.searchParams.set("projection", projection.projection);
+  url.searchParams.set("viewpoint", projection.viewpoint);
   url.searchParams.set("atmosphere", atmosphere.enabled ? "on" : "off");
   url.searchParams.set("atmospherePreset", atmosphere.preset);
   url.searchParams.set("turbidity", atmosphere.turbidity.toFixed(1));

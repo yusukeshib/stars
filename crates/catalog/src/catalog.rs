@@ -18,6 +18,11 @@ struct RawStar {
 #[derive(Debug, Clone, Copy)]
 pub struct Star {
     pub position: Vec3,
+    /// Heliocentric distance in parsecs from HYG's `dist` column. Earth-centred
+    /// sky rendering uses only [`Self::position`], but Phase-4 external
+    /// galactic views need the same catalogue row as a 3D point in the local
+    /// Milky Way neighbourhood.
+    pub distance_pc: f32,
     /// Cartesian tangent vector in radians per Julian year, derived from HYG's
     /// `pmrarad` / `pmdecrad` columns. Add `proper_motion * years_since_j2000`
     /// to `position` and normalize for first-order apparent catalogue motion.
@@ -44,11 +49,11 @@ const MAX_MAGNITUDE: f64 = 8.0;
 const MIN_DISTANCE_PC: f64 = 0.0;
 const MAX_DISTANCE_PC: f64 = 100_000.0;
 #[cfg(feature = "embedded")]
-const EMBEDDED_MAGIC: &[u8; 8] = b"STRBIN2\0";
+const EMBEDDED_MAGIC: &[u8; 8] = b"STRBIN3\0";
 #[cfg(feature = "embedded")]
 const EMBEDDED_HEADER_LEN: usize = 12;
 #[cfg(feature = "embedded")]
-const EMBEDDED_RECORD_LEN: usize = 22;
+const EMBEDDED_RECORD_LEN: usize = 26;
 
 pub fn load_from_csv(data: &str) -> Vec<Star> {
     let mut reader = csv::ReaderBuilder::new()
@@ -69,14 +74,18 @@ pub fn load_from_csv(data: &str) -> Vec<Star> {
         if raw.mag > MAX_MAGNITUDE {
             continue;
         }
-        if let Some(dist) = raw.dist {
-            if dist <= MIN_DISTANCE_PC || dist >= MAX_DISTANCE_PC {
-                continue;
-            }
-        }
+        let distance_pc = match raw.dist {
+            Some(dist) if dist > MIN_DISTANCE_PC && dist < MAX_DISTANCE_PC => dist as f32,
+            Some(_) => continue,
+            // Keep legacy CSV compatibility for tiny fixtures that omit HYG's
+            // distance column; place them on the unit sphere for external views
+            // rather than rejecting otherwise-valid sky-rendering tests.
+            None => 1.0,
+        };
 
         stars.push(Star {
             position: radec_hours_deg_to_cartesian(raw.ra, raw.dec),
+            distance_pc,
             proper_motion: proper_motion_vector_radians_per_year(
                 raw.ra,
                 raw.dec,
@@ -128,8 +137,10 @@ fn load_from_binary(data: &[u8]) -> Result<Vec<Star>, String> {
             decode_f32(record, 14),
             decode_f32(record, 18),
         );
+        let distance_pc = decode_f32(record, 22);
         stars.push(Star {
             position: Vec3::new(x, y, z).normalize_or_zero(),
+            distance_pc,
             proper_motion,
             magnitude,
             color: bv_to_rgb(ci),
@@ -183,6 +194,7 @@ mod tests {
         let stars = load_from_csv(&csv);
         assert_eq!(stars.len(), 1);
         assert!((stars[0].magnitude - (-1.46)).abs() < 0.01);
+        assert!((stars[0].distance_pc - 2.637).abs() < 0.001);
         assert!(stars[0].position.length() > 0.99);
         assert_eq!(stars[0].proper_motion, Vec3::ZERO);
     }

@@ -78,7 +78,7 @@ window size, camera state, or UI labels.
 Owns GPU-facing rendering state:
 
 - `Renderer` lifecycle and render passes;
-- `Camera`, `LocalView`, `SkyProjection`, and GPU camera uniforms;
+- `Camera`, `LocalView`, `SkyProjection`, `SkyViewpoint`, and GPU camera uniforms;
 - `StarInstance` and `build_star_instance`;
 - overlay geometry, text labels, and `OverlayKind` / `OverlayConfig`;
 - HDR target, skyglow pass, tonemap pass, star shader, text shader, and atmosphere uniforms.
@@ -116,6 +116,10 @@ All crates should preserve these conventions:
   hours.
 - Catalog positions are J2000 / ICRS-like unit-sphere Cartesian coordinates:
   `x = cos δ cos α`, `y = cos δ sin α`, `z = sin δ`.
+- Catalog distances are stored in parsecs from HYG's `dist` column. The
+  Earth-centred sky dome treats stars as directions at infinity; the external
+  galactic viewpoint multiplies the J2000 direction by this distance and
+  rotates it into IAU galactic Cartesian coordinates.
 - HYG proper motion is converted into a Cartesian tangent vector in radians per
   Julian year.
 - Civil input time is UTC.
@@ -141,8 +145,8 @@ A typical frame is:
    with perceptual radius, brightness, colour, and proper-motion fields.
 4. Host creates or resizes the `wgpu` surface / target texture.
 5. `Camera` combines `Observer`, `LocalView`, aspect ratio, `SkyProjection`,
-   correction terms, solar-system apparent directions, and atmosphere settings
-   into GPU uniforms.
+   `SkyViewpoint`, correction terms, solar-system apparent directions, and
+   atmosphere settings into GPU uniforms.
 6. `Renderer::render` draws skyglow / bodies / stars into an HDR target,
    tonemaps to the output view, then composites overlay lines and labels in
    LDR screen space.
@@ -158,9 +162,13 @@ The exact pass layout can change, but responsibilities should stay separated:
   sunlit scattering, twilight, moonlit sky, and solar-system disks. Perspective
   reconstructs rays through the inverse view-projection matrix; all-sky modes
   invert the selected Mollweide / Aitoff / Hammer map before rotating the ray
-  back to equatorial coordinates.
+  back to equatorial coordinates. In `SkyViewpoint::GalacticNorth`, this pass
+  instead ray-marches the top-down galactic plane intersection and draws a
+  compact analytic Milky Way disc for external context.
 - **Star pass**: per-star proper motion, corrections, refraction, extinction,
-  projection, PSF/glare, and HDR accumulation.
+  projection, PSF/glare, and HDR accumulation. In the external galactic
+  viewpoint, atmospheric effects are skipped and stars are projected as parsec
+  positions in the IAU galactic frame.
 - **Overlay pass**: reference circles, grids, constellation lines, boundaries,
   projection, and LDR text labels from the shared bitmap font atlas /
   label-placement pass.
@@ -190,7 +198,7 @@ cannot reliably read them.
 
 ```rust
 use astronomy::{julian_date_from_unix_seconds, Observer};
-use renderer::{Camera, LocalView, SkyProjection};
+use renderer::{Camera, LocalView, SkyProjection, SkyViewpoint};
 
 let jd = julian_date_from_unix_seconds(unix_seconds);
 let observer = Observer::from_degrees(35.68, 139.69, jd);
@@ -201,6 +209,7 @@ let view = LocalView {
 };
 let mut camera = Camera::new(observer, view, width as f32 / height as f32);
 camera.projection = SkyProjection::Perspective; // or Mollweide / Aitoff / Hammer
+camera.viewpoint = SkyViewpoint::Earth; // or GalacticNorth for a top-down Milky Way map
 ```
 
 Interactive hosts should refresh time every frame, or expose an explicit pause /
@@ -222,6 +231,7 @@ let instances = stars
             s.color,
             s.magnitude,
             limiting_magnitude,
+            s.distance_pc,
         )
     })
     .collect::<Vec<_>>();

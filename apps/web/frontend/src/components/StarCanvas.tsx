@@ -81,6 +81,7 @@ export function StarCanvas({
 
   useEffect(() => {
     handleRef.current?.set_projection(projection.projection);
+    handleRef.current?.set_viewpoint(projection.viewpoint);
   }, [projection]);
 
   useEffect(() => {
@@ -124,6 +125,7 @@ export function StarCanvas({
       );
       handle.set_planets_enabled(planetsRef.current.enabled);
       handle.set_projection(projectionRef.current.projection);
+      handle.set_viewpoint(projectionRef.current.viewpoint);
 
       let lastSunAltitudePublish = 0;
       let lastPlanningPublish = -Infinity;

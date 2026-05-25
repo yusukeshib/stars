@@ -10,6 +10,7 @@ use renderer::{
 use stars_host_common::{
     atmosphere_from_args, load_star_instances_from_file, overlay_config_from_args,
     parse_time_to_time_scales, AtmosphereOverrides, AtmospherePresetArg, OverlayArg, ProjectionArg,
+    ViewpointArg,
 };
 
 /// Render the night sky as seen from a given observer to a PNG.
@@ -43,6 +44,11 @@ struct Args {
     /// Screen projection: perspective, mollweide, aitoff, or hammer.
     #[arg(long, default_value_t = ProjectionArg::Perspective)]
     projection: ProjectionArg,
+
+    /// Camera location: earth (observer-centred sky) or galactic-north
+    /// (external top-down Milky Way disc map).
+    #[arg(long, default_value_t = ViewpointArg::Earth)]
+    viewpoint: ViewpointArg,
 
     /// Output image width.
     #[arg(long, default_value_t = 1280)]
@@ -197,6 +203,7 @@ fn main() -> Result<()> {
         skyglow_enabled,
         !args.no_planets,
         args.projection.into(),
+        args.viewpoint.into(),
         limiting_mag,
         args.width,
         args.height,
@@ -223,6 +230,7 @@ async fn render_to_pixels(
     skyglow_enabled: bool,
     planets_enabled: bool,
     projection: renderer::SkyProjection,
+    viewpoint: renderer::SkyViewpoint,
     limiting_mag: f32,
     width: u32,
     height: u32,
@@ -277,6 +285,7 @@ async fn render_to_pixels(
     camera.atmosphere = atmosphere;
     camera.planets_enabled = planets_enabled;
     camera.projection = projection;
+    camera.viewpoint = viewpoint;
     camera.limiting_magnitude = limiting_mag;
     renderer.update_camera(&queue, &camera, width, height);
 

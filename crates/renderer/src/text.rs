@@ -564,6 +564,9 @@ fn project(
     projection_params: [f32; 4],
     viewport: [f32; 2],
 ) -> Option<[f32; 2]> {
+    if projection_params[0] < -0.5 {
+        return None;
+    }
     let ndc = if projection_params[3] > 0.5 {
         let view_dir =
             (view_proj * Vec4::new(position[0], position[1], position[2], 0.0)).truncate();

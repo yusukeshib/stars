@@ -12,6 +12,7 @@ use renderer::{
 use stars_host_common::{
     atmosphere_from_args, load_star_instances_from_file, overlay_config_from_args,
     parse_time_to_time_scales, AtmosphereOverrides, AtmospherePresetArg, OverlayArg, ProjectionArg,
+    ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -64,6 +65,11 @@ struct Args {
     /// Screen projection: perspective, mollweide, aitoff, or hammer.
     #[arg(long, default_value_t = ProjectionArg::Perspective)]
     projection: ProjectionArg,
+
+    /// Camera location: earth (observer-centred sky) or galactic-north
+    /// (external top-down Milky Way disc map).
+    #[arg(long, default_value_t = ViewpointArg::Earth)]
+    viewpoint: ViewpointArg,
 
     /// Path to the HYG-format star catalog CSV.
     #[arg(long, default_value = "crates/catalog/data/hyg_v42.csv")]
@@ -173,6 +179,7 @@ fn main() -> Result<()> {
         atmosphere,
         !args.no_planets,
         args.projection.into(),
+        args.viewpoint.into(),
     );
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -200,6 +207,7 @@ struct App {
     atmosphere: Atmosphere,
     planets_enabled: bool,
     projection: renderer::SkyProjection,
+    viewpoint: renderer::SkyViewpoint,
     sky_clock: SkyClock,
     mouse_pressed: bool,
     last_mouse: Option<(f64, f64)>,
@@ -266,6 +274,7 @@ impl App {
         atmosphere: Atmosphere,
         planets_enabled: bool,
         projection: renderer::SkyProjection,
+        viewpoint: renderer::SkyViewpoint,
     ) -> Self {
         Self {
             gpu: None,
@@ -279,6 +288,7 @@ impl App {
             atmosphere,
             planets_enabled,
             projection,
+            viewpoint,
             sky_clock: SkyClock::new(start_jd),
             mouse_pressed: false,
             last_mouse: None,
@@ -376,6 +386,7 @@ impl ApplicationHandler for App {
         camera.atmosphere = self.atmosphere;
         camera.planets_enabled = self.planets_enabled;
         camera.projection = self.projection;
+        camera.viewpoint = self.viewpoint;
 
         self.gpu = Some(GpuState {
             surface,
