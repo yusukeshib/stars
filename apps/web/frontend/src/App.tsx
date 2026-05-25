@@ -23,16 +23,21 @@ const DEFAULT_VIEW: View = {
   fovDeg: 70,
 };
 
-// Read once at module load. Used both for initial state and to decide whether
-// to auto-prompt for geolocation (we skip it if the user already has a stored
-// location, so we don't overwrite their explicit choice).
+const normalizeWebOverlays = (overlays: OverlayConfig): OverlayConfig => ({
+  ...overlays,
+  // Cardinal marks are intentionally hidden in the web UI; drop older persisted
+  // selections so users do not get a stuck invisible toggle.
+  layers: overlays.layers.filter((layer) => layer !== "cardinals"),
+});
+
+// Read once at module load.
 const PERSISTED = loadConfig();
 
 export function App() {
   const [observer, setObserver] = useState<Observer>(PERSISTED?.observer ?? DEFAULT_OBSERVER);
   const [view, setView] = useState<View>(PERSISTED?.view ?? DEFAULT_VIEW);
   const [overlays, setOverlays] = useState<OverlayConfig>(
-    PERSISTED?.overlays ?? DEFAULT_OVERLAY_CONFIG,
+    PERSISTED?.overlays ? normalizeWebOverlays(PERSISTED.overlays) : DEFAULT_OVERLAY_CONFIG,
   );
   const [timeMs, setTimeMs] = useState<number>(() => Date.now());
   const lastTickRef = useRef<number>(performance.now());
