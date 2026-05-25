@@ -13,3 +13,7 @@ csv = { workspace = true }
 serde = { workspace = true }
 glam = { workspace = true }
 log = { workspace = true }
+
+[build-dependencies]
+csv = { workspace = true }
+serde = { workspace = true }
