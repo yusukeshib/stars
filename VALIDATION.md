@@ -44,7 +44,8 @@ Add or update tests when changing any of these areas:
 - twilight band boundaries;
 - magnitude, illuminance, luminance, extinction, skyglow, daylight, twilight,
   and tone reproduction reference models;
-- catalog coordinate conversion and colour conversion;
+- catalog backend source labels, identifier preservation, filtering, coordinate
+  conversion, and colour conversion;
 - session schema migrations, scene preset parsing, and deterministic rendering
   inputs;
 - notebook / CSV astronomy-table fixtures when example-facing Sun, Moon, or
@@ -184,6 +185,30 @@ Validation expectation:
 Current limitation:
 
 - Terrain horizon and weather constraints are not modeled.
+
+### Catalog backend scaffold
+
+Current implementation includes:
+
+- `CatalogBackend` / `CatalogQuery` / `CatalogPage` scaffolding for future large
+  catalogs;
+- `HygCsvBackend` preserving HYG, HIP, and HD numeric identifiers CPU-side;
+- source-side magnitude and row-limit filtering distinct from renderer limiting
+  magnitude.
+
+Validation expectation:
+
+- Backend source labels must stay stable because session snapshots and future
+  manifests depend on them.
+- Identifier fields should be pinned when a backend starts preserving a new
+  source ID.
+- Large-catalog ingest should add tests for tile/LOD determinism, page cursor
+  stability, and filtering boundaries.
+
+Current limitation:
+
+- Renderer buffers and host hover/copy flows do not yet expose preserved IDs;
+  that remains tracked by `P3-02`.
 
 ### Reproducible scenes and visual regression
 

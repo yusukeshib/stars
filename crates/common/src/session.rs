@@ -641,14 +641,7 @@ mod tests {
             viewpoint: SkyViewpoint::Earth,
             external_viewpoint: ExternalViewpoint::GALACTIC_NORTH,
             eyepiece: EyepieceSimulation::OFF,
-            catalog: CatalogSnapshot {
-                backend: "hyg-csv".into(),
-                source: "HYG".into(),
-                version: Some("4.2".into()),
-                path: Some("crates/catalog/data/hyg_v42.csv".into()),
-                hash: None,
-                limiting_magnitude: 7.5,
-            },
+            catalog: crate::hyg_catalog_snapshot("crates/catalog/data/hyg_v42.csv", 7.5),
             corrections: CorrectionSnapshot::default(),
         }
     }

@@ -40,7 +40,8 @@ The current engine already includes:
 - shareable schema-versioned JSON sessions across CLI, desktop, and web, plus
   compact web session URLs;
 - deterministic validation/demo scene presets, notebook reproducibility examples,
-  and an opt-in generated gallery for screenshot review;
+  catalog-backend scaling scaffolding, and an opt-in generated gallery for
+  screenshot review;
 - citation metadata, Zenodo release-archive metadata, and a standards-compliance
   page for citing and reviewing model choices.
 
@@ -125,21 +126,23 @@ More detail lives in [`ARCHITECTURE.md`](ARCHITECTURE.md).
   and JSON-session export workflow.
 - [`docs/validation-gallery.md`](docs/validation-gallery.md) — generated demo
   gallery and opt-in screenshot-regression workflow.
+- [`docs/catalog-backend-design.md`](docs/catalog-backend-design.md) — catalog
+  backend, identifier, LOD, paging, and WASM-subset plan before large ingest.
 - [`examples/notebooks`](examples/notebooks) — Jupyter / Python examples that
   replay JSON sessions, compare pinned astronomy tables, and render via CLI.
 
 ## Current focus
 
 Phase 1, Phase 1', Phase 2, citation/standards documentation, notebook
-reproducibility examples, Phase 4 full-sky projection work, Phase 4 out-of-Earth
-galactic / custom external viewpoints, and Phase 4 telescope eyepiece simulation
-are implemented. The next best work is to strengthen the remaining platform
-foundation and then extend visually:
+reproducibility examples, catalog-backend scaling scaffolding, Phase 4 full-sky
+projection work, Phase 4 out-of-Earth galactic / custom external viewpoints,
+and Phase 4 telescope eyepiece simulation are implemented. The next best work
+is to extend visually while finishing the remaining platform hooks:
 
-1. catalog-backend scaling design before Gaia / Tycho / Hipparcos ingest;
-2. deep-sky overlays for Messier / NGC-style objects;
-3. accessibility, observation-planning polish, and variable-star light curves;
-4. Python bindings and headless server mode for the Phase 3 platform.
+1. deep-sky overlays for Messier / NGC-style objects;
+2. accessibility, observation-planning polish, and variable-star light curves;
+3. Python bindings and headless server mode for the Phase 3 platform;
+4. data provenance manifest before large Gaia / Tycho / Hipparcos ingest.
 
 ## Contributing
 

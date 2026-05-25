@@ -17,7 +17,8 @@ use renderer::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    parse_time_to_time_scales, CatalogSnapshot, CorrectionSnapshot, SessionScene, StarSession,
+    hyg_catalog_snapshot, parse_time_to_time_scales, CatalogSnapshot, CorrectionSnapshot,
+    SessionScene, StarSession,
 };
 
 /// CLI-facing stable identifiers for built-in deterministic scenes.
@@ -474,17 +475,6 @@ fn overlay_config(layers: &[OverlayKind]) -> OverlayConfig {
         layers: layers.to_vec(),
         grid_step_deg: 15.0,
         opacity: 0.6,
-    }
-}
-
-fn hyg_catalog_snapshot(path: &Path, limiting_magnitude: f32) -> CatalogSnapshot {
-    CatalogSnapshot {
-        backend: "hyg-csv".to_string(),
-        source: "HYG".to_string(),
-        version: Some("4.2".to_string()),
-        path: Some(path.display().to_string()),
-        hash: None,
-        limiting_magnitude,
     }
 }
 

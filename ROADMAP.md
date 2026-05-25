@@ -62,15 +62,16 @@ That missing piece is tracked in Phase 2, after the Sun and Moon have apparent
 topocentric positions. The goal is for sky colour to be driven by physical
 illuminants and atmosphere parameters rather than by hard-coded gradients.
 
-**Current highest priority:** strengthen reproducibility and reviewability before
-large new data integrations, then continue the remaining visual Phase 4 work in
-small, shippable slices. Phase 1, Phase 1', Phase 2, the core stellar
-apparent-place corrections, full-sky projections, the fixed external galactic
-viewpoint, telescope eyepiece simulation, custom external viewpoint origins,
-scene presets, notebook reproducibility examples, the validation/demo gallery
-workflow, citation metadata, and the standards-compliance page are now complete.
-A row is `✅ done` only when the model named in its references is implemented,
-documented, tested, and wired into all relevant hosts.
+**Current highest priority:** continue the remaining visual Phase 4 work and
+Phase 3 platform hooks in small, shippable slices before ingesting large new
+catalog data. Phase 1, Phase 1', Phase 2, the core stellar apparent-place
+corrections, catalog backend scaling scaffold/design, full-sky projections, the
+fixed external galactic viewpoint, telescope eyepiece simulation, custom
+external viewpoint origins, scene presets, notebook reproducibility examples,
+the validation/demo gallery workflow, citation metadata, and the
+standards-compliance page are now complete. A row is `✅ done` only when the
+model named in its references is implemented, documented, tested, and wired into
+all relevant hosts.
 
 ### Atmosphere implementation ladder
 
@@ -92,19 +93,19 @@ is split into independently shippable rungs:
    with the model limits.
 
 There are currently no `⏳ next` atmosphere rows; the active queue has moved to
-catalog scaling design and Phase 4 visual polish.
+Phase 4 visual polish and the remaining Phase 3 platform hooks.
 
 ### Recommended near-term sequence
 
 These items are intentionally ordered before the largest catalog additions so
 future features have stable scenes, source manifests, and review hooks:
 
-1. **Catalog scaling design:** document the backend, identifier, LOD,
-   streaming, and WASM-subset plan before Gaia / Tycho / Hipparcos ingest.
-2. **Visual and UX polish:** deep-sky overlays, accessibility, observation
+1. **Visual and UX polish:** deep-sky overlays, accessibility, observation
    planning polish, variable-star light curves, and eyepiece preset provenance.
-3. **Remaining Phase 3 platform hooks:** Python bindings and headless server
-   mode once the catalog/backend shape is clear.
+2. **Remaining Phase 3 platform hooks:** Python bindings and headless server
+   mode now that the catalog/backend shape is documented.
+3. **Large catalog ingest:** Hipparcos / Tycho-2 / Gaia DR3 can begin after the
+   machine-readable data manifest rules are in place.
 
 ---
 
@@ -161,7 +162,7 @@ Columns:
 | `P2-14` | 2 | **Rise / transit / set tables** — per object, per evening | Local-evening Sun/Moon/planet rise-transit-set table in the web settings panel | ✅ done (`astronomy::planning`, `apps/web/frontend`) |
 | `P2-15` | 2 | **Twilight indicators** — civil / nautical / astronomical bands | Solar-depression twilight labels plus planning-panel band intervals | ✅ done (`astronomy::planning`, `apps/web/frontend`) |
 | `P2-16` | 2 | **Session URL** — encode (lat, lng, jd, az, alt, fov, overlays, planets, projection, atmosphere preset) | URL load/copy path using plain query parameters; no version gate | ✅ done (`apps/web/frontend`) |
-| `P3-00` | 3 | **Catalog backend scaling design** | Document backend trait boundaries, identifier mapping, LOD / spatial index strategy, streaming / paging, and the small embedded WASM subset before ingesting large catalogs | ⬜ |
+| `P3-00` | 3 | **Catalog backend scaling design** | `docs/catalog-backend-design.md` documents backend trait boundaries, identifier mapping, LOD / spatial index strategy, streaming / paging, and the small embedded WASM subset; `crates/catalog` now has the scaffold plus HYG CSV/embedded adapters | ✅ done (`catalog::CatalogBackend`, `catalog::HygCsvBackend`) |
 | `P3-01` | 3 | **Hipparcos / Tycho-2 / Gaia DR3 ingest** | Pluggable catalog backend; keep HYG for the embedded WASM build; land only after `P3-00` defines storage and filtering rules | ⬜ |
 | `P3-02` | 3 | **Identifier preservation** — Hipparcos / HD / TYC / Gaia source_id passed through the renderer | Needed for hover, click-to-copy, session reproducibility, SIMBAD / VizieR links, and catalog snapshots | ⬜ |
 | `P3-03` | 3 | **SIMBAD / VizieR deep links** | Hover a star → external link with the right query; keep external services optional and out of deterministic renders | ⬜ |

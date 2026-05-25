@@ -34,12 +34,14 @@ Repository location:
 
 Used for:
 
-- embedded and filesystem star catalog loading;
+- embedded and filesystem star catalog loading through the HYG backend scaffold;
 - star positions;
 - magnitudes;
 - B−V colour values;
 - proper motion where available;
 - distance filtering;
+- HYG `id`, `hip`, and `hd` numeric identifier preservation in
+  `catalog::CatalogIdentifiers` for future hover/copy/session work;
 - generated top-50 bright-star labels and bright-star-weighted constellation
   label anchors in `crates/renderer/build.rs`.
 
@@ -51,6 +53,7 @@ Acquisition:
 
 Implementation areas:
 
+- `crates/catalog/src/backend.rs`
 - `crates/catalog/src/catalog.rs`
 - `crates/catalog/src/coords.rs`
 - `crates/catalog/src/color.rs`
@@ -63,6 +66,8 @@ Current filtering policy:
 
 Notes:
 
+- `docs/catalog-backend-design.md` defines the backend, identifier, LOD, paging,
+  and WASM-subset policy for future large-catalog ingest.
 - If a future Gaia / Hipparcos / Tycho backend lands, record its source,
   license, version, preprocessing, and identifier mapping here.
 
