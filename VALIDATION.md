@@ -47,6 +47,8 @@ Add or update tests when changing any of these areas:
 - catalog coordinate conversion and colour conversion;
 - session schema migrations, scene preset parsing, and deterministic rendering
   inputs;
+- notebook / CSV astronomy-table fixtures when example-facing Sun, Moon, or
+  planet outputs intentionally change;
 - visual-regression baselines when renderer changes are meant to preserve the
   appearance of representative scenes.
 
@@ -193,6 +195,8 @@ Current implementation includes:
 - deterministic scene presets for Tokyo evening, dark sky, noon, sunset, civil /
   nautical / astronomical twilight, moonlit night, an eclipse aid, all-sky maps,
   and external galactic viewpoints;
+- notebook examples in `examples/notebooks` that load the same JSON sessions,
+  compare pinned Sun/Moon/planet tables, and optionally render via CLI;
 - a validation/demo gallery generated from those presets by
   `scripts/render-validation-gallery.sh`;
 - opt-in byte-for-byte visual-regression checks for representative renderer
@@ -200,11 +204,13 @@ Current implementation includes:
 
 Validation expectation:
 
-- Preset names, inputs, expected model domains, and generated image dimensions
-  should be documented.
+- Preset names, inputs, expected model domains, generated tabular fixtures, and
+  generated image dimensions should be documented.
 - Visual diffs should use tolerances appropriate to GPU and platform variation;
   they should catch meaningful regressions without implying pixel-perfect
   portability across all hardware.
+- Any notebook table fixture change should include the regenerated CSV and a
+  reason the astronomy-model output changed.
 - Any screenshot used as evidence in a PR should identify the scene preset or
   session file that produced it.
 
