@@ -16,11 +16,12 @@ Implemented phase groups:
 - Phase 1' physical dark-sky visual pipeline.
 - Phase 2 time systems, apparent-place corrections, atmosphere, solar-system
   bodies, and planning UI.
+- Phase 3 schema-versioned JSON sessions.
 - Phase 4 full-sky projections and external galactic viewpoint.
 
 Still open:
 
-- Phase 3 research / platform features.
+- Remaining Phase 3 research / platform features.
 - Remaining Phase 4 advanced visual features.
 
 ## Phase 1 — Educational planetarium
@@ -264,6 +265,35 @@ Primary implementation areas:
 
 - `crates/astronomy/src/planning.rs`
 - `apps/web/frontend`
+
+## Phase 3 — Reproducibility and platform baseline
+
+### Schema-versioned JSON sessions
+
+Implemented portable JSON sessions with an explicit `schemaVersion` and host
+version metadata. Sessions preserve enough state to reproduce a render across
+hosts:
+
+- observer latitude / longitude;
+- UTC, UT1, TAI, TT, approximate TDB, leap-second offset, and DUT1 fields;
+- view azimuth / altitude / field of view;
+- overlays, grid step, and opacity;
+- projection, viewpoint, custom external camera vectors, and eyepiece optics;
+- atmosphere preset plus all exposed atmosphere / refraction controls;
+- planet visibility, active correction flags, and catalog snapshot metadata.
+
+Native hosts can load sessions with `--session`; the CLI can also write the
+effective scene with `--write-session`. The web settings panel can copy/download
+and load the same JSON shape, while the existing compact URL format remains
+available for quick sharing.
+
+Primary implementation areas:
+
+- `crates/common/src/session.rs`
+- `apps/cli/src/main.rs`
+- `apps/viewer/src/main.rs`
+- `apps/web/frontend/src/session.ts`
+- `apps/web/frontend/src/components/StatusBar.tsx`
 
 ## Phase 4 — Advanced visual features
 

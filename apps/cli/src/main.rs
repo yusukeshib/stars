@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use astronomy::Observer;
@@ -8,23 +8,33 @@ use renderer::{
     DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
-    atmosphere_from_args, eyepiece_from_args, load_star_instances_from_file,
-    overlay_config_from_args, parse_time_to_time_scales, viewpoint_from_args, AtmosphereOverrides,
-    AtmospherePresetArg, ExternalViewpointOverrides, EyepieceOverrides, OverlayArg, ProjectionArg,
-    ViewpointArg,
+    atmosphere_from_args, eyepiece_from_args, load_session, load_star_instances_from_file,
+    overlay_config_from_args, parse_time_to_time_scales, save_session, viewpoint_from_args,
+    AtmosphereOverrides, AtmospherePresetArg, CatalogSnapshot, CorrectionSnapshot,
+    ExternalViewpointOverrides, EyepieceOverrides, OverlayArg, ProjectionArg, SessionScene,
+    StarSession, ViewpointArg,
 };
 
 /// Render the night sky as seen from a given observer to a PNG.
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
-    /// Observer latitude in decimal degrees (north positive).
+    /// Observer latitude in decimal degrees (north positive). Required unless --session is supplied.
     #[arg(long, allow_hyphen_values = true)]
-    lat: f64,
+    lat: Option<f64>,
 
-    /// Observer longitude in decimal degrees (east positive).
+    /// Observer longitude in decimal degrees (east positive). Required unless --session is supplied.
     #[arg(long, allow_hyphen_values = true)]
-    lng: f64,
+    lng: Option<f64>,
+
+    /// Load a schema-versioned JSON session. Scene fields in the session drive
+    /// the render; output size/path and catalog fallback still come from CLI flags.
+    #[arg(long)]
+    session: Option<PathBuf>,
+
+    /// Write the effective scene to a schema-versioned JSON session file.
+    #[arg(long)]
+    write_session: Option<PathBuf>,
 
     /// Time as RFC3339 (e.g. 2026-04-26T12:00:00Z). Defaults to "now".
     #[arg(long)]
@@ -196,89 +206,124 @@ fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();
 
-    let time = parse_time_to_time_scales(args.time.as_deref())?;
-    log::info!(
-        "Observer lat={} lng={} jd_utc={} jd_ut1={} jd_tdb={}",
-        args.lat,
-        args.lng,
-        time.jd_utc,
-        time.jd_ut1,
-        time.jd_tdb
-    );
-
-    let observer = Observer::from_degrees_with_time(args.lat, args.lng, time);
-    let view = LocalView {
-        azimuth_rad: (args.azimuth as f32).to_radians(),
-        altitude_rad: (args.altitude as f32).to_radians(),
-        fov_y_rad: (args.fov as f32).to_radians(),
+    let scene = if let Some(session_path) = &args.session {
+        load_session(session_path)?.to_scene()?
+    } else {
+        let lat = args
+            .lat
+            .context("--lat is required unless --session is supplied")?;
+        let lng = args
+            .lng
+            .context("--lng is required unless --session is supplied")?;
+        let time = parse_time_to_time_scales(args.time.as_deref())?;
+        let overlays = overlay_config_from_args(
+            args.no_overlays,
+            &args.overlays,
+            args.grid_step_deg,
+            args.overlay_opacity,
+        );
+        let atmosphere = atmosphere_from_args(
+            args.no_extinction,
+            args.atmosphere_preset,
+            AtmosphereOverrides {
+                turbidity: args.turbidity,
+                observer_altitude_m: args.observer_altitude_m,
+                ozone_du: args.ozone_du,
+                visibility_km: args.visibility_km,
+                pressure_hpa: args.pressure_hpa,
+                temperature_c: args.temperature_c,
+            },
+        );
+        let (viewpoint, external_viewpoint) = viewpoint_from_args(
+            args.viewpoint,
+            ExternalViewpointOverrides {
+                origin_pc: vec3_arg(&args.external_origin_pc),
+                target_pc: vec3_arg(&args.external_target_pc),
+                up: vec3_arg(&args.external_up),
+            },
+        );
+        SessionScene {
+            latitude_deg: lat,
+            longitude_deg: lng,
+            time,
+            view: LocalView {
+                azimuth_rad: (args.azimuth as f32).to_radians(),
+                altitude_rad: (args.altitude as f32).to_radians(),
+                fov_y_rad: (args.fov as f32).to_radians(),
+            },
+            overlays,
+            atmosphere_preset: args.atmosphere_preset.into(),
+            atmosphere,
+            planets_enabled: !args.no_planets,
+            projection: args.projection.into(),
+            viewpoint,
+            external_viewpoint,
+            eyepiece: eyepiece_from_args(
+                args.eyepiece,
+                EyepieceOverrides {
+                    aperture_mm: args.telescope_aperture_mm,
+                    focal_length_mm: args.telescope_focal_length_mm,
+                    eyepiece_focal_length_mm: args.eyepiece_focal_length_mm,
+                    apparent_fov_deg: args.eyepiece_apparent_fov_deg,
+                    field_stop_mm: args.eyepiece_field_stop_mm,
+                },
+            ),
+            catalog: catalog_snapshot(&args.catalog, args.limiting_magnitude),
+            corrections: CorrectionSnapshot::for_scene(atmosphere),
+        }
     };
 
-    let limiting_mag = args.limiting_magnitude;
-    let instances = load_star_instances_from_file(&args.catalog, limiting_mag)?;
-    log::info!("Loaded {} stars", instances.len());
+    log::info!(
+        "Observer lat={} lng={} jd_utc={} jd_ut1={} jd_tdb={}",
+        scene.latitude_deg,
+        scene.longitude_deg,
+        scene.time.jd_utc,
+        scene.time.jd_ut1,
+        scene.time.jd_tdb
+    );
 
-    let overlays = overlay_config_from_args(
-        args.no_overlays,
-        &args.overlays,
-        args.grid_step_deg,
-        args.overlay_opacity,
-    );
-    let atmosphere = atmosphere_from_args(
-        args.no_extinction,
-        args.atmosphere_preset,
-        AtmosphereOverrides {
-            turbidity: args.turbidity,
-            observer_altitude_m: args.observer_altitude_m,
-            ozone_du: args.ozone_du,
-            visibility_km: args.visibility_km,
-            pressure_hpa: args.pressure_hpa,
-            temperature_c: args.temperature_c,
-        },
-    );
-    let skyglow_enabled = !args.no_skyglow;
-    let (viewpoint, external_viewpoint) = viewpoint_from_args(
-        args.viewpoint,
-        ExternalViewpointOverrides {
-            origin_pc: vec3_arg(&args.external_origin_pc),
-            target_pc: vec3_arg(&args.external_target_pc),
-            up: vec3_arg(&args.external_up),
-        },
-    );
-    let eyepiece = eyepiece_from_args(
-        args.eyepiece,
-        EyepieceOverrides {
-            aperture_mm: args.telescope_aperture_mm,
-            focal_length_mm: args.telescope_focal_length_mm,
-            eyepiece_focal_length_mm: args.eyepiece_focal_length_mm,
-            apparent_fov_deg: args.eyepiece_apparent_fov_deg,
-            field_stop_mm: args.eyepiece_field_stop_mm,
-        },
-    );
-    if eyepiece.enabled {
+    if scene.eyepiece.enabled {
         log::info!(
             "Eyepiece simulation: {:.2}x, {:.3}° true FOV, {:.2} arcsec/mm plate scale, {:.2} mm exit pupil",
-            eyepiece.magnification(),
-            eyepiece.true_field_deg(),
-            eyepiece.plate_scale_arcsec_per_mm(),
-            eyepiece.exit_pupil_mm()
+            scene.eyepiece.magnification(),
+            scene.eyepiece.true_field_deg(),
+            scene.eyepiece.plate_scale_arcsec_per_mm(),
+            scene.eyepiece.exit_pupil_mm()
         );
     }
 
+    if let Some(path) = &args.write_session {
+        let session = StarSession::from_scene(env!("CARGO_PKG_VERSION"), "stars-cli", &scene);
+        save_session(path, &session)?;
+        log::info!("Wrote session JSON to {}", path.display());
+    }
+
+    let catalog_path = scene
+        .catalog
+        .path
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| args.catalog.clone());
+    let instances = load_star_instances_from_file(&catalog_path, scene.catalog.limiting_magnitude)?;
+    log::info!("Loaded {} stars", instances.len());
+
+    let observer =
+        Observer::from_degrees_with_time(scene.latitude_deg, scene.longitude_deg, scene.time);
     let pixels = pollster::block_on(render_to_pixels(
         observer,
-        view,
-        atmosphere,
-        skyglow_enabled,
-        !args.no_planets,
-        args.projection.into(),
-        viewpoint,
-        external_viewpoint,
-        eyepiece,
-        limiting_mag,
+        scene.view,
+        scene.atmosphere,
+        !args.no_skyglow,
+        scene.planets_enabled,
+        scene.projection,
+        scene.viewpoint,
+        scene.external_viewpoint,
+        scene.eyepiece,
+        scene.catalog.limiting_magnitude,
         args.width,
         args.height,
         &instances,
-        &overlays,
+        &scene.overlays,
     ))?;
 
     let img = image::RgbaImage::from_raw(args.width, args.height, pixels)
@@ -288,6 +333,17 @@ fn main() -> Result<()> {
 
     log::info!("Wrote {}", args.output.display());
     Ok(())
+}
+
+fn catalog_snapshot(path: &Path, limiting_magnitude: f32) -> CatalogSnapshot {
+    CatalogSnapshot {
+        backend: "hyg-csv".to_string(),
+        source: "HYG".to_string(),
+        version: Some("4.2".to_string()),
+        path: Some(path.display().to_string()),
+        hash: None,
+        limiting_magnitude,
+    }
 }
 
 fn vec3_arg(values: &Option<Vec<f32>>) -> Option<[f32; 3]> {

@@ -22,7 +22,7 @@
 - perspective に加えて Mollweide / Aitoff / Hammer の全天投影。
 - 地球外の `galactic-north` / `custom-external` 視点による、IAU 銀河座標系パーセクスケールカメラからの局所的な天の川円盤表示。
 - OTA と接眼レンズの組み合わせから倍率、プレートスケール、射出瞳、実視野を求める望遠鏡接眼レンズシミュレーション。
-- 共有可能な Web セッション URL。
+- CLI / desktop / web で共有できる schema-versioned JSON session と、短い共有向けの Web session URL。
 
 ## CLI 生成ギャラリー
 
@@ -46,6 +46,13 @@ CLI で PNG を出力する場合:
 
 ```bash
 make cli ARGS="--lat 35.68 --lng 139.69 --azimuth 180 --altitude 30 -o stars.png"
+```
+
+portable JSON session を保存・再生する場合:
+
+```bash
+make cli ARGS="--lat 35.68 --lng 139.69 --write-session tokyo.json -o stars.png"
+make cli ARGS="--session tokyo.json -o replay.png"
 ```
 
 Web 版を起動する場合:
@@ -88,7 +95,7 @@ scripts            カタログ取得・README 画像生成・WASM build helper
 
 Phase 1、Phase 1'、Phase 2、Phase 4 の全天投影、Phase 4 の地球外・銀河視点、そして Phase 4 の望遠鏡接眼レンズシミュレーションは実装済みです。次は、見た目の追加だけでなく、再現性・引用可能性・検証可能性・教育用途を強くする順番で進めるのが自然です。
 
-1. schema-versioned JSON session と、決定的に再現できる scene preset。
+1. JSON session schema を土台にした、決定的に再現できる scene preset。
 2. 代表的な空を集めた validation / demo gallery と visual regression check。
 3. `CITATION.cff`、standards-compliance note、早期の notebook example。
 4. Gaia / Tycho / Hipparcos ingest の前に、catalog backend のスケーリング設計。
