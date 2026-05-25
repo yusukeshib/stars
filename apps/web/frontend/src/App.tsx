@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { StarCanvas } from "./components/StarCanvas";
 import { StatusBar } from "./components/StatusBar";
-import { GearButton } from "./components/GearButton";
-import { SettingsPanel } from "./components/SettingsPanel";
 import {
   clampAltitude,
   clampFov,
@@ -37,7 +35,6 @@ export function App() {
     PERSISTED?.overlays ?? DEFAULT_OVERLAY_CONFIG,
   );
   const [timeMs, setTimeMs] = useState<number>(() => Date.now());
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const lastTickRef = useRef<number>(performance.now());
 
   // Persist observer + view + overlays whenever they change. We debounce
@@ -63,23 +60,6 @@ export function App() {
     lastTickRef.current = performance.now();
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, []);
-
-  // Auto-geolocation only fires for first-time visitors. If the user has a
-  // persisted observer we respect their explicit choice and stay quiet.
-  useEffect(() => {
-    if (PERSISTED?.observer) return;
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setObserver({
-          latitudeDeg: pos.coords.latitude,
-          longitudeDeg: pos.coords.longitude,
-        });
-      },
-      () => {},
-      { timeout: 5000 },
-    );
   }, []);
 
   const useGeolocation = () => {
@@ -110,20 +90,16 @@ export function App() {
           setView((v) => ({ ...v, fovDeg: clampFov(v.fovDeg * factor) }))
         }
       />
-      <StatusBar observer={observer} view={view} timeMs={timeMs} />
-      <GearButton onClick={() => setSettingsOpen(true)} />
-      {settingsOpen && (
-        <SettingsPanel
-          observer={observer}
-          timeMs={timeMs}
-          overlays={overlays}
-          onClose={() => setSettingsOpen(false)}
-          onSetObserver={setObserver}
-          onSetTime={setTimeMs}
-          onSetOverlays={setOverlays}
-          onUseGeolocation={useGeolocation}
-        />
-      )}
+      <StatusBar
+        observer={observer}
+        view={view}
+        timeMs={timeMs}
+        overlays={overlays}
+        onSetObserver={setObserver}
+        onSetTime={setTimeMs}
+        onSetOverlays={setOverlays}
+        onUseGeolocation={useGeolocation}
+      />
     </>
   );
 }

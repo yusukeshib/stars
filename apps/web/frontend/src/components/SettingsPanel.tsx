@@ -1,34 +1,14 @@
-import type { Observer, OverlayConfig } from "../observer";
+import type { OverlayConfig } from "../observer";
 import { OverlayToggles } from "./OverlayToggles";
 
 type Props = {
-  observer: Observer;
-  timeMs: number;
   overlays: OverlayConfig;
   onClose: () => void;
-  onSetObserver: (next: Observer) => void;
-  onSetTime: (timeMs: number) => void;
   onSetOverlays: (next: OverlayConfig) => void;
-  onUseGeolocation: () => void;
 };
 
-function toLocalDatetimeInput(timeMs: number): string {
-  const d = new Date(timeMs);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 /// Modal-style settings overlay. Click the backdrop or the × to close.
-export function SettingsPanel({
-  observer,
-  timeMs,
-  overlays,
-  onClose,
-  onSetObserver,
-  onSetTime,
-  onSetOverlays,
-  onUseGeolocation,
-}: Props) {
+export function SettingsPanel({ overlays, onClose, onSetOverlays }: Props) {
   return (
     <div
       // Backdrop. Clicks here close the panel.
@@ -92,65 +72,6 @@ export function SettingsPanel({
           </button>
         </header>
 
-        <Section label="OBSERVER">
-          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "6px 10px" }}>
-            <label htmlFor="set-lat" style={labelStyle}>Lat</label>
-            <input
-              id="set-lat"
-              type="number"
-              step="0.01"
-              min={-90}
-              max={90}
-              value={observer.latitudeDeg}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                if (e.target.value !== "" && Number.isFinite(v) && v >= -90 && v <= 90) {
-                  onSetObserver({ ...observer, latitudeDeg: v });
-                }
-              }}
-              style={inputStyle}
-            />
-            <label htmlFor="set-lng" style={labelStyle}>Lng</label>
-            <input
-              id="set-lng"
-              type="number"
-              step="0.01"
-              min={-180}
-              max={180}
-              value={observer.longitudeDeg}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                if (e.target.value !== "" && Number.isFinite(v) && v >= -180 && v <= 180) {
-                  onSetObserver({ ...observer, longitudeDeg: v });
-                }
-              }}
-              style={inputStyle}
-            />
-          </div>
-          <button onClick={onUseGeolocation} style={buttonStyle}>
-            Use my location
-          </button>
-        </Section>
-
-        <Section label="TIME (local)">
-          <label htmlFor="set-time" style={{ ...labelStyle, display: "block", marginBottom: 6 }}>
-            Local time
-          </label>
-          <input
-            id="set-time"
-            type="datetime-local"
-            value={toLocalDatetimeInput(timeMs)}
-            onChange={(e) => {
-              const v = new Date(e.target.value).getTime();
-              if (!Number.isNaN(v)) onSetTime(v);
-            }}
-            style={{ ...inputStyle, width: "100%" }}
-          />
-          <p style={{ margin: "8px 0 0", fontSize: 11, opacity: 0.55 }}>
-            Setting a time rebases the clock; it then ticks forward from there.
-          </p>
-        </Section>
-
         <Section label="OVERLAYS">
           <OverlayToggles config={overlays} onChange={onSetOverlays} />
         </Section>
@@ -173,28 +94,3 @@ function Section({ label, children }: { label: string; children: React.ReactNode
     </section>
   );
 }
-
-const labelStyle: React.CSSProperties = {
-  alignSelf: "center",
-  opacity: 0.7,
-};
-
-const inputStyle: React.CSSProperties = {
-  background: "rgba(255, 255, 255, 0.07)",
-  color: "#e6edf5",
-  border: "1px solid rgba(255, 255, 255, 0.12)",
-  borderRadius: 5,
-  padding: "5px 8px",
-  font: "inherit",
-};
-
-const buttonStyle: React.CSSProperties = {
-  background: "rgba(80, 130, 220, 0.22)",
-  color: "#e6edf5",
-  border: "1px solid rgba(120, 160, 230, 0.35)",
-  borderRadius: 5,
-  padding: "6px 10px",
-  marginTop: 10,
-  cursor: "pointer",
-  font: "inherit",
-};
