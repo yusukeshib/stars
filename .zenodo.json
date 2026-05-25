@@ -1,0 +1,28 @@
+{
+  "title": "stars: a physically informed cross-platform sky renderer",
+  "upload_type": "software",
+  "description": "stars is a Rust sky-rendering engine and reference set of CLI, desktop, and web hosts for reproducible planetarium scenes. It documents its time-scale, coordinate, photometry, atmosphere, catalog, and rendering approximations so rendered scenes can be reviewed, cited, and regenerated from portable JSON sessions.",
+  "creators": [
+    {
+      "name": "Shibata, Yusuke"
+    }
+  ],
+  "keywords": [
+    "astronomy",
+    "planetarium",
+    "sky renderer",
+    "reproducibility",
+    "Rust",
+    "WebGPU",
+    "astronomical visualization"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/yusukeshib/stars",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ],
+  "access_right": "open",
+  "notes": "Archive each tagged release with Zenodo and copy the minted version DOI into the GitHub release notes and, when available, into CITATION.cff. Cite the release DOI together with the JSON session and data/source caveats documented in docs/citation.md."
+}

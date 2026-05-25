@@ -40,7 +40,9 @@ The current engine already includes:
 - shareable schema-versioned JSON sessions across CLI, desktop, and web, plus
   compact web session URLs;
 - deterministic validation/demo scene presets and an opt-in generated gallery
-  for screenshot review.
+  for screenshot review;
+- citation metadata, Zenodo release-archive metadata, and a standards-compliance
+  page for citing and reviewing model choices.
 
 ## CLI-generated gallery
 
@@ -115,6 +117,10 @@ More detail lives in [`ARCHITECTURE.md`](ARCHITECTURE.md).
   and current model limits.
 - [`DATA_SOURCES.md`](DATA_SOURCES.md) — catalog, constellation, and literature
   data provenance.
+- [`CITATION.cff`](CITATION.cff) and [`docs/citation.md`](docs/citation.md) —
+  preferred citation text, Zenodo release DOI workflow, and data/source caveats.
+- [`docs/standards-compliance.md`](docs/standards-compliance.md) — implemented
+  IAU/SOFA-aligned routines, approximations, and non-goals.
 - [`docs/scene-presets.md`](docs/scene-presets.md) — deterministic named scenes
   and JSON-session export workflow.
 - [`docs/validation-gallery.md`](docs/validation-gallery.md) — generated demo
@@ -122,12 +128,13 @@ More detail lives in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Current focus
 
-Phase 1, Phase 1', Phase 2, Phase 4 full-sky projection work, Phase 4
-out-of-Earth galactic / custom external viewpoints, and Phase 4 telescope
-eyepiece simulation are implemented. The next best work is to make the app
-easier to reproduce, cite, validate, teach from, and then extend visually:
+Phase 1, Phase 1', Phase 2, citation/standards documentation, Phase 4 full-sky
+projection work, Phase 4 out-of-Earth galactic / custom external viewpoints,
+and Phase 4 telescope eyepiece simulation are implemented. The next best work
+is to make the app easier to reproduce, validate, teach from, and then extend
+visually:
 
-1. `CITATION.cff`, standards-compliance notes, and early notebook examples;
+1. early notebook examples backed by CLI/session outputs;
 2. catalog-backend scaling design before Gaia / Tycho / Hipparcos ingest;
 3. deep-sky overlays for Messier / NGC-style objects;
 4. accessibility, observation-planning polish, and variable-star light curves.

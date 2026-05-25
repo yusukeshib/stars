@@ -3,7 +3,8 @@
 `stars` aims to be visually useful while keeping the scientific choices behind
 its output explicit. This document records the validation policy: what should be
 pinned by tests, what external references matter, and where the current limits
-are.
+are. The companion [`docs/standards-compliance.md`](docs/standards-compliance.md)
+page lists implemented IAU/SOFA-aligned routines, approximations, and non-goals.
 
 The roadmap-level goal is not that every subsystem is publication-grade today.
 The goal is that each approximation is named, tested, and easy to replace when
@@ -213,6 +214,13 @@ Current limitation:
   `make ci` because adapter/driver differences can change readback bytes. PRs
   should still regenerate and inspect gallery images for renderer-visible
   changes, or explain why doing so was not practical.
+
+## Citation and standards traceability
+
+When using validation output in a paper, teaching material, or issue report,
+follow [`docs/citation.md`](docs/citation.md): cite the archived release or
+exact commit, attach the JSON session or preset name, and name any relevant
+approximation from [`docs/standards-compliance.md`](docs/standards-compliance.md).
 
 ## External comparison targets
 
