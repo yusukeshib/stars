@@ -1,15 +1,21 @@
 //! Shared helpers for the native host binaries.
 //!
-//! Anything that depends on `clap` or `chrono` lives here so the engine crates
-//! (`astronomy`, `catalog`, `renderer`) stay free of CLI / time-parsing
-//! dependencies and remain trivially embeddable from WASM, FFI, and tests.
-//! Despite living under `crates/`, this is *not* engine-tier — only the host
-//! apps under `apps/` consume it.
+//! Anything that depends on `clap` / `chrono`, or that glues multiple engine
+//! crates together only for native hosts, lives here. This keeps the engine
+//! crates (`astronomy`, `catalog`, `renderer`) free of CLI / time-parsing
+//! dependencies and prevents native host apps from duplicating catalog→renderer
+//! adapter logic. Despite living under `crates/`, this is *not* engine-tier —
+//! only the host apps under `apps/` consume it.
+
+use std::path::Path;
 
 use anyhow::{Context, Result};
-use astronomy::{julian_date_from_unix_seconds, TimeScales};
+use astronomy::TimeScales;
+use catalog::load_from_file;
 use clap::ValueEnum;
-use renderer::{AtmospherePreset, OverlayKind};
+use renderer::{
+    build_star_instance, Atmosphere, AtmospherePreset, OverlayConfig, OverlayKind, StarInstance,
+};
 
 /// CLI-facing mirror of [`OverlayKind`] that derives [`ValueEnum`] so `clap`
 /// can render kebab-case help text and parse user input. Kept in this crate
@@ -81,6 +87,82 @@ impl From<AtmospherePresetArg> for AtmospherePreset {
     }
 }
 
+/// Build a renderer overlay configuration from native-host CLI values.
+///
+/// Keeping this here prevents `stars-cli` and `stars-viewer` from drifting on
+/// overlay defaults, string parsing, or opacity clamping while preserving the
+/// engine/host boundary: `renderer` owns the render model; this crate owns the
+/// `clap`-facing mirror types.
+pub fn overlay_config_from_args(
+    overlays_disabled: bool,
+    overlays: &[OverlayArg],
+    grid_step_deg: f64,
+    overlay_opacity: f32,
+) -> OverlayConfig {
+    let layers = if overlays_disabled {
+        Vec::new()
+    } else {
+        overlays.iter().copied().map(OverlayKind::from).collect()
+    };
+    OverlayConfig {
+        layers,
+        grid_step_deg,
+        opacity: overlay_opacity.clamp(0.0, 1.0),
+    }
+}
+
+/// Build a renderer atmosphere from native-host CLI values.
+///
+/// The option fields intentionally mirror the CLI/viewer flags. Keeping the
+/// override application in one helper makes the native hosts share identical
+/// precedence and disable semantics.
+pub fn atmosphere_from_args(
+    disabled: bool,
+    preset: AtmospherePresetArg,
+    turbidity: Option<f32>,
+    observer_altitude_m: Option<f32>,
+    ozone_du: Option<f32>,
+    visibility_km: Option<f32>,
+) -> Atmosphere {
+    if disabled {
+        return Atmosphere::OFF;
+    }
+
+    let mut atmosphere = Atmosphere::from_preset(AtmospherePreset::from(preset));
+    if let Some(turbidity) = turbidity {
+        atmosphere.turbidity = turbidity;
+    }
+    if let Some(observer_altitude_m) = observer_altitude_m {
+        atmosphere.observer_altitude_m = observer_altitude_m;
+    }
+    if let Some(ozone_du) = ozone_du {
+        atmosphere.ozone_du = ozone_du;
+    }
+    if let Some(visibility_km) = visibility_km {
+        atmosphere.visibility_km = visibility_km;
+    }
+    atmosphere
+}
+
+/// Load a filesystem-backed star catalog and convert it into renderer-ready
+/// instances using the shared perceptual magnitude/colour pipeline.
+///
+/// Native hosts both follow this exact step; centralising it here prevents the
+/// CLI and viewer from drifting in how they bridge the `catalog` and `renderer`
+/// crates. WASM keeps its separate embedded-catalog path in `apps/web`.
+pub fn load_star_instances_from_file(
+    path: impl AsRef<Path>,
+    limiting_magnitude: f32,
+) -> Result<Vec<StarInstance>> {
+    let path = path.as_ref();
+    let stars =
+        load_from_file(path).with_context(|| format!("Reading catalog at {}", path.display()))?;
+    Ok(stars
+        .iter()
+        .map(|s| build_star_instance(s.position.into(), s.color, s.magnitude, limiting_magnitude))
+        .collect())
+}
+
 fn parse_time_to_unix_seconds(time: Option<&str>) -> Result<f64> {
     let unix_seconds = match time {
         Some(s) => {
@@ -99,14 +181,6 @@ fn parse_time_to_unix_seconds(time: Option<&str>) -> Result<f64> {
 /// Parse `Some(rfc3339)` (or `None` ⇒ "now") into UTC/UT1/TAI/TT/TDB scales.
 pub fn parse_time_to_time_scales(time: Option<&str>) -> Result<TimeScales> {
     Ok(TimeScales::from_unix_seconds(parse_time_to_unix_seconds(
-        time,
-    )?))
-}
-
-/// Parse `Some(rfc3339)` (or `None` ⇒ "now") into a UTC Julian Date, sub-second
-/// precision preserved.
-pub fn parse_time_to_jd(time: Option<&str>) -> Result<f64> {
-    Ok(julian_date_from_unix_seconds(parse_time_to_unix_seconds(
         time,
     )?))
 }
@@ -159,15 +233,64 @@ mod tests {
     }
 
     #[test]
+    fn overlay_config_helper_applies_disable_and_opacity_rules() {
+        let overlays = [OverlayArg::Horizon, OverlayArg::ConstellationLines];
+        let enabled = overlay_config_from_args(false, &overlays, 30.0, 2.0);
+        assert_eq!(
+            enabled.layers,
+            vec![OverlayKind::Horizon, OverlayKind::ConstellationLines]
+        );
+        assert_eq!(enabled.grid_step_deg, 30.0);
+        assert_eq!(enabled.opacity, 1.0);
+
+        let disabled = overlay_config_from_args(true, &overlays, 15.0, 0.5);
+        assert!(disabled.layers.is_empty());
+        assert_eq!(disabled.opacity, 0.5);
+    }
+
+    #[test]
+    fn atmosphere_helper_applies_overrides_and_disable_rule() {
+        let atmosphere = atmosphere_from_args(
+            false,
+            AtmospherePresetArg::HazyUrban,
+            Some(4.0),
+            Some(1234.0),
+            Some(280.0),
+            Some(20.0),
+        );
+        assert_eq!(
+            atmosphere.extinction_k_rgb,
+            Atmosphere::HAZY_URBAN.extinction_k_rgb
+        );
+        assert_eq!(atmosphere.turbidity, 4.0);
+        assert_eq!(atmosphere.observer_altitude_m, 1234.0);
+        assert_eq!(atmosphere.ozone_du, 280.0);
+        assert_eq!(atmosphere.visibility_km, 20.0);
+
+        let off = atmosphere_from_args(
+            true,
+            AtmospherePresetArg::ClearRural,
+            Some(4.0),
+            Some(1234.0),
+            Some(280.0),
+            Some(20.0),
+        );
+        assert_eq!(off.extinction_k_rgb, Atmosphere::OFF.extinction_k_rgb);
+        assert!(!off.sunlit_scattering);
+    }
+
+    #[test]
     fn parse_time_now_is_finite() {
-        let jd = parse_time_to_jd(None).unwrap();
+        let jd = parse_time_to_time_scales(None).unwrap().jd_utc;
         assert!(jd.is_finite() && jd > 2_400_000.0);
     }
 
     #[test]
     fn parse_time_rfc3339_matches_known_jd() {
         // 2000-01-01T12:00:00Z is J2000.0 = JD 2451545.0
-        let jd = parse_time_to_jd(Some("2000-01-01T12:00:00Z")).unwrap();
+        let jd = parse_time_to_time_scales(Some("2000-01-01T12:00:00Z"))
+            .unwrap()
+            .jd_utc;
         assert!((jd - 2_451_545.0).abs() < 1e-6, "jd={jd}");
     }
 }

@@ -2,21 +2,36 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use astronomy::Observer;
-use catalog::load_from_file;
 use clap::Parser;
 use renderer::{
-    build_star_instance, Atmosphere, AtmospherePreset, Camera, LocalView, OverlayConfig,
-    OverlayKind, Renderer, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    Atmosphere, Camera, LocalView, OverlayConfig, Renderer, StarInstance,
+    DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
-use stars_host_common::{parse_time_to_time_scales, AtmospherePresetArg, OverlayArg};
+use stars_host_common::{
+    atmosphere_from_args, load_star_instances_from_file, overlay_config_from_args,
+    parse_time_to_time_scales, AtmospherePresetArg, OverlayArg,
+};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
+
+const INITIAL_WINDOW_WIDTH: u32 = 1280;
+const INITIAL_WINDOW_HEIGHT: u32 = 720;
+/// Convert high-resolution trackpad pixel deltas into approximately the same
+/// units as line-wheel deltas before applying the zoom exponential.
+const PIXEL_SCROLL_TO_LINE_DELTA: f32 = 0.01;
+/// Exponential zoom sensitivity per scroll unit. A small value keeps wheel and
+/// trackpad zoom smooth rather than jumping between FoV clamp limits.
+const ZOOM_SCROLL_SENSITIVITY: f32 = 0.05;
+const CLOCK_SPEED_REALTIME: f64 = 1.0;
+const CLOCK_SPEED_MINUTE_PER_SECOND: f64 = 60.0;
+const CLOCK_SPEED_HOUR_PER_SECOND: f64 = 3_600.0;
+const CLOCK_SPEED_DAY_PER_SECOND: f64 = 86_400.0;
 
 /// Interactive desktop viewer for the night sky.
 #[derive(Parser, Debug)]
@@ -100,14 +115,9 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     let start_jd = parse_time_to_time_scales(args.time.as_deref())?.jd_utc;
-    let stars = load_from_file(&args.catalog)
-        .with_context(|| format!("Reading catalog at {}", args.catalog.display()))?;
-    log::info!("Loaded {} stars", stars.len());
     let limiting_mag = DEFAULT_SCREEN_LIMITING_MAGNITUDE;
-    let instances: Vec<StarInstance> = stars
-        .iter()
-        .map(|s| build_star_instance(s.position.into(), s.color, s.magnitude, limiting_mag))
-        .collect();
+    let instances = load_star_instances_from_file(&args.catalog, limiting_mag)?;
+    log::info!("Loaded {} stars", instances.len());
 
     let initial_view = LocalView {
         azimuth_rad: (args.azimuth as f32).to_radians(),
@@ -115,39 +125,21 @@ fn main() -> Result<()> {
         fov_y_rad: (args.fov as f32).to_radians(),
     };
 
-    let overlays = OverlayConfig {
-        layers: if args.no_overlays {
-            Vec::new()
-        } else {
-            args.overlays
-                .iter()
-                .copied()
-                .map(OverlayKind::from)
-                .collect()
-        },
-        grid_step_deg: args.grid_step_deg,
-        opacity: args.overlay_opacity.clamp(0.0, 1.0),
-    };
+    let overlays = overlay_config_from_args(
+        args.no_overlays,
+        &args.overlays,
+        args.grid_step_deg,
+        args.overlay_opacity,
+    );
 
-    let atmosphere = if args.no_extinction {
-        Atmosphere::OFF
-    } else {
-        let mut atmosphere =
-            Atmosphere::from_preset(AtmospherePreset::from(args.atmosphere_preset));
-        if let Some(turbidity) = args.turbidity {
-            atmosphere.turbidity = turbidity;
-        }
-        if let Some(observer_altitude_m) = args.observer_altitude_m {
-            atmosphere.observer_altitude_m = observer_altitude_m;
-        }
-        if let Some(ozone_du) = args.ozone_du {
-            atmosphere.ozone_du = ozone_du;
-        }
-        if let Some(visibility_km) = args.visibility_km {
-            atmosphere.visibility_km = visibility_km;
-        }
-        atmosphere
-    };
+    let atmosphere = atmosphere_from_args(
+        args.no_extinction,
+        args.atmosphere_preset,
+        args.turbidity,
+        args.observer_altitude_m,
+        args.ozone_du,
+        args.visibility_km,
+    );
 
     let event_loop = EventLoop::new()?;
     let mut app = App::new(
@@ -206,7 +198,7 @@ impl SkyClock {
         Self {
             anchor_jd: start_jd,
             epoch: Instant::now(),
-            speed: 1.0,
+            speed: CLOCK_SPEED_REALTIME,
             paused_at: None,
         }
     }
@@ -274,24 +266,55 @@ impl ApplicationHandler for App {
 
         let attrs = Window::default_attributes()
             .with_title("Stars")
-            .with_inner_size(PhysicalSize::new(1280u32, 720u32));
-        let window = Arc::new(event_loop.create_window(attrs).unwrap());
+            .with_inner_size(PhysicalSize::new(
+                INITIAL_WINDOW_WIDTH,
+                INITIAL_WINDOW_HEIGHT,
+            ));
+        let window = match event_loop.create_window(attrs) {
+            Ok(window) => Arc::new(window),
+            Err(error) => {
+                log::error!("failed to create viewer window: {error}");
+                event_loop.exit();
+                return;
+            }
+        };
         self.window = Some(window.clone());
 
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
-        let surface = instance.create_surface(window.clone()).unwrap();
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .expect("No suitable GPU adapter found");
+        let surface = match instance.create_surface(window.clone()) {
+            Ok(surface) => surface,
+            Err(error) => {
+                log::error!("failed to create wgpu surface: {error}");
+                event_loop.exit();
+                return;
+            }
+        };
+        let adapter =
+            match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                compatible_surface: Some(&surface),
+                ..Default::default()
+            })) {
+                Ok(adapter) => adapter,
+                Err(error) => {
+                    log::error!("no suitable GPU adapter found: {error}");
+                    event_loop.exit();
+                    return;
+                }
+            };
 
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("Stars Viewer Device"),
-            ..Default::default()
-        }))
-        .expect("Failed to create device");
+        let (device, queue) =
+            match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                label: Some("Stars Viewer Device"),
+                ..Default::default()
+            })) {
+                Ok(device_and_queue) => device_and_queue,
+                Err(error) => {
+                    log::error!("failed to create wgpu device: {error}");
+                    event_loop.exit();
+                    return;
+                }
+            };
 
         let surface_caps = surface.get_capabilities(&adapter);
         let format = surface_caps
@@ -387,9 +410,12 @@ impl ApplicationHandler for App {
             WindowEvent::MouseWheel { delta, .. } => {
                 let scroll = match delta {
                     winit::event::MouseScrollDelta::LineDelta(_, y) => y,
-                    winit::event::MouseScrollDelta::PixelDelta(p) => p.y as f32 * 0.01,
+                    winit::event::MouseScrollDelta::PixelDelta(p) => {
+                        p.y as f32 * PIXEL_SCROLL_TO_LINE_DELTA
+                    }
                 };
-                gpu.camera.zoom_fov((-scroll * 0.05).exp());
+                gpu.camera
+                    .zoom_fov((-scroll * ZOOM_SCROLL_SENSITIVITY).exp());
             }
 
             WindowEvent::KeyboardInput {
@@ -402,10 +428,10 @@ impl ApplicationHandler for App {
                 ..
             } => match code {
                 KeyCode::Space => self.sky_clock.toggle_pause(),
-                KeyCode::Digit1 => self.sky_clock.set_speed(1.0),
-                KeyCode::Digit2 => self.sky_clock.set_speed(60.0),
-                KeyCode::Digit3 => self.sky_clock.set_speed(3600.0),
-                KeyCode::Digit4 => self.sky_clock.set_speed(86_400.0),
+                KeyCode::Digit1 => self.sky_clock.set_speed(CLOCK_SPEED_REALTIME),
+                KeyCode::Digit2 => self.sky_clock.set_speed(CLOCK_SPEED_MINUTE_PER_SECOND),
+                KeyCode::Digit3 => self.sky_clock.set_speed(CLOCK_SPEED_HOUR_PER_SECOND),
+                KeyCode::Digit4 => self.sky_clock.set_speed(CLOCK_SPEED_DAY_PER_SECOND),
                 KeyCode::Escape => event_loop.exit(),
                 _ => {}
             },
@@ -451,7 +477,11 @@ impl ApplicationHandler for App {
                 gpu.queue.submit(std::iter::once(encoder.finish()));
                 surface_texture.present();
 
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                } else {
+                    log::warn!("redraw completed but viewer window is missing");
+                }
             }
 
             _ => {}

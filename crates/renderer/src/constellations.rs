@@ -1,7 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ConstellationSegment {
-    pub start: [f32; 3],
-    pub end: [f32; 3],
+pub(crate) struct ConstellationSegment {
+    pub(crate) start: [f32; 3],
+    pub(crate) end: [f32; 3],
 }
 
 const CONSTELLATION_BOUNDARY_MAGIC: &[u8; 8] = b"CNBND1\0\0";
@@ -14,16 +14,16 @@ const CONSTELLATION_LINE_DATA: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/constellation_lines.bin"));
 
 /// Modern western constellation stick figures, represented as J2000 unit-vector
-/// line segments. The build script compacts the source CSV into an i16 binary
-/// table so embedding these overlays follows the same pattern as the star
-/// catalog.
-pub fn constellation_lines() -> Vec<ConstellationSegment> {
+/// line segments. The renderer build script compacts the source CSV into an
+/// i16 binary table so these draw-only overlays stay inside the rendering
+/// crate rather than leaking into the star-catalog API.
+pub(crate) fn constellation_lines() -> Vec<ConstellationSegment> {
     decode_constellation_segments(CONSTELLATION_LINE_DATA, CONSTELLATION_LINE_MAGIC)
 }
 
 /// IAU/Delporte constellation boundaries, represented as J2000 unit-vector line
 /// segments. The source CSV is derived from CDS VI/49 boundary data.
-pub fn constellation_boundaries() -> Vec<ConstellationSegment> {
+pub(crate) fn constellation_boundaries() -> Vec<ConstellationSegment> {
     decode_constellation_segments(CONSTELLATION_BOUNDARY_DATA, CONSTELLATION_BOUNDARY_MAGIC)
 }
 

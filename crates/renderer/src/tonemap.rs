@@ -53,14 +53,14 @@ pub(crate) struct Tonemap {
     tonemap_bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     /// The HDR scene texture. Created in [`Tonemap::new`] and recreated by
-    /// [`Tonemap::resize`] whenever the framebuffer changes size.
-    #[allow(dead_code)]
-    hdr_texture: wgpu::Texture,
+    /// [`Tonemap::resize`] whenever the framebuffer changes size. Kept alive
+    /// by the struct because `hdr_view` borrows the underlying GPU resource.
+    _hdr_texture: wgpu::Texture,
     hdr_view: wgpu::TextureView,
     /// 1×1 R32Float target holding the log-average luminance of the HDR
-    /// scene, computed by the luminance-reduction pass.
-    #[allow(dead_code)]
-    adaptation_texture: wgpu::Texture,
+    /// scene, computed by the luminance-reduction pass. Kept alive for the
+    /// same reason as `_hdr_texture`.
+    _adaptation_texture: wgpu::Texture,
     adaptation_view: wgpu::TextureView,
     luminance_bind_group: wgpu::BindGroup,
     tonemap_bind_group: wgpu::BindGroup,
@@ -279,9 +279,9 @@ impl Tonemap {
             tonemap_pipeline,
             tonemap_bind_group_layout,
             sampler,
-            hdr_texture,
+            _hdr_texture: hdr_texture,
             hdr_view,
-            adaptation_texture,
+            _adaptation_texture: adaptation_texture,
             adaptation_view,
             luminance_bind_group,
             tonemap_bind_group,
@@ -315,9 +315,9 @@ impl Tonemap {
             &adaptation_view,
             camera_buffer,
         );
-        self.hdr_texture = hdr_texture;
+        self._hdr_texture = hdr_texture;
         self.hdr_view = hdr_view;
-        self.adaptation_texture = adaptation_texture;
+        self._adaptation_texture = adaptation_texture;
         self.adaptation_view = adaptation_view;
         self.luminance_bind_group = luminance_bind_group;
         self.width = width;

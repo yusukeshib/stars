@@ -14,7 +14,7 @@ use crate::vertex::{limiting_magnitude_to_zeropoint, NAKED_EYE_LIMITING_MAGNITUD
 /// shader's view of it.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
-pub struct CameraUniform {
+pub(crate) struct CameraUniform {
     pub view_proj: [[f32; 4]; 4],
     /// Inverse of `view_proj`. Lets a fullscreen pass reconstruct the
     /// world-space ray direction for each pixel from its clip-space
@@ -307,7 +307,7 @@ impl Camera {
     /// View matrix in the observer's local ENU frame (no equatorial→horizontal rotation).
     /// Use this for geometry that is naturally expressed in local coordinates
     /// (horizon line, alt-az grid, cardinal direction markers).
-    pub fn view_matrix_local(&self) -> Mat4 {
+    fn view_matrix_local(&self) -> Mat4 {
         // look_at_rh derives screen-right from (forward × up); using local zenith as
         // "up" keeps the horizon level on screen. `forward_local` uses a clamped
         // view so host-supplied ±90° altitudes cannot hit the gimbal-lock singularity.
@@ -316,11 +316,11 @@ impl Camera {
 
     /// View matrix in J2000 equatorial coordinates (includes the equatorial→horizontal
     /// rotation). Use this for star positions, RA/Dec grids, ecliptic, celestial equator.
-    pub fn view_matrix(&self) -> Mat4 {
+    fn view_matrix(&self) -> Mat4 {
         self.view_matrix_local() * self.equatorial_to_horizontal()
     }
 
-    pub fn projection_matrix(&self) -> Mat4 {
+    fn projection_matrix(&self) -> Mat4 {
         Mat4::perspective_rh(self.effective_view().fov_y_rad, self.aspect, 0.01, 10.0)
     }
 
@@ -330,7 +330,7 @@ impl Camera {
     }
 
     /// View-projection for local ENU-frame geometry.
-    pub fn view_proj_local(&self) -> Mat4 {
+    pub(crate) fn view_proj_local(&self) -> Mat4 {
         self.projection_matrix() * self.view_matrix_local()
     }
 
@@ -363,7 +363,7 @@ impl Camera {
         pixel_size_rad * pixel_size_rad
     }
 
-    pub fn uniform(&self, width: u32, height: u32) -> CameraUniform {
+    pub(crate) fn uniform(&self, width: u32, height: u32) -> CameraUniform {
         let zenith = self.zenith_in_equatorial();
         let k = self
             .atmosphere

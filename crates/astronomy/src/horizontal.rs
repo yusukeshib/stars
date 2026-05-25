@@ -1,6 +1,8 @@
 use glam::{Mat3, Mat4};
+use std::f64::consts::TAU;
 
-/// Altitude/azimuth in radians. Azimuth is measured from North, increasing toward East.
+/// Altitude/azimuth in radians. Azimuth is normalized to `[0, 2π)` and is
+/// measured from North, increasing toward East.
 #[derive(Debug, Clone, Copy)]
 pub struct AltAz {
     pub altitude: f64,
@@ -14,8 +16,9 @@ pub fn equatorial_to_horizontal(ra: f64, dec: f64, lst: f64, lat: f64) -> AltAz 
     let sin_alt = lat.sin() * dec.sin() + lat.cos() * dec.cos() * h.cos();
     let altitude = sin_alt.clamp(-1.0, 1.0).asin();
     // Azimuth measured from North toward East.
-    let azimuth =
-        (-h.sin() * dec.cos()).atan2(dec.sin() * lat.cos() - h.cos() * dec.cos() * lat.sin());
+    let azimuth = (-h.sin() * dec.cos())
+        .atan2(dec.sin() * lat.cos() - h.cos() * dec.cos() * lat.sin())
+        .rem_euclid(TAU);
     AltAz { altitude, azimuth }
 }
 
@@ -104,9 +107,18 @@ mod tests {
             alt_az.altitude
         );
         // Azimuth should be π (due south).
-        let az_norm =
-            (alt_az.azimuth.rem_euclid(2.0 * std::f64::consts::PI) - std::f64::consts::PI).abs();
+        let az_norm = (alt_az.azimuth.rem_euclid(TAU) - std::f64::consts::PI).abs();
         assert!(az_norm < 1e-6, "az={}", alt_az.azimuth);
+    }
+
+    #[test]
+    fn azimuth_is_normalized() {
+        let alt_az = equatorial_to_horizontal(deg(90.0), deg(0.0), 0.0, deg(35.0));
+        assert!(
+            (0.0..TAU).contains(&alt_az.azimuth),
+            "azimuth should be normalized into [0, 2π), got {}",
+            alt_az.azimuth
+        );
     }
 
     #[test]

@@ -2,13 +2,15 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use astronomy::Observer;
-use catalog::load_from_file;
 use clap::Parser;
 use renderer::{
-    build_star_instance, Atmosphere, AtmospherePreset, Camera, LocalView, OverlayConfig,
-    OverlayKind, Renderer, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    Atmosphere, Camera, LocalView, OverlayConfig, Renderer, StarInstance,
+    DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
-use stars_host_common::{parse_time_to_time_scales, AtmospherePresetArg, OverlayArg};
+use stars_host_common::{
+    atmosphere_from_args, load_star_instances_from_file, overlay_config_from_args,
+    parse_time_to_time_scales, AtmospherePresetArg, OverlayArg,
+};
 
 /// Render the night sky as seen from a given observer to a PNG.
 #[derive(Parser, Debug)]
@@ -125,23 +127,6 @@ struct Args {
     no_skyglow: bool,
 }
 
-fn overlay_config_from_args(args: &Args) -> OverlayConfig {
-    let layers = if args.no_overlays {
-        Vec::new()
-    } else {
-        args.overlays
-            .iter()
-            .copied()
-            .map(OverlayKind::from)
-            .collect()
-    };
-    OverlayConfig {
-        layers,
-        grid_step_deg: args.grid_step_deg,
-        opacity: args.overlay_opacity.clamp(0.0, 1.0),
-    }
-}
-
 fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();
@@ -163,36 +148,24 @@ fn main() -> Result<()> {
         fov_y_rad: (args.fov as f32).to_radians(),
     };
 
-    let stars = load_from_file(&args.catalog)
-        .with_context(|| format!("Reading catalog at {}", args.catalog.display()))?;
-    log::info!("Loaded {} stars", stars.len());
-
     let limiting_mag = args.limiting_magnitude;
-    let instances: Vec<StarInstance> = stars
-        .iter()
-        .map(|s| build_star_instance(s.position.into(), s.color, s.magnitude, limiting_mag))
-        .collect();
+    let instances = load_star_instances_from_file(&args.catalog, limiting_mag)?;
+    log::info!("Loaded {} stars", instances.len());
 
-    let overlays = overlay_config_from_args(&args);
-    let atmosphere = if args.no_extinction {
-        Atmosphere::OFF
-    } else {
-        let mut atmosphere =
-            Atmosphere::from_preset(AtmospherePreset::from(args.atmosphere_preset));
-        if let Some(turbidity) = args.turbidity {
-            atmosphere.turbidity = turbidity;
-        }
-        if let Some(observer_altitude_m) = args.observer_altitude_m {
-            atmosphere.observer_altitude_m = observer_altitude_m;
-        }
-        if let Some(ozone_du) = args.ozone_du {
-            atmosphere.ozone_du = ozone_du;
-        }
-        if let Some(visibility_km) = args.visibility_km {
-            atmosphere.visibility_km = visibility_km;
-        }
-        atmosphere
-    };
+    let overlays = overlay_config_from_args(
+        args.no_overlays,
+        &args.overlays,
+        args.grid_step_deg,
+        args.overlay_opacity,
+    );
+    let atmosphere = atmosphere_from_args(
+        args.no_extinction,
+        args.atmosphere_preset,
+        args.turbidity,
+        args.observer_altitude_m,
+        args.ozone_du,
+        args.visibility_km,
+    );
     let skyglow_enabled = !args.no_skyglow;
 
     let pixels = pollster::block_on(render_to_pixels(
