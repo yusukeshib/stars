@@ -19,10 +19,24 @@ type Props = {
   onWheel: (zoomFactor: number) => void;
 };
 
+type PointerPoint = { x: number; y: number };
+
+const distance = (a: PointerPoint, b: PointerPoint) => Math.hypot(a.x - b.x, a.y - b.y);
+
+function firstTwoPointers(points: Map<number, PointerPoint>): [PointerPoint, PointerPoint] | null {
+  const iterator = points.values();
+  const first = iterator.next();
+  const second = iterator.next();
+  if (first.done || second.done) return null;
+  return [first.value, second.value];
+}
+
 export function StarCanvas({ observer, view, timeMs, overlays, onDrag, onWheel }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const handleRef = useRef<StarViewHandle | null>(null);
+  const activePointers = useRef<Map<number, PointerPoint>>(new Map());
   const dragState = useRef<{ x: number; y: number; pointerId: number } | null>(null);
+  const pinchDistance = useRef<number | null>(null);
 
   // Mirror props in refs so the long-lived render loop sees fresh values without
   // having to be torn down and rebuilt on every prop change.
@@ -110,10 +124,39 @@ export function StarCanvas({ observer, view, timeMs, overlays, onDrag, onWheel }
         cursor: "grab",
       }}
       onPointerDown={(e) => {
-        (e.target as Element).setPointerCapture(e.pointerId);
-        dragState.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (activePointers.current.size === 1) {
+          dragState.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
+          pinchDistance.current = null;
+          return;
+        }
+
+        const pinchPoints = firstTwoPointers(activePointers.current);
+        dragState.current = null;
+        pinchDistance.current = pinchPoints ? distance(...pinchPoints) : null;
       }}
       onPointerMove={(e) => {
+        if (!activePointers.current.has(e.pointerId)) return;
+        activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (activePointers.current.size >= 2) {
+          const pinchPoints = firstTwoPointers(activePointers.current);
+          if (!pinchPoints) return;
+
+          const nextDistance = distance(...pinchPoints);
+          const previousDistance = pinchDistance.current;
+          pinchDistance.current = nextDistance;
+          dragState.current = null;
+
+          if (previousDistance !== null && nextDistance > 0) {
+            // Pinch out => larger touch distance => smaller FOV (zoom in).
+            onWheel(previousDistance / nextDistance);
+          }
+          return;
+        }
+
         const d = dragState.current;
         if (!d || d.pointerId !== e.pointerId) return;
         const dx = e.clientX - d.x;
@@ -126,10 +169,30 @@ export function StarCanvas({ observer, view, timeMs, overlays, onDrag, onWheel }
         onDrag(-dx * scale, dy * scale);
       }}
       onPointerUp={(e) => {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+        activePointers.current.delete(e.pointerId);
+        pinchDistance.current = null;
+
         if (dragState.current?.pointerId === e.pointerId) dragState.current = null;
+        if (activePointers.current.size === 1) {
+          const [[pointerId, point]] = activePointers.current;
+          dragState.current = { ...point, pointerId };
+        }
       }}
       onPointerCancel={(e) => {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+        activePointers.current.delete(e.pointerId);
+        pinchDistance.current = null;
+
         if (dragState.current?.pointerId === e.pointerId) dragState.current = null;
+        if (activePointers.current.size === 1) {
+          const [[pointerId, point]] = activePointers.current;
+          dragState.current = { ...point, pointerId };
+        }
       }}
       onWheel={(e) => {
         // Trackpad pinch / wheel: positive deltaY = zoom out.

@@ -31,7 +31,7 @@ export type OverlayConfig = {
 };
 
 export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
-  layers: ["horizon", "cardinals"],
+  layers: ["horizon"],
   gridStepDeg: 15,
   opacity: 0.6,
 };

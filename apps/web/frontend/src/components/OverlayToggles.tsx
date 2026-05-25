@@ -5,29 +5,33 @@ import {
   type OverlayLayer,
 } from "../observer";
 
+const EDITABLE_OVERLAY_LAYERS = OVERLAY_LAYERS.filter(
+  (layer): layer is Exclude<OverlayLayer, "cardinals"> => layer !== "cardinals",
+);
+
 type Props = {
   config: OverlayConfig;
   onChange: (next: OverlayConfig) => void;
 };
 
-/// Checkbox list of overlay layers plus grid-step and opacity sliders. The
-/// layer set and naming mirror the CLI's `--overlays` flag exactly, so users
-/// who consult the CLI help find the same vocabulary here.
+/// Checkbox list of overlay layers plus grid-step and opacity sliders. The web
+/// UI exposes the useful line/grid overlays while hiding legacy cardinal marks.
 export function OverlayToggles({ config, onChange }: Props) {
   const toggle = (layer: OverlayLayer) => {
     const has = config.layers.includes(layer);
     const next = has
-      ? config.layers.filter((l) => l !== layer)
-      // Preserve the canonical OVERLAY_LAYERS order on insert so the wasm
-      // call site is deterministic regardless of toggle history.
-      : OVERLAY_LAYERS.filter((l) => l === layer || config.layers.includes(l));
+      ? config.layers.filter((l) => l !== layer && l !== "cardinals")
+      // Preserve the canonical layer order on insert so the wasm call site is
+      // deterministic regardless of toggle history. Hidden legacy layers are
+      // omitted from web UI edits.
+      : EDITABLE_OVERLAY_LAYERS.filter((l) => l === layer || config.layers.includes(l));
     onChange({ ...config, layers: next });
   };
 
   return (
     <>
       <div style={{ display: "grid", gap: 4 }}>
-        {OVERLAY_LAYERS.map((layer) => {
+        {EDITABLE_OVERLAY_LAYERS.map((layer) => {
           const checked = config.layers.includes(layer);
           const id = `overlay-${layer}`;
           return (

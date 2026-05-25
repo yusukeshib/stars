@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { StarCanvas } from "./components/StarCanvas";
 import { StatusBar } from "./components/StatusBar";
-import { GearButton } from "./components/GearButton";
-import { SettingsPanel } from "./components/SettingsPanel";
 import {
   clampAltitude,
   clampFov,
@@ -25,19 +23,23 @@ const DEFAULT_VIEW: View = {
   fovDeg: 70,
 };
 
-// Read once at module load. Used both for initial state and to decide whether
-// to auto-prompt for geolocation (we skip it if the user already has a stored
-// location, so we don't overwrite their explicit choice).
+const normalizeWebOverlays = (overlays: OverlayConfig): OverlayConfig => ({
+  ...overlays,
+  // Cardinal marks are intentionally hidden in the web UI; drop older persisted
+  // selections so users do not get a stuck invisible toggle.
+  layers: overlays.layers.filter((layer) => layer !== "cardinals"),
+});
+
+// Read once at module load.
 const PERSISTED = loadConfig();
 
 export function App() {
   const [observer, setObserver] = useState<Observer>(PERSISTED?.observer ?? DEFAULT_OBSERVER);
   const [view, setView] = useState<View>(PERSISTED?.view ?? DEFAULT_VIEW);
   const [overlays, setOverlays] = useState<OverlayConfig>(
-    PERSISTED?.overlays ?? DEFAULT_OVERLAY_CONFIG,
+    PERSISTED?.overlays ? normalizeWebOverlays(PERSISTED.overlays) : DEFAULT_OVERLAY_CONFIG,
   );
   const [timeMs, setTimeMs] = useState<number>(() => Date.now());
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const lastTickRef = useRef<number>(performance.now());
 
   // Persist observer + view + overlays whenever they change. We debounce
@@ -50,8 +52,8 @@ export function App() {
     return () => clearTimeout(handle);
   }, [observer, view, overlays]);
 
-  // Clock always ticks. When the user picks a custom moment via the settings
-  // panel we simply rebase `timeMs`; the same loop keeps advancing from there.
+  // Clock always ticks. When the user picks a custom moment via the quick time
+  // popup we simply rebase `timeMs`; the same loop keeps advancing from there.
   useEffect(() => {
     let raf = 0;
     const step = (now: number) => {
@@ -63,23 +65,6 @@ export function App() {
     lastTickRef.current = performance.now();
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, []);
-
-  // Auto-geolocation only fires for first-time visitors. If the user has a
-  // persisted observer we respect their explicit choice and stay quiet.
-  useEffect(() => {
-    if (PERSISTED?.observer) return;
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setObserver({
-          latitudeDeg: pos.coords.latitude,
-          longitudeDeg: pos.coords.longitude,
-        });
-      },
-      () => {},
-      { timeout: 5000 },
-    );
   }, []);
 
   const useGeolocation = () => {
@@ -110,20 +95,16 @@ export function App() {
           setView((v) => ({ ...v, fovDeg: clampFov(v.fovDeg * factor) }))
         }
       />
-      <StatusBar observer={observer} view={view} timeMs={timeMs} />
-      <GearButton onClick={() => setSettingsOpen(true)} />
-      {settingsOpen && (
-        <SettingsPanel
-          observer={observer}
-          timeMs={timeMs}
-          overlays={overlays}
-          onClose={() => setSettingsOpen(false)}
-          onSetObserver={setObserver}
-          onSetTime={setTimeMs}
-          onSetOverlays={setOverlays}
-          onUseGeolocation={useGeolocation}
-        />
-      )}
+      <StatusBar
+        observer={observer}
+        view={view}
+        timeMs={timeMs}
+        overlays={overlays}
+        onSetObserver={setObserver}
+        onSetTime={setTimeMs}
+        onSetOverlays={setOverlays}
+        onUseGeolocation={useGeolocation}
+      />
     </>
   );
 }
