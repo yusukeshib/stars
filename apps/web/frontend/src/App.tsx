@@ -112,6 +112,7 @@ export function App() {
     URL_ATMOSPHERE ?? PERSISTED?.atmosphere ?? DEFAULT_ATMOSPHERE_CONFIG,
   );
   const [timeMs, setTimeMs] = useState<number>(() => Date.now());
+  const [sunAltitudeDeg, setSunAltitudeDeg] = useState<number | null>(null);
   const lastTickRef = useRef<number>(performance.now());
 
   // Persist observer + view + overlays + atmosphere whenever they change. We debounce
@@ -171,11 +172,13 @@ export function App() {
         onWheel={(factor) =>
           setView((v) => ({ ...v, fovDeg: clampFov(v.fovDeg * factor) }))
         }
+        onSunAltitude={setSunAltitudeDeg}
       />
       <StatusBar
         observer={observer}
         view={view}
         timeMs={timeMs}
+        sunAltitudeDeg={sunAltitudeDeg}
         overlays={overlays}
         atmosphere={atmosphere}
         onSetObserver={setObserver}

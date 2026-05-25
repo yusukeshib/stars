@@ -74,6 +74,12 @@ const ARCSEC2_PER_SR: f32 = 4.2545e10;
 const PI: f32 = 3.14159265359;
 const DEG_TO_RAD: f32 = 0.017453292519943295;
 const LN10: f32 = 2.30258509299;
+// Mean obliquity of the ecliptic at J2000.0, IAU 2006 value
+// ε₀ = 84381.406″ = 23.4392911°. These are sin/cos(ε₀), used only for
+// converting J2000 equatorial camera rays into the fixed J2000 ecliptic frame
+// of the zodiacal-light fit; obliquity-of-date is ROADMAP Phase 2.
+const OBLIQUITY_COS_J2000: f32 = 0.917482062;
+const OBLIQUITY_SIN_J2000: f32 = 0.397777156;
 const EYE_PSF_SOLID_ANGLE_SR: f32 = 8.461594994075e-8;
 
 // Dark-sky surface brightness is written directly on the renderer's physical
@@ -441,18 +447,18 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let zeropoint = camera.viewport_pixel_sr_zeropoint.w;
     let pixel_sr = camera.viewport_pixel_sr_zeropoint.z;
     let pixel_arcsec2 = pixel_sr * ARCSEC2_PER_SR;
-    // Approximate ecliptic coordinates directly from J2000 equatorial y/z using
-    // ε=23.4392911°. The Sun direction supplied by the ephemeris lets the
-    // zodiacal component evaluate a real sun-relative longitude and antisolar
-    // gegenschein rather than a fixed sky-space blob.
+    // Convert J2000 equatorial rays into the fixed J2000 ecliptic frame.
+    // The Sun direction supplied by the ephemeris lets the zodiacal component
+    // evaluate a real sun-relative longitude and antisolar gegenschein rather
+    // than a fixed sky-space blob.
     let x_ecl = ray_dir.x;
-    let y_ecl = 0.917482062 * ray_dir.y + 0.397777156 * ray_dir.z;
-    let z_ecl = -0.397777156 * ray_dir.y + 0.917482062 * ray_dir.z;
+    let y_ecl = OBLIQUITY_COS_J2000 * ray_dir.y + OBLIQUITY_SIN_J2000 * ray_dir.z;
+    let z_ecl = -OBLIQUITY_SIN_J2000 * ray_dir.y + OBLIQUITY_COS_J2000 * ray_dir.z;
     let beta = asin(clamp(z_ecl, -1.0, 1.0));
     let lambda = atan2(y_ecl, x_ecl);
     let sun = normalize(camera.sun_eq_radius.xyz);
     let sun_x_ecl = sun.x;
-    let sun_y_ecl = 0.917482062 * sun.y + 0.397777156 * sun.z;
+    let sun_y_ecl = OBLIQUITY_COS_J2000 * sun.y + OBLIQUITY_SIN_J2000 * sun.z;
     let sun_lambda = atan2(sun_y_ecl, sun_x_ecl);
     let sun_rel_lon = lambda - sun_lambda;
     let mu = diffuse_sky_mag_per_arcsec2(l_rad, b_rad, beta, sun_rel_lon) - PERCEPTUAL_BOOST_MAGS;

@@ -21,9 +21,10 @@
 //! See `shaders/tonemap.wgsl` and `shaders/luminance.wgsl` for the per-
 //! shader references and the full derivation. The Ferwerda 1996 rod/cone
 //! TVI functions are implemented in `astronomy::photometry`; they motivate
-//! the photopic-vs-scotopic key split here, but the *per-fragment* rod/cone
-//! pathway separation (V'(λ)-weighted scotopic chroma) is scoped for the
-//! Pattanaik 1998 multiscale upgrade in ROADMAP Phase 1'.
+//! the photopic-vs-scotopic key split here. The fragment shader then applies
+//! the Phase 1' Pattanaik-style local adaptation / rod-cone pathway split in
+//! display space so dark-sky pixels desaturate toward a V'(λ)-weighted rod
+//! signal instead of tone-mapping RGB unchanged.
 
 /// Format of the intermediate scene buffer.
 ///

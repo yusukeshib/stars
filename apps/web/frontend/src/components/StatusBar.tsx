@@ -15,6 +15,7 @@ type Props = {
   observer: Observer;
   view: View;
   timeMs: number;
+  sunAltitudeDeg: number | null;
   overlays: OverlayConfig;
   atmosphere: AtmosphereConfig;
   onSetObserver: (next: Observer) => void;
@@ -30,31 +31,8 @@ const fmtDeg = (n: number) => `${n.toFixed(1)}°`;
 const COMPASS_DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 const compass = (az: number) => COMPASS_DIRS[Math.round(az / 45) % 8];
 const pad = (n: number) => n.toString().padStart(2, "0");
-const DEG = Math.PI / 180;
-const RAD = 180 / Math.PI;
-
-function julianDateFromUnixMs(ms: number): number {
-  return ms / 86400000 + 2440587.5;
-}
-
-function sunAltitudeDeg(ms: number, observer: Observer): number {
-  const jd = julianDateFromUnixMs(ms);
-  const n = jd - 2451545.0;
-  const L = ((280.46 + 0.9856474 * n) % 360 + 360) % 360;
-  const g = ((357.528 + 0.9856003 * n) % 360 + 360) % 360;
-  const lambda = (L + 1.915 * Math.sin(g * DEG) + 0.020 * Math.sin(2 * g * DEG)) * DEG;
-  const epsilon = (23.439 - 0.0000004 * n) * DEG;
-  const ra = Math.atan2(Math.cos(epsilon) * Math.sin(lambda), Math.cos(lambda));
-  const dec = Math.asin(Math.sin(epsilon) * Math.sin(lambda));
-  const t = (jd - 2451545.0) / 36525;
-  const gmst = (280.46061837 + 360.98564736629 * (jd - 2451545.0) + 0.000387933 * t * t - (t * t * t) / 38710000) * DEG;
-  const lst = gmst + observer.longitudeDeg * DEG;
-  const ha = lst - ra;
-  const lat = observer.latitudeDeg * DEG;
-  return Math.asin(Math.sin(lat) * Math.sin(dec) + Math.cos(lat) * Math.cos(dec) * Math.cos(ha)) * RAD;
-}
-
-function twilightLabel(sunAltDeg: number): string {
+function twilightLabel(sunAltDeg: number | null): string {
+  if (sunAltDeg === null) return "Sky model initializing";
   if (sunAltDeg >= 0) return `Daylight (Sun ${sunAltDeg.toFixed(1)}°)`;
   if (sunAltDeg >= -6) return `Civil twilight (Sun ${sunAltDeg.toFixed(1)}°)`;
   if (sunAltDeg >= -12) return `Nautical twilight (Sun ${sunAltDeg.toFixed(1)}°)`;
@@ -100,6 +78,7 @@ export function StatusBar({
   observer,
   view,
   timeMs,
+  sunAltitudeDeg,
   overlays,
   atmosphere,
   onSetObserver,
@@ -139,7 +118,7 @@ export function StatusBar({
   const time = new Date(timeMs);
   const hour = time.getHours();
   const minute = time.getMinutes();
-  const twilight = twilightLabel(sunAltitudeDeg(timeMs, observer));
+  const twilight = twilightLabel(sunAltitudeDeg);
 
   return (
     <div ref={rootRef} style={containerStyle}>
