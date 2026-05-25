@@ -21,7 +21,8 @@ The current engine already includes:
 
 - horizon, cardinal, alt-az, equatorial, ecliptic, meridian, galactic, and
   constellation overlays;
-- constellation lines and IAU/Delporte constellation boundaries;
+- constellation lines, IAU/Delporte constellation boundaries, and text labels
+  for bright stars, Sun/Moon/planets, constellations, cardinal directions, and degrees;
 - physical star brightness / colour pipeline with HDR rendering, atmospheric
   extinction, glare, mesopic/scotopic adaptation, diffuse sky glow, zodiacal
   light, airglow, and dust extinction;
@@ -93,16 +94,13 @@ More detail lives in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Current focus
 
-The core Phase 1, Phase 1', Phase 2, and Phase 4 full-sky projection work is
+Phase 1, Phase 1', Phase 2, and Phase 4 full-sky projection work are
 implemented. The most useful remaining visual work is now Phase 4 rendering
 polish, in this order:
 
 1. out-of-Earth / galactic viewpoint experiments;
 2. deep-sky overlays for Messier / NGC-style objects;
 3. telescope eyepiece simulation.
-
-Text labels for stars, planets, constellations, cardinal directions, and degree
-marks are also still open from Phase 1.
 
 ## Contributing
 

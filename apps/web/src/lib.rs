@@ -188,8 +188,10 @@ impl StarView {
     /// Update the active overlay layers. `layers` is a list of kebab-case names
     /// that match the CLI's `--overlays` flag: "horizon", "cardinals",
     /// "alt-az-grid", "equatorial-grid", "ecliptic", "celestial-equator",
-    /// "meridian", "galactic-equator", "constellation-lines", and
-    /// "constellation-boundaries". Unknown names are ignored with a
+    /// "meridian", "galactic-equator", "constellation-lines",
+    /// "constellation-boundaries", "star-labels", "planet-labels",
+    /// "constellation-labels", "cardinal-labels", and "degree-labels".
+    /// Unknown names are ignored with a
     /// warning so the JS layer can evolve without breaking older builds.
     ///
     /// `grid_step_deg` and `opacity` are passed through to the renderer, which
@@ -260,7 +262,9 @@ impl StarView {
         push_num(&mut s, jd_utc_to_unix_ms(plan.end_jd_utc));
         s.push_str(",\"rows\":[");
         for (idx, row) in plan.rows.iter().enumerate() {
-            if idx > 0 { s.push(','); }
+            if idx > 0 {
+                s.push(',');
+            }
             s.push_str("{\"name\":\"");
             s.push_str(row.name);
             s.push_str("\",\"riseMs\":");
@@ -278,7 +282,9 @@ impl StarView {
         }
         s.push_str("],\"twilight\":[");
         for (idx, band) in plan.twilight.iter().enumerate() {
-            if idx > 0 { s.push(','); }
+            if idx > 0 {
+                s.push(',');
+            }
             s.push_str("{\"label\":\"");
             s.push_str(band.band.label());
             s.push_str("\",\"startMs\":");

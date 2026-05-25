@@ -70,7 +70,7 @@ export function OverlayToggles({ config, onChange }: Props) {
           onChange={(v) => onChange({ ...config, gridStepDeg: v })}
         />
         <Slider
-          label="Opacity"
+          label="Line opacity"
           value={config.opacity}
           min={0}
           max={1}

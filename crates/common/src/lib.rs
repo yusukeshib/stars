@@ -37,6 +37,11 @@ pub enum OverlayArg {
     GalacticEquator,
     ConstellationLines,
     ConstellationBoundaries,
+    StarLabels,
+    PlanetLabels,
+    ConstellationLabels,
+    CardinalLabels,
+    DegreeLabels,
 }
 
 impl std::fmt::Display for OverlayArg {
@@ -60,6 +65,11 @@ impl From<OverlayArg> for OverlayKind {
             OverlayArg::GalacticEquator => OverlayKind::GalacticEquator,
             OverlayArg::ConstellationLines => OverlayKind::ConstellationLines,
             OverlayArg::ConstellationBoundaries => OverlayKind::ConstellationBoundaries,
+            OverlayArg::StarLabels => OverlayKind::StarLabels,
+            OverlayArg::PlanetLabels => OverlayKind::PlanetLabels,
+            OverlayArg::ConstellationLabels => OverlayKind::ConstellationLabels,
+            OverlayArg::CardinalLabels => OverlayKind::CardinalLabels,
+            OverlayArg::DegreeLabels => OverlayKind::DegreeLabels,
         }
     }
 }
@@ -255,6 +265,11 @@ mod tests {
             OverlayArg::GalacticEquator,
             OverlayArg::ConstellationLines,
             OverlayArg::ConstellationBoundaries,
+            OverlayArg::StarLabels,
+            OverlayArg::PlanetLabels,
+            OverlayArg::ConstellationLabels,
+            OverlayArg::CardinalLabels,
+            OverlayArg::DegreeLabels,
         ] {
             let kind: OverlayKind = arg.into();
             let s = kind.as_kebab_str();

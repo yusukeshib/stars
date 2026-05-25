@@ -12,7 +12,7 @@ relevant host applications.
 
 Implemented phase groups:
 
-- Phase 1 core educational overlays, except text labels.
+- Phase 1 core educational overlays and text labels.
 - Phase 1' physical dark-sky visual pipeline.
 - Phase 2 time systems, apparent-place corrections, atmosphere, solar-system
   bodies, and planning UI.
@@ -20,7 +20,6 @@ Implemented phase groups:
 
 Still open:
 
-- Phase 1 text labels.
 - Phase 3 research / platform features.
 - Remaining Phase 4 advanced visual features.
 
@@ -68,14 +67,27 @@ Primary implementation areas:
 - `apps/web/frontend`
 - `crates/common`
 
-### Remaining Phase 1 work
+### Text labels
 
-Text rendering is still open:
+Implemented a shared label renderer that projects sky positions into
+screen-space, applies a simple collision/priority pass, and draws text from a
+built-in bitmap font atlas after tone mapping.
 
-- star / planet / constellation labels;
-- N / E / S / W and degree labels.
+Shipped capabilities:
 
-Those should probably share one font atlas and label placement system.
+- top-50 bright-star labels with proper names plus Bayer / Flamsteed-style
+  designations generated from HYG v4.2;
+- Sun, Moon, and Mercury-through-Neptune labels from the renderer apparent-body uniforms;
+- constellation-name labels anchored by bright-star centroids;
+- default N/E/S/W cardinal labels;
+- optional local degree labels for alt-az grids.
+
+Primary implementation areas:
+
+- `crates/renderer/src/text.rs`
+- `crates/renderer/src/shaders/text.wgsl`
+- `crates/renderer/build.rs`
+- host overlay controls in `apps/cli`, `apps/viewer`, and `apps/web`
 
 ## Phase 1' — Physical dark-sky visual pipeline
 

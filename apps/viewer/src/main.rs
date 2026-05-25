@@ -73,7 +73,7 @@ struct Args {
     #[arg(
         long,
         value_delimiter = ',',
-        default_values_t = vec![OverlayArg::Horizon, OverlayArg::Cardinals],
+        default_values_t = vec![OverlayArg::Horizon, OverlayArg::Cardinals, OverlayArg::CardinalLabels],
     )]
     overlays: Vec<OverlayArg>,
 
@@ -85,7 +85,7 @@ struct Args {
     #[arg(long, default_value_t = 15.0)]
     grid_step_deg: f64,
 
-    /// Opacity of overlay lines (0..=1).
+    /// Opacity of overlay lines (0..=1). Text labels remain fully opaque.
     #[arg(long, default_value_t = 0.6)]
     overlay_opacity: f32,
 

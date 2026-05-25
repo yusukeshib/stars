@@ -4,6 +4,7 @@ mod overlay;
 mod pipeline;
 mod renderer;
 mod skyglow;
+mod text;
 mod tonemap;
 mod vertex;
 
