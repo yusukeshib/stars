@@ -6,6 +6,7 @@
 //! - Local frame is ENU (East, North, Up) at the observer.
 //! - Angles internally are radians; helpers also accept degrees / hours where noted.
 
+pub mod atmosphere;
 mod ephemeris;
 mod horizontal;
 pub mod illuminants;

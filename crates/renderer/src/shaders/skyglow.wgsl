@@ -477,10 +477,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // V-band → RGB tint. The ISL spectrum is dominated by F/G/K main-
     // sequence stars; a slightly cool-white tint approximates the colour
-    // mix without per-band surface-brightness data. Replacing this with a
-    // proper per-band model (Leinert §6 + Sandage 1976 colours) is scoped
-    // for the same future PR that upgrades the catalogue colours to the
-    // Ballesteros blackbody pipeline.
+    // mix without per-band surface-brightness data. The catalogue point-source
+    // colour path is physically calibrated separately; this diffuse component
+    // remains V-band because the Leinert/SFD dark-sky fit is pinned there.
     let tint = vec3<f32>(0.92, 0.94, 1.00);
 
     let night_radiance = tint * flux_per_pixel * attenuation;

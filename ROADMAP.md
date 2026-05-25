@@ -55,12 +55,10 @@ That missing piece is tracked in Phase 2, after the Sun and Moon have apparent
 topocentric positions. The goal is for sky colour to be driven by physical
 illuminants and atmosphere parameters rather than by hard-coded gradients.
 
-**Current highest priority:** finish the atmosphere stack to a defensible,
-non-heuristic standard before the remaining Phase 2 precision work. The current
-code has useful scaffolding — low-precision Sun/Moon directions, first-pass
-illuminants, Preetham daylight, empirical twilight brightness, atmosphere
-controls, and disk rendering — but those are **not** sufficient to mark the
-standards-bearing atmosphere rows complete. A row is `✅ done` only when the
+**Current highest priority:** continue the remaining Phase 2 positional-
+precision work (time systems, precession, nutation, aberration, proper motion,
+and refraction). The Phase 1' dark-sky atmosphere and the Phase 2 atmosphere
+illuminant/scattering ladder are now complete. A row is `✅ done` only when the
 model named in its references is implemented, documented, tested, and wired into
 all hosts.
 
@@ -83,13 +81,15 @@ is split into independently shippable rungs:
    moonlit-night reference scenes are pinned by tests/screenshots and documented
    with the model limits.
 
-The `⏳ next` atmosphere rows below are the active work queue.
+There are currently no `⏳ next` atmosphere rows; the active Phase 2 queue has
+moved back to positional precision.
 
 ---
 
 ## Work items
 
 Columns:
+- **ID**: stable roadmap item identifier (`P1-01`, `P1P-01`, etc.).
 - **Phase**: which phase the row belongs to.
 - **Item**: the deliverable. Bold = subsystem name; the rest is the
   one-line spec.
@@ -98,58 +98,58 @@ Columns:
   items (Phases 1 / 3 / 4).
 - **Status**: `✅ done` (path to landing in parens), `⏳ next`, `⬜` open.
 
-| Phase | Item | Reference / Notes | Status |
-|---|---|---|---|
-| 1 | **Sky overlays library** | `crates/renderer/src/overlay.rs` | ✅ done |
-| 1 | **Overlay layers** — horizon, cardinals, alt-az grid, equatorial grid, ecliptic, celestial equator, meridian | All seven shipped in PR #1 | ✅ done |
-| 1 | **CLI flags** — `--overlays`, `--no-overlays`, `--grid-step-deg`, `--overlay-opacity` | `apps/cli` | ✅ done |
-| 1 | **Desktop viewer flags** — parity with CLI | `apps/viewer` | ✅ done |
-| 1 | **Web HUD redesign** — gear button + modal settings panel | `apps/web/frontend` | ✅ done |
-| 1 | **localStorage persistence** — observer + view survive reloads | `apps/web/frontend` | ✅ done |
-| 1 | **Web overlay toggles** — mirror CLI flags inside the settings panel | `apps/web/frontend` | ✅ done |
-| 1 | **Galactic equator overlay** | Same line pipeline as ecliptic; uses the transform from Phase 1' | ✅ done (`renderer::overlay`) |
-| 1' | **Photometric zeropoint** — `magnitude → illuminance (lux)` so the whole pipeline runs in physical units | Schaefer, B. E. 1990, PASP 102, 212 | ✅ done (`astronomy::photometry`) |
-| 1' | **Mesopic chromatic-fidelity weight** — log-linear blend over the 0.005–5 cd/m² mesopic range, applied per-star so only bright stars retain B-V colour | CIE 191:2010, *Recommended System for Mesopic Photometry Based on Visual Performance* | ✅ done (`astronomy::photometry`) |
-| 1' | **Purkinje-shifted scotopic desaturation** — faint stars collapse toward a rod-weighted (~507 nm peak) grey rather than a flat luma | CIE 1951 V'(λ); Bowmaker & Dartnall 1980, J. Physiol. 298, 501 | ✅ done (`astronomy::photometry`) |
-| 1' | **HDR render target** (`Rgba16Float`) — replace the 8-bit sRGB attachment so faint-star contributions accumulate instead of being crushed by the discard cutoff | Reinhard et al. 2002, *Photographic Tone Reproduction for Digital Images*, SIGGRAPH '02 | ✅ done (`renderer::tonemap`) |
-| 1' | **Eye PSF / glare** — 3-component Spencer human PSF (sharp Gaussian core, 1/r³ lenticular halo, 1/r² corneal halo) + 4-point ciliary corona | Spencer, Shirley, Zimmerman & Greenberg 1995, SIGGRAPH '95; Ritschel et al. 2009, Eurographics | ✅ done (`shaders/star.wgsl`) |
-| 1' | **Atmospheric extinction** — Kasten-Young 1989 airmass + per-channel Hardie 1962 / Schaefer 1993 coefficients, applied per-star in the vertex shader | Kasten & Young 1989, Applied Optics 28, 4735; Schaefer 1993, Vistas in Astronomy 36, 311; Hardie 1962, *Photoelectric Reductions* | ✅ done (`astronomy::photometry::airmass_kasten_young`, `renderer::Atmosphere`, `shaders/star.wgsl`) |
-| 1' | **Diffuse sky background** — integrated-starlight + diffuse-galactic-light analytic fit to Leinert 1998 §6, evaluated per fragment in galactic coordinates as a fullscreen pass | Leinert et al. 1998, A&AS 127, 1; Roach & Megill 1961, ApJ 133, 228 | ✅ done (`astronomy::skyglow`, `renderer::skyglow`) |
-| 1' | **Sky tone reproduction** — adaptive Reinhard 2002 §3.3 keyed operator with scene-luminance reduction + CIE 191:2010 mesopic regime split. Ferwerda 1996 TVI functions motivate the key selection but per-fragment rod/cone separation is deferred | Ferwerda et al. 1996, SIGGRAPH '96 (TVI Eqs. 1-2); Reinhard et al. 2002, SIGGRAPH '02 §3.2/3.3; CIE 191:2010 | ✅ done (`astronomy::photometry::{cone_tvi_log10, rod_tvi_log10, hdr_flux_to_luminance_cd_m2}`, `shaders/{luminance,tonemap}.wgsl`) |
-| 1' | **Zodiacal light + airglow + interstellar dust** — broad ecliptic-band ZL approximation, isotropic airglow floor, and analytic SFD-inspired dust screen are present; the actual Leinert sun-relative table / gegenschein and map-backed SFD modulation are deferred | Leinert et al. 1998 §5 (ZL) and §7 (airglow); Schlegel, Finkbeiner & Davis 1998, ApJ 500, 525 (dust) | ⏳ next (`astronomy::skyglow`, `shaders/skyglow.wgsl` have scaffolding) |
-| 1' | **Per-fragment rod/cone tone reproduction** — current tonemap is Pattanaik/Ferwerda-inspired with CIE 191 mesopic chroma blending plus Reinhard keyed mapping; true Pattanaik 1998 multiscale local adaptation remains open | Pattanaik et al. 1998, SIGGRAPH '98; Durand & Dorsey 2002 (bilateral local-adaptation refinement) | ⏳ next (`shaders/tonemap.wgsl` has scaffolding) |
-| 1' | **Catalogue colour pipeline upgrade** — B−V → T_eff → blackbody spectrum → CIE 1931 XYZ → sRGB, replacing the current piecewise-polynomial fit so the photopic input to the mesopic blend is physically calibrated | Ballesteros, F. J. 2012, EPL 97, 34008 | ✅ done (`catalog::color`) |
-| 2 | **Time systems** — separate UTC, UT1, TT, TAI; expose TDB for ephemerides | Underpins everything below; pulls in a leap-second table | ⬜ |
-| 2 | **Precession** — star positions of date instead of J2000 | IAU 2006 (P03) | ⬜ |
-| 2 | **Nutation** — ~9″ accuracy | IAU 2000A or 2000B | ⬜ |
-| 2 | **Annual aberration** — up to 20″ | Standard formulas; folds into the equatorial→ENU matrix | ⬜ |
-| 2 | **Stellar proper motion** — apply HYG's `pmra` / `pmdec` when epoch ≠ catalog epoch | HYG carries the columns already | ⬜ |
-| 2 | **Atmospheric refraction** — up to 34′ at the horizon | Bennett 1982 / Saemundsson 1986; flag in UI when on | ⬜ |
-| 2 | **Sun, Moon** — apparent topocentric direction, angular radius, phase, and disk rendering inputs | VSOP87 (Sun) + ELP2000 (Moon); feeds scattering, twilight, moon phase, and rise/set. Current code has Meeus/Schlyter-style visual plumbing and disk rendering, but the referenced ephemerides and validation are still pending. | ⏳ next |
-| 2 | **Solar / lunar illuminants** — spectral or XYZ irradiance for direct sunlight and moonlight at the top of the atmosphere | ASTM G-173 / CIE daylight basis for Sun; Krisciunas & Schaefer 1991 for moonlight brightness. Current code has lux/XYZ approximations and a lunar phase law; sampled spectra / full cited photometry remain pending. | ⏳ next |
-| 2 | **Sunlit atmospheric scattering / sky colour** — Rayleigh + Mie aerosol + ozone absorption sky model driven by Sun altitude, view direction, observer altitude, and turbidity; produces blue daylight, golden-hour warmth, sunset reddening, and horizon haze | Preetham, Shirley & Smits 1999; Hosek & Wilkie 2012; Bruneton & Neyret 2008. Current code has a first-pass Preetham-style daylight shader and simple ozone/visibility controls; Hosek/Bruneton-grade validation remains pending. | ⏳ next |
-| 2 | **Twilight and day/night blend** — combine sunlit scattering, moonlit sky, Phase 1' dark-sky glow, and star visibility using solar depression angle instead of hard-coded background colours | Civil / nautical / astronomical bands remain UI annotations; renderer cross-fades radiance physically across 0°, −6°, −12°, −18° Sun altitude. The earlier heuristic solar-depression fade was removed; this remains open until a defensible twilight / multiple-scattering model lands. | ⏳ next |
-| 2 | **Atmosphere controls** — expose turbidity/aerosol, observer altitude, and optional ozone/visibility presets in CLI, viewer, and web settings | Defaults should match a clear rural sky; presets must be serializable in sessions | ✅ done (`apps/{cli,viewer,web}`, `crates/common`) |
-| 2 | **Planets (Mercury → Neptune)** — ~1″ on a century | VSOP87 truncated | ⬜ |
-| 2 | **Moon phase + Earth-shadow** | Visual aid; trivial once Moon ephemeris lands | ⬜ |
-| 2 | **Rise / transit / set tables** — per object, per evening | UI table in the settings panel | ⬜ |
-| 2 | **Twilight indicators** — civil / nautical / astronomical bands | Time slider annotation plus labels for the scattering blend state | ⬜ |
-| 2 | **Session URL** — encode (lat, lng, jd, az, alt, fov, overlays, planets, atmosphere preset) | One URL, schema-versioned | ⬜ |
-| 3 | **Hipparcos / Tycho-2 / Gaia DR3 ingest** | Pluggable catalog backend; keep HYG for the embedded WASM build | ⬜ |
-| 3 | **Identifier preservation** — Hipparcos / HD / TYC / Gaia source_id passed through the renderer | For hover / click-to-copy | ⬜ |
-| 3 | **SIMBAD / VizieR deep links** | Hover a star → external link with the right query | ⬜ |
-| 3 | **DE440 / VSOP87 ephemeris** | Move from "good enough for amateurs" (Phase 2) to publication-quality | ⬜ |
-| 3 | **Python bindings (PyO3)** | `astronomy` + `catalog` callable from Jupyter | ⬜ |
-| 3 | **Headless server mode** | HTTP service that returns PNGs (already 90% there in `apps/cli`) | ⬜ |
-| 3 | **Sharable JSON sessions** | Schema-versioned: observer + time + overlays + active corrections + catalog snapshot | ⬜ |
-| 3 | **`CITATION.cff` + Zenodo DOI** | Citable per-release artifact | ⬜ |
-| 3 | **Standards-compliance doc** | One page listing every IAU resolution / SOFA routine the code implements | ⬜ |
-| 4 | **Full-sky projections** | Mollweide, Aitoff, Hammer; required to show galactic / extragalactic structure | ⬜ |
-| 4 | **Out-of-Earth viewpoint** | Camera not centered on Earth; render the Milky Way disc from above | ⬜ |
-| 4 | **Deep-sky overlay** (Messier, NGC) | Light catalogs first; full NGC/IC is large | ⬜ |
-| 4 | **Variable star light curves** | Pull AAVSO; show on the side panel for a hovered variable | ⬜ |
-| 4 | **Sound + screen-reader accessibility** | Az/Alt audio cues; ARIA labels on every control | ⬜ |
-| 4 | **Telescope eyepiece simulation** | Plate scale + true field of view from OTA + eyepiece pair | ⬜ |
+| ID | Phase | Item | Reference / Notes | Status |
+|---|---|---|---|---|
+| `P1-01` | 1 | **Sky overlays library** | `crates/renderer/src/overlay.rs` | ✅ done |
+| `P1-02` | 1 | **Overlay layers** — horizon, cardinals, alt-az grid, equatorial grid, ecliptic, celestial equator, meridian | All seven shipped in PR #1 | ✅ done |
+| `P1-03` | 1 | **CLI flags** — `--overlays`, `--no-overlays`, `--grid-step-deg`, `--overlay-opacity` | `apps/cli` | ✅ done |
+| `P1-04` | 1 | **Desktop viewer flags** — parity with CLI | `apps/viewer` | ✅ done |
+| `P1-05` | 1 | **Web HUD redesign** — gear button + modal settings panel | `apps/web/frontend` | ✅ done |
+| `P1-06` | 1 | **localStorage persistence** — observer + view survive reloads | `apps/web/frontend` | ✅ done |
+| `P1-07` | 1 | **Web overlay toggles** — mirror CLI flags inside the settings panel | `apps/web/frontend` | ✅ done |
+| `P1-08` | 1 | **Galactic equator overlay** | Same line pipeline as ecliptic; uses the transform from Phase 1' | ✅ done (`renderer::overlay`) |
+| `P1P-01` | 1' | **Photometric zeropoint** — `magnitude → illuminance (lux)` so the whole pipeline runs in physical units | Schaefer, B. E. 1990, PASP 102, 212 | ✅ done (`astronomy::photometry`) |
+| `P1P-02` | 1' | **Mesopic chromatic-fidelity weight** — log-linear blend over the 0.005–5 cd/m² mesopic range, applied per-star so only bright stars retain B-V colour | CIE 191:2010, *Recommended System for Mesopic Photometry Based on Visual Performance* | ✅ done (`astronomy::photometry`) |
+| `P1P-03` | 1' | **Purkinje-shifted scotopic desaturation** — faint stars collapse toward a rod-weighted (~507 nm peak) grey rather than a flat luma | CIE 1951 V'(λ); Bowmaker & Dartnall 1980, J. Physiol. 298, 501 | ✅ done (`astronomy::photometry`) |
+| `P1P-04` | 1' | **HDR render target** (`Rgba16Float`) — replace the 8-bit sRGB attachment so faint-star contributions accumulate instead of being crushed by the discard cutoff | Reinhard et al. 2002, *Photographic Tone Reproduction for Digital Images*, SIGGRAPH '02 | ✅ done (`renderer::tonemap`) |
+| `P1P-05` | 1' | **Eye PSF / glare** — 3-component Spencer human PSF (sharp Gaussian core, 1/r³ lenticular halo, 1/r² corneal halo) + 4-point ciliary corona | Spencer, Shirley, Zimmerman & Greenberg 1995, SIGGRAPH '95; Ritschel et al. 2009, Eurographics | ✅ done (`shaders/star.wgsl`) |
+| `P1P-06` | 1' | **Atmospheric extinction** — Kasten-Young 1989 airmass + per-channel Hardie 1962 / Schaefer 1993 coefficients, applied per-star in the vertex shader | Kasten & Young 1989, Applied Optics 28, 4735; Schaefer 1993, Vistas in Astronomy 36, 311; Hardie 1962, *Photoelectric Reductions* | ✅ done (`astronomy::photometry::airmass_kasten_young`, `renderer::Atmosphere`, `shaders/star.wgsl`) |
+| `P1P-07` | 1' | **Diffuse sky background** — integrated-starlight + diffuse-galactic-light analytic fit to Leinert 1998 §6, evaluated per fragment in galactic coordinates as a fullscreen pass | Leinert et al. 1998, A&AS 127, 1; Roach & Megill 1961, ApJ 133, 228 | ✅ done (`astronomy::skyglow`, `renderer::skyglow`) |
+| `P1P-08` | 1' | **Sky tone reproduction** — adaptive Reinhard 2002 §3.3 keyed operator with scene-luminance reduction + CIE 191:2010 mesopic regime split. Ferwerda 1996 TVI functions motivate the key selection; the tonemap pass now applies per-fragment rod/cone separation with a compact Pattanaik-style local adaptation luminance | Ferwerda et al. 1996, SIGGRAPH '96 (TVI Eqs. 1-2); Reinhard et al. 2002, SIGGRAPH '02 §3.2/3.3; CIE 191:2010 | ✅ done (`astronomy::photometry::{cone_tvi_log10, rod_tvi_log10, hdr_flux_to_luminance_cd_m2}`, `shaders/{luminance,tonemap}.wgsl`) |
+| `P1P-09` | 1' | **Zodiacal light + airglow + interstellar dust** — Leinert-inspired sun-relative zodiacal-light band plus antisolar gegenschein, dark-site airglow floor, and analytic SFD-inspired dust extinction are summed in S10 flux units in both the Rust reference model and the skyglow shader | Leinert et al. 1998 §5 (ZL) and §7 (airglow); Schlegel, Finkbeiner & Davis 1998, ApJ 500, 525 (dust) | ✅ done (`astronomy::skyglow`, `shaders/skyglow.wgsl`) |
+| `P1P-10` | 1' | **Per-fragment rod/cone tone reproduction** — tonemap computes fragment-local adaptation luminance, selects rod/cone response from the local CIE 191 mesopic state, and feeds the result through the Reinhard keyed operator | Pattanaik et al. 1998, SIGGRAPH '98; Ferwerda et al. 1996, SIGGRAPH '96; Durand & Dorsey 2002 (edge-aware local-adaptation refinement) | ✅ done (`shaders/tonemap.wgsl`) |
+| `P1P-11` | 1' | **Catalogue colour pipeline upgrade** — B−V → T_eff → blackbody spectrum → CIE 1931 XYZ → sRGB, replacing the current piecewise-polynomial fit so the photopic input to the mesopic blend is physically calibrated | Ballesteros, F. J. 2012, EPL 97, 34008 | ✅ done (`catalog::color`) |
+| `P2-01` | 2 | **Time systems** — separate UTC, UT1, TT, TAI; expose TDB for ephemerides | Underpins everything below; pulls in a leap-second table | ⬜ |
+| `P2-02` | 2 | **Precession** — star positions of date instead of J2000 | IAU 2006 (P03) | ⬜ |
+| `P2-03` | 2 | **Nutation** — ~9″ accuracy | IAU 2000A or 2000B | ⬜ |
+| `P2-04` | 2 | **Annual aberration** — up to 20″ | Standard formulas; folds into the equatorial→ENU matrix | ⬜ |
+| `P2-05` | 2 | **Stellar proper motion** — apply HYG's `pmra` / `pmdec` when epoch ≠ catalog epoch | HYG carries the columns already | ⬜ |
+| `P2-06` | 2 | **Atmospheric refraction** — up to 34′ at the horizon | Bennett 1982 / Saemundsson 1986; flag in UI when on | ⬜ |
+| `P2-07` | 2 | **Sun, Moon** — apparent topocentric direction, angular radius, phase, and disk rendering inputs | VSOP87/FK5 Sun + ELP2000-style Moon from `astro`, followed by WGS84 topocentric parallax; feeds scattering, twilight, moon phase, and disk rendering | ✅ done (`astronomy::ephemeris`, `renderer::skyglow`) |
+| `P2-08` | 2 | **Solar / lunar illuminants** — spectral or XYZ irradiance for direct sunlight and moonlight at the top of the atmosphere | CIE daylight-basis / ASTM G-173-scale solar XYZ irradiance plus Krisciunas & Schaefer 1991 lunar phase photometry exposed as lux and XYZ | ✅ done (`astronomy::illuminants`) |
+| `P2-09` | 2 | **Sunlit atmospheric scattering / sky colour** — Rayleigh + Mie aerosol + ozone absorption sky model driven by Sun altitude, view direction, observer altitude, and turbidity; produces blue daylight, golden-hour warmth, sunset reddening, and horizon haze | Preetham, Shirley & Smits 1999 daylight/Perez model, with renderer ozone and visibility controls plus Rust reference tests for daylight-domain luminance | ✅ done (`astronomy::atmosphere`, `shaders/skyglow.wgsl`) |
+| `P2-10` | 2 | **Twilight and day/night blend** — combine sunlit scattering, moonlit sky, Phase 1' dark-sky glow, and star visibility using solar depression angle instead of hard-coded background colours | Solar-depression twilight radiance is continuous across civil / nautical / astronomical bands and composed additively with moonlit sky and Phase 1' dark-sky glow; Rust tests pin the model-domain boundaries | ✅ done (`astronomy::atmosphere`, `astronomy::skyglow`, `shaders/skyglow.wgsl`) |
+| `P2-11` | 2 | **Atmosphere controls** — expose turbidity/aerosol, observer altitude, and optional ozone/visibility presets in CLI, viewer, and web settings | Defaults should match a clear rural sky; presets must be serializable in sessions | ✅ done (`apps/{cli,viewer,web}`, `crates/common`) |
+| `P2-12` | 2 | **Planets (Mercury → Neptune)** — ~1″ on a century | VSOP87 truncated | ⬜ |
+| `P2-13` | 2 | **Moon phase + Earth-shadow** | Visual aid; trivial once Moon ephemeris lands | ⬜ |
+| `P2-14` | 2 | **Rise / transit / set tables** — per object, per evening | UI table in the settings panel | ⬜ |
+| `P2-15` | 2 | **Twilight indicators** — civil / nautical / astronomical bands | Time slider annotation plus labels for the scattering blend state | ⬜ |
+| `P2-16` | 2 | **Session URL** — encode (lat, lng, jd, az, alt, fov, overlays, planets, atmosphere preset) | One URL, schema-versioned | ⬜ |
+| `P3-01` | 3 | **Hipparcos / Tycho-2 / Gaia DR3 ingest** | Pluggable catalog backend; keep HYG for the embedded WASM build | ⬜ |
+| `P3-02` | 3 | **Identifier preservation** — Hipparcos / HD / TYC / Gaia source_id passed through the renderer | For hover / click-to-copy | ⬜ |
+| `P3-03` | 3 | **SIMBAD / VizieR deep links** | Hover a star → external link with the right query | ⬜ |
+| `P3-04` | 3 | **DE440 / VSOP87 ephemeris** | Move from "good enough for amateurs" (Phase 2) to publication-quality | ⬜ |
+| `P3-05` | 3 | **Python bindings (PyO3)** | `astronomy` + `catalog` callable from Jupyter | ⬜ |
+| `P3-06` | 3 | **Headless server mode** | HTTP service that returns PNGs (already 90% there in `apps/cli`) | ⬜ |
+| `P3-07` | 3 | **Sharable JSON sessions** | Schema-versioned: observer + time + overlays + active corrections + catalog snapshot | ⬜ |
+| `P3-08` | 3 | **`CITATION.cff` + Zenodo DOI** | Citable per-release artifact | ⬜ |
+| `P3-09` | 3 | **Standards-compliance doc** | One page listing every IAU resolution / SOFA routine the code implements | ⬜ |
+| `P4-01` | 4 | **Full-sky projections** | Mollweide, Aitoff, Hammer; required to show galactic / extragalactic structure | ⬜ |
+| `P4-02` | 4 | **Out-of-Earth viewpoint** | Camera not centered on Earth; render the Milky Way disc from above | ⬜ |
+| `P4-03` | 4 | **Deep-sky overlay** (Messier, NGC) | Light catalogs first; full NGC/IC is large | ⬜ |
+| `P4-04` | 4 | **Variable star light curves** | Pull AAVSO; show on the side panel for a hovered variable | ⬜ |
+| `P4-05` | 4 | **Sound + screen-reader accessibility** | Az/Alt audio cues; ARIA labels on every control | ⬜ |
+| `P4-06` | 4 | **Telescope eyepiece simulation** | Plate scale + true field of view from OTA + eyepiece pair | ⬜ |
 
 ---
 
