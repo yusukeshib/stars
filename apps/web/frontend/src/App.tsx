@@ -27,6 +27,7 @@ import {
   type View,
 } from "./observer";
 import { loadConfig, saveConfig } from "./storage";
+import { parseStarSessionJson, starSessionJson, type SessionState } from "./session";
 
 const DEFAULT_OBSERVER: Observer = {
   latitudeDeg: 35.68, // Tokyo as a sensible default
@@ -76,16 +77,7 @@ const vec3Param = (
 const vec3SearchParam = ({ x, y, z }: { x: number; y: number; z: number }): string =>
   `${x.toFixed(1)},${y.toFixed(1)},${z.toFixed(1)}`;
 
-type UrlSession = {
-  observer?: Observer;
-  view?: View;
-  overlays?: OverlayConfig;
-  atmosphere?: AtmosphereConfig;
-  planets?: PlanetsConfig;
-  projection?: ProjectionConfig;
-  eyepiece?: EyepieceConfig;
-  timeMs?: number;
-};
+type UrlSession = Partial<SessionState>;
 
 function loadAtmosphereFromUrl(params?: URLSearchParams): AtmosphereConfig | null {
   if (typeof window === "undefined") return null;
@@ -338,6 +330,29 @@ export function App() {
     return () => cancelAnimationFrame(raf);
   }, []);
 
+  const currentSessionState = (): SessionState => ({
+    observer,
+    view,
+    overlays,
+    atmosphere,
+    planets,
+    projection,
+    eyepiece,
+    timeMs,
+  });
+
+  const applySessionState = (session: SessionState) => {
+    setObserver(session.observer);
+    setView(session.view);
+    setOverlays(normalizeWebOverlays(session.overlays));
+    setAtmosphere(session.atmosphere);
+    setPlanets(session.planets);
+    setProjection(session.projection);
+    setEyepiece(session.eyepiece);
+    setTimeMs(session.timeMs);
+    lastTickRef.current = performance.now();
+  };
+
   const useGeolocation = () => {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition((pos) => {
@@ -398,6 +413,34 @@ export function App() {
             // Clipboard permission is best-effort; updating the address bar still shares the session.
           }
           window.history.replaceState(null, "", url);
+        }}
+        onCopySessionJson={async () => {
+          const json = starSessionJson(currentSessionState());
+          let copied = false;
+          try {
+            if (navigator.clipboard?.writeText) {
+              await navigator.clipboard.writeText(json);
+              copied = true;
+            }
+          } catch {
+            copied = false;
+          }
+          if (!copied) {
+            const blob = new Blob([json], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "stars-session.json";
+            link.click();
+            URL.revokeObjectURL(url);
+          }
+        }}
+        onImportSessionJson={(raw) => {
+          try {
+            applySessionState(parseStarSessionJson(raw));
+          } catch (error) {
+            window.alert(error instanceof Error ? error.message : "Invalid session JSON.");
+          }
         }}
         onUseGeolocation={useGeolocation}
       />

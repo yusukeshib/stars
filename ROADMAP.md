@@ -99,8 +99,8 @@ visual polish.
 These items are intentionally ordered before the largest catalog additions so
 future features have stable scenes, source manifests, and review hooks:
 
-1. **Portable reproduction:** schema-versioned JSON sessions plus deterministic
-   scene presets for common validation/demo skies.
+1. **Portable reproduction:** deterministic scene presets for common
+   validation/demo skies, built on the shipped schema-versioned JSON sessions.
 2. **Validation visibility:** a validation/demo gallery and visual-regression
    checks for noon, sunset, twilight, moonlit night, dark sky, all-sky maps, and
    external galactic viewpoints.
@@ -174,7 +174,7 @@ Columns:
 | `P3-04` | 3 | **DE440 / VSOP87 ephemeris** | Move from "good enough for amateurs" (Phase 2) to publication-quality; preserve documented fallback for offline / lightweight builds | ⬜ |
 | `P3-05` | 3 | **Python bindings (PyO3)** | `astronomy` + `catalog` callable from Jupyter; early notebook examples may use CLI renders and JSON sessions before full bindings land | ⬜ |
 | `P3-06` | 3 | **Headless server mode** | HTTP service that returns PNGs and metadata JSON from a supplied scene/session (already 90% there in `apps/cli`) | ⬜ |
-| `P3-07` | 3 | **Sharable JSON sessions** | Schema-versioned: observer + time scales + view + overlays + projection/viewpoint + active corrections + atmosphere + catalog snapshot + app version | ⏳ next |
+| `P3-07` | 3 | **Sharable JSON sessions** | Schema-versioned JSON sessions cover observer, time scales, view, overlays, projection/viewpoint, active corrections, atmosphere, catalog snapshot, eyepiece, and app version across CLI, desktop, and web hosts | ✅ done (`stars_host_common::session`, `apps/{cli,viewer,web}`) |
 | `P3-08` | 3 | **`CITATION.cff` + Zenodo DOI** | Citable per-release artifact; include data/source caveats and preferred citation text | ⏳ next |
 | `P3-09` | 3 | **Standards-compliance doc** | One page listing every IAU resolution / SOFA routine, approximation, and deliberate non-goal the code implements or does not implement | ⏳ next |
 | `P3-10` | 3 | **Scene presets** | Deterministic named scenes for Tokyo tonight, dark sky, noon, sunset, civil/nautical/astronomical twilight, moonlit night, eclipse aid, all-sky maps, and external galactic viewpoints | ⏳ next |

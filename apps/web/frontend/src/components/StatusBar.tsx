@@ -45,6 +45,8 @@ type Props = {
   onSetProjection: (next: ProjectionConfig) => void;
   onSetEyepiece: (next: EyepieceConfig) => void;
   onCopySessionUrl: () => void | Promise<void>;
+  onCopySessionJson: () => void | Promise<void>;
+  onImportSessionJson: (raw: string) => void;
   onUseGeolocation: () => void;
 };
 
@@ -159,6 +161,8 @@ export function StatusBar({
   onSetProjection,
   onSetEyepiece,
   onCopySessionUrl,
+  onCopySessionJson,
+  onImportSessionJson,
   onUseGeolocation,
 }: Props) {
   const [openPopover, setOpenPopover] = useState<Popover | null>(null);
@@ -435,6 +439,8 @@ export function StatusBar({
             onSetProjection={onSetProjection}
             onSetEyepiece={onSetEyepiece}
             onCopySessionUrl={onCopySessionUrl}
+            onCopySessionJson={onCopySessionJson}
+            onImportSessionJson={onImportSessionJson}
           />
         </PopoverPanel>
       )}
@@ -558,6 +564,8 @@ type SettingsPanelProps = Pick<
   | "onSetProjection"
   | "onSetEyepiece"
   | "onCopySessionUrl"
+  | "onCopySessionJson"
+  | "onImportSessionJson"
 >;
 
 function SettingsPanel({
@@ -573,7 +581,10 @@ function SettingsPanel({
   onSetProjection,
   onSetEyepiece,
   onCopySessionUrl,
+  onCopySessionJson,
+  onImportSessionJson,
 }: SettingsPanelProps) {
+  const sessionFileRef = useRef<HTMLInputElement>(null);
   const setAtmospherePreset = (preset: AtmospherePreset) => {
     onSetAtmosphere({
       ...atmosphere,
@@ -878,11 +889,31 @@ function SettingsPanel({
 
       <SettingCard
         title="Session"
-        description="Share this exact location, time, projection, and display setup."
+        description="Share this exact location, time, projection, and display setup. JSON sessions are schema-versioned and preserve time scales plus catalog/correction metadata."
       >
-        <button type="button" onClick={onCopySessionUrl} style={buttonStyle}>
-          Copy session URL
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" onClick={onCopySessionUrl} style={buttonStyle}>
+            Copy session URL
+          </button>
+          <button type="button" onClick={onCopySessionJson} style={buttonStyle}>
+            Copy JSON
+          </button>
+          <button type="button" onClick={() => sessionFileRef.current?.click()} style={buttonStyle}>
+            Load JSON
+          </button>
+        </div>
+        <input
+          ref={sessionFileRef}
+          type="file"
+          accept="application/json,.json"
+          style={{ display: "none" }}
+          onChange={async (event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
+            if (!file) return;
+            onImportSessionJson(await file.text());
+          }}
+        />
         <p style={{ ...helperTextStyle, marginTop: 10 }}>
           Drag the sky to look around · scroll to zoom
         </p>

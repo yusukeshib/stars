@@ -37,7 +37,8 @@ The current engine already includes:
   the local Milky Way disc from parsec-scale IAU galactic-frame cameras;
 - telescope eyepiece simulation that derives magnification, plate scale, exit
   pupil, and true field of view from an OTA + eyepiece pair;
-- shareable web session URLs.
+- shareable schema-versioned JSON sessions across CLI, desktop, and web, plus
+  compact web session URLs.
 
 ## CLI-generated gallery
 
@@ -62,6 +63,13 @@ Render a PNG from the CLI:
 
 ```bash
 make cli ARGS="--lat 35.68 --lng 139.69 --azimuth 180 --altitude 30 -o stars.png"
+```
+
+Save or replay a portable JSON session:
+
+```bash
+make cli ARGS="--lat 35.68 --lng 139.69 --write-session tokyo.json -o stars.png"
+make cli ARGS="--session tokyo.json -o replay.png"
 ```
 
 Run the web app:
@@ -112,7 +120,7 @@ out-of-Earth galactic / custom external viewpoints, and Phase 4 telescope
 eyepiece simulation are implemented. The next best work is to make the app
 easier to reproduce, cite, validate, teach from, and then extend visually:
 
-1. schema-versioned JSON sessions plus deterministic scene presets;
+1. deterministic scene presets built on the JSON session schema;
 2. validation / demo gallery and visual-regression checks for representative skies;
 3. `CITATION.cff`, standards-compliance notes, and early notebook examples;
 4. catalog-backend scaling design before Gaia / Tycho / Hipparcos ingest;

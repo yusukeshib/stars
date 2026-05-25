@@ -13,10 +13,14 @@ use anyhow::{Context, Result};
 use astronomy::TimeScales;
 use catalog::load_from_file;
 use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
+
+mod session;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation,
     OverlayConfig, OverlayKind, SkyProjection, SkyViewpoint, StarInstance,
 };
+pub use session::*;
 
 /// CLI-facing mirror of [`OverlayKind`] that derives [`ValueEnum`] so `clap`
 /// can render kebab-case help text and parse user input. Kept in this crate
@@ -25,7 +29,8 @@ use renderer::{
 /// The variant set, the kebab-case spelling, and the [`From`] mapping are
 /// pinned to [`OverlayKind`] by [`overlay_arg_round_trips`] below — adding a
 /// variant in `renderer` will fail this crate's tests until it's mirrored here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum OverlayArg {
     Horizon,
     Cardinals,
@@ -75,7 +80,8 @@ impl From<OverlayArg> for OverlayKind {
 }
 
 /// CLI-facing mirror of [`SkyProjection`] for `clap` parsing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ProjectionArg {
     Perspective,
     Mollweide,
@@ -101,7 +107,8 @@ impl From<ProjectionArg> for SkyProjection {
 }
 
 /// CLI-facing mirror of [`SkyViewpoint`] for `clap` parsing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ViewpointArg {
     Earth,
     GalacticNorth,
@@ -125,7 +132,8 @@ impl From<ViewpointArg> for SkyViewpoint {
 }
 
 /// CLI-facing mirror of [`AtmospherePreset`] for `clap` parsing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum AtmospherePresetArg {
     ClearRural,
     HazyUrban,

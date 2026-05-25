@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -10,10 +10,10 @@ use renderer::{
     DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
-    atmosphere_from_args, eyepiece_from_args, load_star_instances_from_file,
+    atmosphere_from_args, eyepiece_from_args, load_session, load_star_instances_from_file,
     overlay_config_from_args, parse_time_to_time_scales, viewpoint_from_args, AtmosphereOverrides,
-    AtmospherePresetArg, ExternalViewpointOverrides, EyepieceOverrides, OverlayArg, ProjectionArg,
-    ViewpointArg,
+    AtmospherePresetArg, CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides,
+    EyepieceOverrides, OverlayArg, ProjectionArg, SessionScene, ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -46,6 +46,10 @@ struct Args {
     /// Observer longitude in decimal degrees (east positive).
     #[arg(long, allow_hyphen_values = true, default_value_t = 139.69)]
     lng: f64,
+
+    /// Load the initial scene from a schema-versioned JSON session.
+    #[arg(long)]
+    session: Option<PathBuf>,
 
     /// Initial time as RFC3339. Defaults to "now". The clock advances in real time.
     #[arg(long)]
@@ -177,83 +181,115 @@ fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();
 
-    let start_jd = parse_time_to_time_scales(args.time.as_deref())?.jd_utc;
-    let limiting_mag = DEFAULT_SCREEN_LIMITING_MAGNITUDE;
-    let instances = load_star_instances_from_file(&args.catalog, limiting_mag)?;
-    log::info!("Loaded {} stars", instances.len());
-
-    let initial_view = LocalView {
-        azimuth_rad: (args.azimuth as f32).to_radians(),
-        altitude_rad: (args.altitude as f32).to_radians(),
-        fov_y_rad: (args.fov as f32).to_radians(),
+    let scene = if let Some(session_path) = &args.session {
+        load_session(session_path)?.to_scene()?
+    } else {
+        let time = parse_time_to_time_scales(args.time.as_deref())?;
+        let overlays = overlay_config_from_args(
+            args.no_overlays,
+            &args.overlays,
+            args.grid_step_deg,
+            args.overlay_opacity,
+        );
+        let atmosphere = atmosphere_from_args(
+            args.no_extinction,
+            args.atmosphere_preset,
+            AtmosphereOverrides {
+                turbidity: args.turbidity,
+                observer_altitude_m: args.observer_altitude_m,
+                ozone_du: args.ozone_du,
+                visibility_km: args.visibility_km,
+                pressure_hpa: args.pressure_hpa,
+                temperature_c: args.temperature_c,
+            },
+        );
+        let (viewpoint, external_viewpoint) = viewpoint_from_args(
+            args.viewpoint,
+            ExternalViewpointOverrides {
+                origin_pc: vec3_arg(&args.external_origin_pc),
+                target_pc: vec3_arg(&args.external_target_pc),
+                up: vec3_arg(&args.external_up),
+            },
+        );
+        SessionScene {
+            latitude_deg: args.lat,
+            longitude_deg: args.lng,
+            time,
+            view: LocalView {
+                azimuth_rad: (args.azimuth as f32).to_radians(),
+                altitude_rad: (args.altitude as f32).to_radians(),
+                fov_y_rad: (args.fov as f32).to_radians(),
+            },
+            overlays,
+            atmosphere_preset: args.atmosphere_preset.into(),
+            atmosphere,
+            planets_enabled: !args.no_planets,
+            projection: args.projection.into(),
+            viewpoint,
+            external_viewpoint,
+            eyepiece: eyepiece_from_args(
+                args.eyepiece,
+                EyepieceOverrides {
+                    aperture_mm: args.telescope_aperture_mm,
+                    focal_length_mm: args.telescope_focal_length_mm,
+                    eyepiece_focal_length_mm: args.eyepiece_focal_length_mm,
+                    apparent_fov_deg: args.eyepiece_apparent_fov_deg,
+                    field_stop_mm: args.eyepiece_field_stop_mm,
+                },
+            ),
+            catalog: catalog_snapshot(&args.catalog, DEFAULT_SCREEN_LIMITING_MAGNITUDE),
+            corrections: CorrectionSnapshot::for_scene(atmosphere),
+        }
     };
 
-    let overlays = overlay_config_from_args(
-        args.no_overlays,
-        &args.overlays,
-        args.grid_step_deg,
-        args.overlay_opacity,
-    );
+    let catalog_path = scene
+        .catalog
+        .path
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| args.catalog.clone());
+    let instances = load_star_instances_from_file(&catalog_path, scene.catalog.limiting_magnitude)?;
+    log::info!("Loaded {} stars", instances.len());
 
-    let atmosphere = atmosphere_from_args(
-        args.no_extinction,
-        args.atmosphere_preset,
-        AtmosphereOverrides {
-            turbidity: args.turbidity,
-            observer_altitude_m: args.observer_altitude_m,
-            ozone_du: args.ozone_du,
-            visibility_km: args.visibility_km,
-            pressure_hpa: args.pressure_hpa,
-            temperature_c: args.temperature_c,
-        },
-    );
-
-    let (viewpoint, external_viewpoint) = viewpoint_from_args(
-        args.viewpoint,
-        ExternalViewpointOverrides {
-            origin_pc: vec3_arg(&args.external_origin_pc),
-            target_pc: vec3_arg(&args.external_target_pc),
-            up: vec3_arg(&args.external_up),
-        },
-    );
-    let eyepiece = eyepiece_from_args(
-        args.eyepiece,
-        EyepieceOverrides {
-            aperture_mm: args.telescope_aperture_mm,
-            focal_length_mm: args.telescope_focal_length_mm,
-            eyepiece_focal_length_mm: args.eyepiece_focal_length_mm,
-            apparent_fov_deg: args.eyepiece_apparent_fov_deg,
-            field_stop_mm: args.eyepiece_field_stop_mm,
-        },
-    );
-    if eyepiece.enabled {
+    if scene.eyepiece.enabled {
         log::info!(
             "Eyepiece simulation: {:.2}x, {:.3}° true FOV, {:.2} arcsec/mm plate scale, {:.2} mm exit pupil",
-            eyepiece.magnification(),
-            eyepiece.true_field_deg(),
-            eyepiece.plate_scale_arcsec_per_mm(),
-            eyepiece.exit_pupil_mm()
+            scene.eyepiece.magnification(),
+            scene.eyepiece.true_field_deg(),
+            scene.eyepiece.plate_scale_arcsec_per_mm(),
+            scene.eyepiece.exit_pupil_mm()
         );
     }
 
     let event_loop = EventLoop::new()?;
     let mut app = App::new(
         instances,
-        args.lat,
-        args.lng,
-        start_jd,
-        initial_view,
-        overlays,
-        limiting_mag,
-        atmosphere,
-        !args.no_planets,
-        args.projection.into(),
-        viewpoint,
-        external_viewpoint,
-        eyepiece,
+        scene.latitude_deg,
+        scene.longitude_deg,
+        scene.time.jd_utc,
+        scene.view,
+        scene.overlays,
+        scene.catalog.limiting_magnitude,
+        scene.atmosphere,
+        scene.planets_enabled,
+        scene.projection,
+        scene.viewpoint,
+        scene.external_viewpoint,
+        scene.eyepiece,
     );
     event_loop.run_app(&mut app)?;
     Ok(())
+}
+
+fn catalog_snapshot(path: &Path, limiting_magnitude: f32) -> CatalogSnapshot {
+    CatalogSnapshot {
+        backend: "hyg-csv".to_string(),
+        source: "HYG".to_string(),
+        version: Some("4.2".to_string()),
+        path: Some(path.display().to_string()),
+        hash: None,
+        limiting_magnitude,
+    }
 }
 
 fn vec3_arg(values: &Option<Vec<f32>>) -> Option<[f32; 3]> {
