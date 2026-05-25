@@ -8,9 +8,10 @@ use renderer::{
     DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
-    atmosphere_from_args, load_star_instances_from_file, overlay_config_from_args,
-    parse_time_to_time_scales, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
-    ExternalViewpointOverrides, OverlayArg, ProjectionArg, ViewpointArg,
+    atmosphere_from_args, eyepiece_from_args, load_star_instances_from_file,
+    overlay_config_from_args, parse_time_to_time_scales, viewpoint_from_args, AtmosphereOverrides,
+    AtmospherePresetArg, ExternalViewpointOverrides, EyepieceOverrides, OverlayArg, ProjectionArg,
+    ViewpointArg,
 };
 
 /// Render the night sky as seen from a given observer to a PNG.
@@ -158,6 +159,31 @@ struct Args {
     #[arg(long)]
     no_planets: bool,
 
+    /// Enable telescope eyepiece simulation. Supplying any telescope/eyepiece
+    /// parameter also enables this mode.
+    #[arg(long)]
+    eyepiece: bool,
+
+    /// Telescope / OTA clear aperture in millimetres, used for exit-pupil reporting.
+    #[arg(long)]
+    telescope_aperture_mm: Option<f32>,
+
+    /// Telescope / OTA focal length in millimetres. Sets plate scale and true FOV.
+    #[arg(long)]
+    telescope_focal_length_mm: Option<f32>,
+
+    /// Eyepiece focal length in millimetres.
+    #[arg(long)]
+    eyepiece_focal_length_mm: Option<f32>,
+
+    /// Eyepiece apparent field of view in degrees, used when field stop is zero.
+    #[arg(long)]
+    eyepiece_apparent_fov_deg: Option<f32>,
+
+    /// Eyepiece field-stop diameter in millimetres. Set 0 to derive true FOV from AFOV.
+    #[arg(long)]
+    eyepiece_field_stop_mm: Option<f32>,
+
     /// Disable the diffuse-sky (integrated starlight + diffuse galactic
     /// light) skyglow pass. With the default (skyglow on), the sky
     /// background includes the analytic Leinert et al. 1998 model so the
@@ -218,6 +244,25 @@ fn main() -> Result<()> {
             up: vec3_arg(&args.external_up),
         },
     );
+    let eyepiece = eyepiece_from_args(
+        args.eyepiece,
+        EyepieceOverrides {
+            aperture_mm: args.telescope_aperture_mm,
+            focal_length_mm: args.telescope_focal_length_mm,
+            eyepiece_focal_length_mm: args.eyepiece_focal_length_mm,
+            apparent_fov_deg: args.eyepiece_apparent_fov_deg,
+            field_stop_mm: args.eyepiece_field_stop_mm,
+        },
+    );
+    if eyepiece.enabled {
+        log::info!(
+            "Eyepiece simulation: {:.2}x, {:.3}° true FOV, {:.2} arcsec/mm plate scale, {:.2} mm exit pupil",
+            eyepiece.magnification(),
+            eyepiece.true_field_deg(),
+            eyepiece.plate_scale_arcsec_per_mm(),
+            eyepiece.exit_pupil_mm()
+        );
+    }
 
     let pixels = pollster::block_on(render_to_pixels(
         observer,
@@ -228,6 +273,7 @@ fn main() -> Result<()> {
         args.projection.into(),
         viewpoint,
         external_viewpoint,
+        eyepiece,
         limiting_mag,
         args.width,
         args.height,
@@ -263,6 +309,7 @@ async fn render_to_pixels(
     projection: renderer::SkyProjection,
     viewpoint: renderer::SkyViewpoint,
     external_viewpoint: renderer::ExternalViewpoint,
+    eyepiece: renderer::EyepieceSimulation,
     limiting_mag: f32,
     width: u32,
     height: u32,
@@ -319,6 +366,7 @@ async fn render_to_pixels(
     camera.projection = projection;
     camera.viewpoint = viewpoint;
     camera.external_viewpoint = external_viewpoint;
+    camera.eyepiece = eyepiece;
     camera.limiting_magnitude = limiting_mag;
     renderer.update_camera(&queue, &camera, width, height);
 

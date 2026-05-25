@@ -60,10 +60,10 @@ topocentric positions. The goal is for sky colour to be driven by physical
 illuminants and atmosphere parameters rather than by hard-coded gradients.
 
 **Current highest priority:** continue the remaining visual Phase 4 work in a
-small, shippable sequence: deep-sky overlays, variable-star side-panel data, and
-telescope eyepiece simulation. Phase 1, Phase 1', Phase 2, the core stellar
-apparent-place corrections, full-sky projections, the fixed external galactic
-viewpoint, and custom external viewpoint origins are now complete. A row is
+small, shippable sequence: deep-sky overlays and variable-star side-panel data.
+Phase 1, Phase 1', Phase 2, the core stellar apparent-place corrections,
+full-sky projections, the fixed external galactic viewpoint, telescope eyepiece
+simulation, and custom external viewpoint origins are now complete. A row is
 `✅ done` only when the model named in its references is implemented,
 documented, tested, and wired into all relevant hosts.
 
@@ -158,7 +158,7 @@ Columns:
 | `P4-03` | 4 | **Deep-sky overlay** (Messier, NGC) | Light catalogs first; full NGC/IC is large | ⬜ |
 | `P4-04` | 4 | **Variable star light curves** | Pull AAVSO; show on the side panel for a hovered variable | ⬜ |
 | `P4-05` | 4 | **Sound + screen-reader accessibility** | Az/Alt audio cues; ARIA labels on every control | ⬜ |
-| `P4-06` | 4 | **Telescope eyepiece simulation** | Plate scale + true field of view from OTA + eyepiece pair | ⬜ |
+| `P4-06` | 4 | **Telescope eyepiece simulation** | Plate scale, magnification, exit pupil, and true field of view from an OTA + eyepiece pair, exposed in CLI / desktop / web session URLs | ✅ done (`renderer::EyepieceSimulation`, `apps/{cli,viewer,web}`) |
 | `P4-07` | 4 | **Custom external viewpoint origin** | `SkyViewpoint::CustomExternal` uses user-selectable `origin_pc`, target, and up vectors in IAU galactic Cartesian parsecs (Sun origin, +X l=0°, +Y l=90°, +Z north galactic pole), exposed in CLI / desktop / web session URLs | ✅ done (`renderer::ExternalViewpoint`, `apps/{cli,viewer,web}`) |
 
 ---

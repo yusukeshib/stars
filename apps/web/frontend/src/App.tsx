@@ -6,14 +6,18 @@ import {
   clampFov,
   wrapAzimuth,
   DEFAULT_ATMOSPHERE_CONFIG,
+  DEFAULT_EYEPIECE_CONFIG,
   DEFAULT_OVERLAY_CONFIG,
   DEFAULT_PLANETS_CONFIG,
   DEFAULT_PROJECTION_CONFIG,
+  MIN_FOV_DEG,
+  MAX_FOV_DEG,
   isAtmospherePreset,
   isOverlayLayer,
   isSkyProjection,
   isSkyViewpoint,
   type AtmosphereConfig,
+  type EyepieceConfig,
   type ExternalViewpointConfig,
   type Observer,
   type OverlayConfig,
@@ -79,6 +83,7 @@ type UrlSession = {
   atmosphere?: AtmosphereConfig;
   planets?: PlanetsConfig;
   projection?: ProjectionConfig;
+  eyepiece?: EyepieceConfig;
   timeMs?: number;
 };
 
@@ -158,6 +163,12 @@ function loadSessionFromUrl(): UrlSession | null {
     "visibilityKm",
     "pressureHpa",
     "temperatureC",
+    "eyepiece",
+    "otaApertureMm",
+    "otaFocalMm",
+    "eyepieceFocalMm",
+    "eyepieceAfovDeg",
+    "eyepieceFieldStopMm",
   ];
   if (!sessionKeys.some((key) => params.has(key))) return null;
   const observer: Observer = {
@@ -167,7 +178,7 @@ function loadSessionFromUrl(): UrlSession | null {
   const view: View = {
     azimuthDeg: numberParam(params, "az", DEFAULT_VIEW.azimuthDeg, 0, 360),
     altitudeDeg: numberParam(params, "alt", DEFAULT_VIEW.altitudeDeg, -89.5, 89.5),
-    fovDeg: numberParam(params, "fov", DEFAULT_VIEW.fovDeg, 5, 120),
+    fovDeg: numberParam(params, "fov", DEFAULT_VIEW.fovDeg, MIN_FOV_DEG, MAX_FOV_DEG),
   };
   const overlayLayers = (params.get("overlays") ?? "")
     .split(",")
@@ -179,6 +190,14 @@ function loadSessionFromUrl(): UrlSession | null {
     opacity: numberParam(params, "overlayOpacity", DEFAULT_OVERLAY_CONFIG.opacity, 0, 1),
   };
   const jd = Number(params.get("jd"));
+  const eyepieceParam = params.get("eyepiece");
+  const hasEyepieceParam =
+    eyepieceParam !== null ||
+    params.has("otaApertureMm") ||
+    params.has("otaFocalMm") ||
+    params.has("eyepieceFocalMm") ||
+    params.has("eyepieceAfovDeg") ||
+    params.has("eyepieceFieldStopMm");
   const projectionParam = params.get("projection");
   const viewpointParam = params.get("viewpoint");
   const hasExternalViewpointParam = params.has("originPc") || params.has("targetPc") || params.has("up");
@@ -204,17 +223,28 @@ function loadSessionFromUrl(): UrlSession | null {
           : DEFAULT_PROJECTION_CONFIG.viewpoint,
       external,
     },
+    eyepiece: hasEyepieceParam
+      ? {
+          enabled: eyepieceParam === null ? true : eyepieceParam !== "off",
+          apertureMm: numberParam(params, "otaApertureMm", DEFAULT_EYEPIECE_CONFIG.apertureMm, 10, 2000),
+          focalLengthMm: numberParam(params, "otaFocalMm", DEFAULT_EYEPIECE_CONFIG.focalLengthMm, 50, 20000),
+          eyepieceFocalLengthMm: numberParam(params, "eyepieceFocalMm", DEFAULT_EYEPIECE_CONFIG.eyepieceFocalLengthMm, 1, 100),
+          apparentFovDeg: numberParam(params, "eyepieceAfovDeg", DEFAULT_EYEPIECE_CONFIG.apparentFovDeg, 1, 120),
+          fieldStopMm: numberParam(params, "eyepieceFieldStopMm", DEFAULT_EYEPIECE_CONFIG.fieldStopMm, 0, 120),
+        }
+      : undefined,
     timeMs: Number.isFinite(jd) ? (jd - 2440587.5) * 86400000 : undefined,
   };
 }
 
-function sessionUrl({ observer, view, overlays, atmosphere, planets, projection, timeMs }: {
+function sessionUrl({ observer, view, overlays, atmosphere, planets, projection, eyepiece, timeMs }: {
   observer: Observer;
   view: View;
   overlays: OverlayConfig;
   atmosphere: AtmosphereConfig;
   planets: PlanetsConfig;
   projection: ProjectionConfig;
+  eyepiece: EyepieceConfig;
   timeMs: number;
 }): string {
   const url = new URL(window.location.href);
@@ -242,6 +272,12 @@ function sessionUrl({ observer, view, overlays, atmosphere, planets, projection,
   url.searchParams.set("visibilityKm", atmosphere.visibilityKm.toFixed(0));
   url.searchParams.set("pressureHpa", String(Math.round(atmosphere.pressureHpa)));
   url.searchParams.set("temperatureC", atmosphere.temperatureC.toFixed(0));
+  url.searchParams.set("eyepiece", eyepiece.enabled ? "on" : "off");
+  url.searchParams.set("otaApertureMm", eyepiece.apertureMm.toFixed(0));
+  url.searchParams.set("otaFocalMm", eyepiece.focalLengthMm.toFixed(0));
+  url.searchParams.set("eyepieceFocalMm", eyepiece.eyepieceFocalLengthMm.toFixed(1));
+  url.searchParams.set("eyepieceAfovDeg", eyepiece.apparentFovDeg.toFixed(1));
+  url.searchParams.set("eyepieceFieldStopMm", eyepiece.fieldStopMm.toFixed(1));
   return url.toString();
 }
 
@@ -269,20 +305,23 @@ export function App() {
   const [projection, setProjection] = useState<ProjectionConfig>(
     URL_SESSION?.projection ?? PERSISTED?.projection ?? DEFAULT_PROJECTION_CONFIG,
   );
+  const [eyepiece, setEyepiece] = useState<EyepieceConfig>(
+    URL_SESSION?.eyepiece ?? PERSISTED?.eyepiece ?? DEFAULT_EYEPIECE_CONFIG,
+  );
   const [timeMs, setTimeMs] = useState<number>(() => URL_SESSION?.timeMs ?? Date.now());
   const [sunAltitudeDeg, setSunAltitudeDeg] = useState<number | null>(null);
   const [planning, setPlanning] = useState<PlanningTable | null>(null);
   const lastTickRef = useRef<number>(performance.now());
 
-  // Persist observer + view + overlays + atmosphere + planets + projection whenever they change. We debounce
+  // Persist observer + view + overlays + atmosphere + planets + projection + eyepiece whenever they change. We debounce
   // because the view updates on every mouse/touch frame during a drag, and
   // localStorage.setItem is synchronous; without the debounce we'd write ~60
   // times a second. Time is intentionally not persisted: a stale timestamp on
   // next load would silently mislead the user.
   useEffect(() => {
-    const handle = setTimeout(() => saveConfig({ observer, view, overlays, atmosphere, planets, projection }), 250);
+    const handle = setTimeout(() => saveConfig({ observer, view, overlays, atmosphere, planets, projection, eyepiece }), 250);
     return () => clearTimeout(handle);
-  }, [observer, view, overlays, atmosphere, planets, projection]);
+  }, [observer, view, overlays, atmosphere, planets, projection, eyepiece]);
 
   // Clock always ticks. When the user picks a custom moment via the quick time
   // popup we simply rebase `timeMs`; the same loop keeps advancing from there.
@@ -319,6 +358,7 @@ export function App() {
         atmosphere={atmosphere}
         planets={planets}
         projection={projection}
+        eyepiece={eyepiece}
         onDrag={(daz, dalt) =>
           setView((v) => ({
             ...v,
@@ -341,6 +381,7 @@ export function App() {
         atmosphere={atmosphere}
         planets={planets}
         projection={projection}
+        eyepiece={eyepiece}
         planning={planning}
         onSetObserver={setObserver}
         onSetTime={setTimeMs}
@@ -348,8 +389,9 @@ export function App() {
         onSetAtmosphere={setAtmosphere}
         onSetPlanets={setPlanets}
         onSetProjection={setProjection}
+        onSetEyepiece={setEyepiece}
         onCopySessionUrl={async () => {
-          const url = sessionUrl({ observer, view, overlays, atmosphere, planets, projection, timeMs });
+          const url = sessionUrl({ observer, view, overlays, atmosphere, planets, projection, eyepiece, timeMs });
           try {
             if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(url);
           } catch {

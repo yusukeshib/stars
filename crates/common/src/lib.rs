@@ -14,8 +14,8 @@ use astronomy::TimeScales;
 use catalog::load_from_file;
 use clap::ValueEnum;
 use renderer::{
-    build_star_instance, Atmosphere, AtmospherePreset, ExternalViewpoint, OverlayConfig,
-    OverlayKind, SkyProjection, SkyViewpoint, StarInstance,
+    build_star_instance, Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation,
+    OverlayConfig, OverlayKind, SkyProjection, SkyViewpoint, StarInstance,
 };
 
 /// CLI-facing mirror of [`OverlayKind`] that derives [`ValueEnum`] so `clap`
@@ -209,6 +209,54 @@ pub fn viewpoint_from_args(
         viewpoint.into()
     };
     (viewpoint, external)
+}
+
+/// Optional telescope / eyepiece controls parsed by native hosts.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EyepieceOverrides {
+    pub aperture_mm: Option<f32>,
+    pub focal_length_mm: Option<f32>,
+    pub eyepiece_focal_length_mm: Option<f32>,
+    pub apparent_fov_deg: Option<f32>,
+    pub field_stop_mm: Option<f32>,
+}
+
+impl EyepieceOverrides {
+    pub fn has_any(self) -> bool {
+        self.aperture_mm.is_some()
+            || self.focal_length_mm.is_some()
+            || self.eyepiece_focal_length_mm.is_some()
+            || self.apparent_fov_deg.is_some()
+            || self.field_stop_mm.is_some()
+    }
+}
+
+/// Build a renderer eyepiece simulation from native-host CLI values.
+///
+/// Supplying any optic parameter enables the mode, matching the external
+/// viewpoint helper's "specific control implies specific mode" behaviour.
+pub fn eyepiece_from_args(enabled: bool, overrides: EyepieceOverrides) -> EyepieceSimulation {
+    let mut eyepiece = if enabled || overrides.has_any() {
+        EyepieceSimulation::DEFAULT_ENABLED
+    } else {
+        EyepieceSimulation::OFF
+    };
+    if let Some(aperture_mm) = overrides.aperture_mm {
+        eyepiece.aperture_mm = aperture_mm;
+    }
+    if let Some(focal_length_mm) = overrides.focal_length_mm {
+        eyepiece.focal_length_mm = focal_length_mm;
+    }
+    if let Some(eyepiece_focal_length_mm) = overrides.eyepiece_focal_length_mm {
+        eyepiece.eyepiece_focal_length_mm = eyepiece_focal_length_mm;
+    }
+    if let Some(apparent_fov_deg) = overrides.apparent_fov_deg {
+        eyepiece.apparent_fov_deg = apparent_fov_deg;
+    }
+    if let Some(field_stop_mm) = overrides.field_stop_mm {
+        eyepiece.field_stop_mm = field_stop_mm;
+    }
+    eyepiece
 }
 
 /// Optional atmosphere overrides parsed by native hosts.
@@ -407,6 +455,33 @@ mod tests {
             ExternalViewpoint::GALACTIC_NORTH.target_pc
         );
         assert_eq!(external.up, [0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn eyepiece_overrides_select_enabled_mode() {
+        let off = eyepiece_from_args(false, EyepieceOverrides::default());
+        assert!(!off.enabled);
+
+        let explicit = eyepiece_from_args(true, EyepieceOverrides::default());
+        assert!(explicit.enabled);
+        assert_eq!(
+            explicit.focal_length_mm,
+            EyepieceSimulation::OFF.focal_length_mm
+        );
+
+        let overridden = eyepiece_from_args(
+            false,
+            EyepieceOverrides {
+                focal_length_mm: Some(1200.0),
+                eyepiece_focal_length_mm: Some(12.0),
+                field_stop_mm: Some(14.0),
+                ..EyepieceOverrides::default()
+            },
+        );
+        assert!(overridden.enabled);
+        assert_eq!(overridden.focal_length_mm, 1200.0);
+        assert_eq!(overridden.eyepiece_focal_length_mm, 12.0);
+        assert_eq!(overridden.field_stop_mm, 14.0);
     }
 
     #[test]

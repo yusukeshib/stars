@@ -6,6 +6,7 @@ import {
   isSkyProjection,
   isSkyViewpoint,
   DEFAULT_ATMOSPHERE_CONFIG,
+  DEFAULT_EYEPIECE_CONFIG,
   DEFAULT_PROJECTION_CONFIG,
   type AtmosphereConfig,
   type ExternalViewpointConfig,
@@ -14,6 +15,7 @@ import {
   type PlanetsConfig,
   type ProjectionConfig,
   type View,
+  type EyepieceConfig,
 } from "./observer";
 
 const STORAGE_KEY = "stars:config";
@@ -28,6 +30,7 @@ export type PersistedConfig = {
   atmosphere?: AtmosphereConfig;
   planets?: PlanetsConfig;
   projection?: ProjectionConfig;
+  eyepiece?: EyepieceConfig;
 };
 
 export type PartialPersistedConfig = Partial<PersistedConfig>;
@@ -49,6 +52,7 @@ export function loadConfig(): PartialPersistedConfig | null {
       atmosphere?: unknown;
       planets?: unknown;
       projection?: unknown;
+      eyepiece?: unknown;
     };
     const out: PartialPersistedConfig = {};
     if (isObserver(obj.observer)) out.observer = obj.observer;
@@ -60,6 +64,8 @@ export function loadConfig(): PartialPersistedConfig | null {
     if (planets) out.planets = planets;
     const projection = parseProjectionConfig(obj.projection);
     if (projection) out.projection = projection;
+    const eyepiece = parseEyepieceConfig(obj.eyepiece);
+    if (eyepiece) out.eyepiece = eyepiece;
     return out;
   } catch {
     return null;
@@ -115,6 +121,11 @@ const PRESSURE_RANGE: [number, number] = [0, 1100];
 const TEMPERATURE_RANGE: [number, number] = [-80, 60];
 const EXTERNAL_PC_RANGE: [number, number] = [-1_000_000, 1_000_000];
 const EXTERNAL_UP_RANGE: [number, number] = [-10, 10];
+const TELESCOPE_APERTURE_RANGE: [number, number] = [10, 2000];
+const TELESCOPE_FOCAL_RANGE: [number, number] = [50, 20000];
+const EYEPIECE_FOCAL_RANGE: [number, number] = [1, 100];
+const EYEPIECE_AFOV_RANGE: [number, number] = [1, 120];
+const EYEPIECE_FIELD_STOP_RANGE: [number, number] = [0, 120];
 
 function isOverlayConfig(v: unknown): v is OverlayConfig {
   if (!v || typeof v !== "object") return false;
@@ -159,6 +170,29 @@ function parseProjectionConfig(v: unknown): ProjectionConfig | null {
     projection: o.projection,
     viewpoint: isSkyViewpoint(o.viewpoint) ? o.viewpoint : DEFAULT_PROJECTION_CONFIG.viewpoint,
     external: parseExternalViewpointConfig(o.external),
+  };
+}
+
+function parseEyepieceConfig(v: unknown): EyepieceConfig | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Partial<EyepieceConfig>;
+  return {
+    enabled: typeof o.enabled === "boolean" ? o.enabled : DEFAULT_EYEPIECE_CONFIG.enabled,
+    apertureMm: inRange(o.apertureMm, TELESCOPE_APERTURE_RANGE)
+      ? o.apertureMm
+      : DEFAULT_EYEPIECE_CONFIG.apertureMm,
+    focalLengthMm: inRange(o.focalLengthMm, TELESCOPE_FOCAL_RANGE)
+      ? o.focalLengthMm
+      : DEFAULT_EYEPIECE_CONFIG.focalLengthMm,
+    eyepieceFocalLengthMm: inRange(o.eyepieceFocalLengthMm, EYEPIECE_FOCAL_RANGE)
+      ? o.eyepieceFocalLengthMm
+      : DEFAULT_EYEPIECE_CONFIG.eyepieceFocalLengthMm,
+    apparentFovDeg: inRange(o.apparentFovDeg, EYEPIECE_AFOV_RANGE)
+      ? o.apparentFovDeg
+      : DEFAULT_EYEPIECE_CONFIG.apparentFovDeg,
+    fieldStopMm: inRange(o.fieldStopMm, EYEPIECE_FIELD_STOP_RANGE)
+      ? o.fieldStopMm
+      : DEFAULT_EYEPIECE_CONFIG.fieldStopMm,
   };
 }
 

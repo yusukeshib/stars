@@ -35,6 +35,8 @@ The current engine already includes:
 - perspective plus Mollweide, Aitoff, and Hammer full-sky projections;
 - out-of-Earth `galactic-north` and `custom-external` viewpoints that render
   the local Milky Way disc from parsec-scale IAU galactic-frame cameras;
+- telescope eyepiece simulation that derives magnification, plate scale, exit
+  pupil, and true field of view from an OTA + eyepiece pair;
 - shareable web session URLs.
 
 See [`PROGRESS.md`](PROGRESS.md) for the implementation log and
@@ -96,13 +98,13 @@ More detail lives in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Current focus
 
-Phase 1, Phase 1', Phase 2, Phase 4 full-sky projection work, and Phase 4
-out-of-Earth galactic / custom external viewpoints are implemented. The most
-useful remaining visual work is now Phase 4 rendering polish, in this order:
+Phase 1, Phase 1', Phase 2, Phase 4 full-sky projection work, Phase 4
+out-of-Earth galactic / custom external viewpoints, and Phase 4 telescope
+eyepiece simulation are implemented. The most useful remaining visual work is
+now Phase 4 rendering polish, in this order:
 
 1. deep-sky overlays for Messier / NGC-style objects;
-2. variable-star side-panel light curves;
-3. telescope eyepiece simulation.
+2. variable-star side-panel light curves.
 
 ## Contributing
 

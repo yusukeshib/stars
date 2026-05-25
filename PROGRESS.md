@@ -350,6 +350,42 @@ Validation:
   selection;
 - Rust workspace check and frontend TypeScript check cover host wiring.
 
+### Telescope eyepiece simulation
+
+Implemented the Phase 4 telescope eyepiece model. Hosts can enable an optical
+train consisting of OTA aperture / focal length and eyepiece focal length /
+apparent field / optional field stop. The renderer derives:
+
+- focal-plane plate scale in arcseconds per millimetre;
+- eyepiece magnification;
+- exit-pupil diameter;
+- true field of view, preferring the physical field stop and falling back to
+  apparent field divided by magnification.
+
+When enabled in the Earth-centred perspective view, the true field overrides the
+regular camera FoV while retaining the same azimuth / altitude pointing. CLI and
+desktop expose matching flags, and the web settings panel persists the optical
+train and includes it in shareable session URLs.
+
+Primary implementation areas:
+
+- `renderer::EyepieceSimulation` and `Camera::effective_view`;
+- native `--eyepiece`, `--telescope-aperture-mm`, `--telescope-focal-length-mm`,
+  `--eyepiece-focal-length-mm`, `--eyepiece-apparent-fov-deg`, and
+  `--eyepiece-field-stop-mm` flags for `apps/cli` and `apps/viewer`;
+- WASM bindings plus web settings, localStorage, status display, and session URL
+  parameters (`eyepiece`, `otaApertureMm`, `otaFocalMm`, `eyepieceFocalMm`,
+  `eyepieceAfovDeg`, `eyepieceFieldStopMm`).
+
+Validation:
+
+- renderer tests pin plate scale, magnification, exit pupil, and true-FOV
+  formulas;
+- renderer tests pin that eyepiece FoV applies only to Earth perspective views;
+- host-common tests pin native override / enable semantics;
+- Rust workspace tests, WASM check, and frontend TypeScript check cover host
+  wiring.
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

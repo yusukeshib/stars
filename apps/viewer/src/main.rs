@@ -10,9 +10,10 @@ use renderer::{
     DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
-    atmosphere_from_args, load_star_instances_from_file, overlay_config_from_args,
-    parse_time_to_time_scales, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
-    ExternalViewpointOverrides, OverlayArg, ProjectionArg, ViewpointArg,
+    atmosphere_from_args, eyepiece_from_args, load_star_instances_from_file,
+    overlay_config_from_args, parse_time_to_time_scales, viewpoint_from_args, AtmosphereOverrides,
+    AtmospherePresetArg, ExternalViewpointOverrides, EyepieceOverrides, OverlayArg, ProjectionArg,
+    ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -145,6 +146,31 @@ struct Args {
     /// Disable Mercury-through-Neptune rendering.
     #[arg(long)]
     no_planets: bool,
+
+    /// Enable telescope eyepiece simulation. Supplying any telescope/eyepiece
+    /// parameter also enables this mode.
+    #[arg(long)]
+    eyepiece: bool,
+
+    /// Telescope / OTA clear aperture in millimetres, used for exit-pupil reporting.
+    #[arg(long)]
+    telescope_aperture_mm: Option<f32>,
+
+    /// Telescope / OTA focal length in millimetres. Sets plate scale and true FOV.
+    #[arg(long)]
+    telescope_focal_length_mm: Option<f32>,
+
+    /// Eyepiece focal length in millimetres.
+    #[arg(long)]
+    eyepiece_focal_length_mm: Option<f32>,
+
+    /// Eyepiece apparent field of view in degrees, used when field stop is zero.
+    #[arg(long)]
+    eyepiece_apparent_fov_deg: Option<f32>,
+
+    /// Eyepiece field-stop diameter in millimetres. Set 0 to derive true FOV from AFOV.
+    #[arg(long)]
+    eyepiece_field_stop_mm: Option<f32>,
 }
 
 fn main() -> Result<()> {
@@ -190,6 +216,25 @@ fn main() -> Result<()> {
             up: vec3_arg(&args.external_up),
         },
     );
+    let eyepiece = eyepiece_from_args(
+        args.eyepiece,
+        EyepieceOverrides {
+            aperture_mm: args.telescope_aperture_mm,
+            focal_length_mm: args.telescope_focal_length_mm,
+            eyepiece_focal_length_mm: args.eyepiece_focal_length_mm,
+            apparent_fov_deg: args.eyepiece_apparent_fov_deg,
+            field_stop_mm: args.eyepiece_field_stop_mm,
+        },
+    );
+    if eyepiece.enabled {
+        log::info!(
+            "Eyepiece simulation: {:.2}x, {:.3}° true FOV, {:.2} arcsec/mm plate scale, {:.2} mm exit pupil",
+            eyepiece.magnification(),
+            eyepiece.true_field_deg(),
+            eyepiece.plate_scale_arcsec_per_mm(),
+            eyepiece.exit_pupil_mm()
+        );
+    }
 
     let event_loop = EventLoop::new()?;
     let mut app = App::new(
@@ -205,6 +250,7 @@ fn main() -> Result<()> {
         args.projection.into(),
         viewpoint,
         external_viewpoint,
+        eyepiece,
     );
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -241,6 +287,7 @@ struct App {
     projection: renderer::SkyProjection,
     viewpoint: renderer::SkyViewpoint,
     external_viewpoint: renderer::ExternalViewpoint,
+    eyepiece: renderer::EyepieceSimulation,
     sky_clock: SkyClock,
     mouse_pressed: bool,
     last_mouse: Option<(f64, f64)>,
@@ -309,6 +356,7 @@ impl App {
         projection: renderer::SkyProjection,
         viewpoint: renderer::SkyViewpoint,
         external_viewpoint: renderer::ExternalViewpoint,
+        eyepiece: renderer::EyepieceSimulation,
     ) -> Self {
         Self {
             gpu: None,
@@ -324,6 +372,7 @@ impl App {
             projection,
             viewpoint,
             external_viewpoint,
+            eyepiece,
             sky_clock: SkyClock::new(start_jd),
             mouse_pressed: false,
             last_mouse: None,
@@ -423,6 +472,7 @@ impl ApplicationHandler for App {
         camera.projection = self.projection;
         camera.viewpoint = self.viewpoint;
         camera.external_viewpoint = self.external_viewpoint;
+        camera.eyepiece = self.eyepiece;
 
         self.gpu = Some(GpuState {
             surface,
@@ -476,7 +526,7 @@ impl ApplicationHandler for App {
             WindowEvent::CursorMoved { position, .. } if self.mouse_pressed => {
                 if let Some((lx, ly)) = self.last_mouse {
                     // Pixel drag scaled by current FOV so it feels consistent at any zoom.
-                    let scale = gpu.camera.view.fov_y_rad / gpu.size.height as f32;
+                    let scale = gpu.camera.effective_fov_y_rad() / gpu.size.height as f32;
                     let daz = -(position.x - lx) as f32 * scale;
                     let dalt = (position.y - ly) as f32 * scale;
                     gpu.camera.rotate_view(daz, dalt);

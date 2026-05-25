@@ -21,6 +21,7 @@
 - Web UI の観測計画機能、つまり出・南中・入り、薄明時間帯の表示。
 - perspective に加えて Mollweide / Aitoff / Hammer の全天投影。
 - 地球外の `galactic-north` / `custom-external` 視点による、IAU 銀河座標系パーセクスケールカメラからの局所的な天の川円盤表示。
+- OTA と接眼レンズの組み合わせから倍率、プレートスケール、射出瞳、実視野を求める望遠鏡接眼レンズシミュレーション。
 - 共有可能な Web セッション URL。
 
 実装済み機能の記録は [`PROGRESS.md`](PROGRESS.md)、今後の計画は [`ROADMAP.md`](ROADMAP.md) を見てください。
@@ -76,10 +77,10 @@ scripts            カタログ取得・WASM build helper
 
 ## 現在の開発フォーカス
 
-Phase 1、Phase 1'、Phase 2、Phase 4 の全天投影、そして Phase 4 の地球外・銀河視点は実装済みです。今後の見た目に関わる大きな作業は、以下の順番で進めるのが自然です。
+Phase 1、Phase 1'、Phase 2、Phase 4 の全天投影、Phase 4 の地球外・銀河視点、そして Phase 4 の望遠鏡接眼レンズシミュレーションは実装済みです。今後の見た目に関わる大きな作業は、以下の順番で進めるのが自然です。
 
 1. Messier / NGC などの deep-sky overlay。
-2. 望遠鏡の接眼レンズシミュレーション。
+2. 変光星のサイドパネル光度曲線。
 
 ## 開発に参加する場合
 

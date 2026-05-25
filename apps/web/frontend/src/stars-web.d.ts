@@ -7,6 +7,14 @@ declare module "stars-web" {
     set_view(azimuthRad: number, altitudeRad: number, fovYRad: number): void;
     set_overlays(layers: string[], gridStepDeg: number, opacity: number): void;
     set_planets_enabled(enabled: boolean): void;
+    set_eyepiece_simulation(
+      enabled: boolean,
+      apertureMm: number,
+      focalLengthMm: number,
+      eyepieceFocalLengthMm: number,
+      apparentFovDeg: number,
+      fieldStopMm: number,
+    ): void;
     set_projection(projection: string): void;
     set_viewpoint(viewpoint: string): void;
     set_external_viewpoint(
