@@ -2,7 +2,7 @@ use glam::Vec3;
 use serde::Deserialize;
 
 use crate::color::bv_to_rgb;
-use crate::coords::radec_hours_deg_to_cartesian;
+use crate::coords::{proper_motion_vector_radians_per_year, radec_hours_deg_to_cartesian};
 
 #[derive(Debug, Deserialize)]
 struct RawStar {
@@ -11,11 +11,17 @@ struct RawStar {
     dist: Option<f64>,
     mag: f64,
     ci: Option<f64>,
+    pmrarad: Option<f64>,
+    pmdecrad: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Star {
     pub position: Vec3,
+    /// Cartesian tangent vector in radians per Julian year, derived from HYG's
+    /// `pmrarad` / `pmdecrad` columns. Add `proper_motion * years_since_j2000`
+    /// to `position` and normalize for first-order apparent catalogue motion.
+    pub proper_motion: Vec3,
     pub magnitude: f32,
     pub color: [f32; 3],
 }
@@ -38,11 +44,11 @@ const MAX_MAGNITUDE: f64 = 8.0;
 const MIN_DISTANCE_PC: f64 = 0.0;
 const MAX_DISTANCE_PC: f64 = 100_000.0;
 #[cfg(feature = "embedded")]
-const EMBEDDED_MAGIC: &[u8; 8] = b"STRBIN1\0";
+const EMBEDDED_MAGIC: &[u8; 8] = b"STRBIN2\0";
 #[cfg(feature = "embedded")]
 const EMBEDDED_HEADER_LEN: usize = 12;
 #[cfg(feature = "embedded")]
-const EMBEDDED_RECORD_LEN: usize = 10;
+const EMBEDDED_RECORD_LEN: usize = 22;
 
 pub fn load_from_csv(data: &str) -> Vec<Star> {
     let mut reader = csv::ReaderBuilder::new()
@@ -71,6 +77,12 @@ pub fn load_from_csv(data: &str) -> Vec<Star> {
 
         stars.push(Star {
             position: radec_hours_deg_to_cartesian(raw.ra, raw.dec),
+            proper_motion: proper_motion_vector_radians_per_year(
+                raw.ra,
+                raw.dec,
+                raw.pmrarad.unwrap_or(0.0),
+                raw.pmdecrad.unwrap_or(0.0),
+            ),
             magnitude: raw.mag as f32,
             color: bv_to_rgb(raw.ci.unwrap_or(0.0) as f32),
         });
@@ -111,8 +123,14 @@ fn load_from_binary(data: &[u8]) -> Result<Vec<Star>, String> {
         let z = decode_unit_i16(record, 4);
         let magnitude = decode_i16(record, 6) as f32 / 100.0;
         let ci = decode_i16(record, 8) as f32 / 1000.0;
+        let proper_motion = Vec3::new(
+            decode_f32(record, 10),
+            decode_f32(record, 14),
+            decode_f32(record, 18),
+        );
         stars.push(Star {
             position: Vec3::new(x, y, z).normalize_or_zero(),
+            proper_motion,
             magnitude,
             color: bv_to_rgb(ci),
         });
@@ -136,6 +154,15 @@ fn decode_unit_i16(record: &[u8], offset: usize) -> f32 {
     decode_i16(record, offset) as f32 / i16::MAX as f32
 }
 
+#[cfg(feature = "embedded")]
+fn decode_f32(record: &[u8], offset: usize) -> f32 {
+    f32::from_le_bytes(
+        record[offset..offset + 4]
+            .try_into()
+            .expect("fixed-size field"),
+    )
+}
+
 #[cfg(feature = "filesystem")]
 pub fn load_from_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<Star>> {
     let data = std::fs::read_to_string(path.as_ref())?;
@@ -157,6 +184,7 @@ mod tests {
         assert_eq!(stars.len(), 1);
         assert!((stars[0].magnitude - (-1.46)).abs() < 0.01);
         assert!(stars[0].position.length() > 0.99);
+        assert_eq!(stars[0].proper_motion, Vec3::ZERO);
     }
 
     #[test]

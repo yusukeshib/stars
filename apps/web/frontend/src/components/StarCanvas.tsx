@@ -73,6 +73,8 @@ export function StarCanvas({
       atmosphere.observerAltitudeM,
       atmosphere.ozoneDu,
       atmosphere.visibilityKm,
+      atmosphere.pressureHpa,
+      atmosphere.temperatureC,
     );
   }, [atmosphere]);
 
@@ -99,6 +101,8 @@ export function StarCanvas({
         at.observerAltitudeM,
         at.ozoneDu,
         at.visibilityKm,
+        at.pressureHpa,
+        at.temperatureC,
       );
 
       let lastSunAltitudePublish = 0;

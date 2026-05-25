@@ -111,35 +111,50 @@ pub fn overlay_config_from_args(
     }
 }
 
-/// Build a renderer atmosphere from native-host CLI values.
+/// Optional atmosphere overrides parsed by native hosts.
 ///
 /// The option fields intentionally mirror the CLI/viewer flags. Keeping the
 /// override application in one helper makes the native hosts share identical
-/// precedence and disable semantics.
+/// precedence and disable semantics without giving `atmosphere_from_args` an
+/// ever-growing positional argument list.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AtmosphereOverrides {
+    pub turbidity: Option<f32>,
+    pub observer_altitude_m: Option<f32>,
+    pub ozone_du: Option<f32>,
+    pub visibility_km: Option<f32>,
+    pub pressure_hpa: Option<f32>,
+    pub temperature_c: Option<f32>,
+}
+
+/// Build a renderer atmosphere from native-host CLI values.
 pub fn atmosphere_from_args(
     disabled: bool,
     preset: AtmospherePresetArg,
-    turbidity: Option<f32>,
-    observer_altitude_m: Option<f32>,
-    ozone_du: Option<f32>,
-    visibility_km: Option<f32>,
+    overrides: AtmosphereOverrides,
 ) -> Atmosphere {
     if disabled {
         return Atmosphere::OFF;
     }
 
     let mut atmosphere = Atmosphere::from_preset(AtmospherePreset::from(preset));
-    if let Some(turbidity) = turbidity {
+    if let Some(turbidity) = overrides.turbidity {
         atmosphere.turbidity = turbidity;
     }
-    if let Some(observer_altitude_m) = observer_altitude_m {
+    if let Some(observer_altitude_m) = overrides.observer_altitude_m {
         atmosphere.observer_altitude_m = observer_altitude_m;
     }
-    if let Some(ozone_du) = ozone_du {
+    if let Some(ozone_du) = overrides.ozone_du {
         atmosphere.ozone_du = ozone_du;
     }
-    if let Some(visibility_km) = visibility_km {
+    if let Some(visibility_km) = overrides.visibility_km {
         atmosphere.visibility_km = visibility_km;
+    }
+    if let Some(pressure_hpa) = overrides.pressure_hpa {
+        atmosphere.pressure_hpa = pressure_hpa;
+    }
+    if let Some(temperature_c) = overrides.temperature_c {
+        atmosphere.temperature_c = temperature_c;
     }
     atmosphere
 }
@@ -159,7 +174,15 @@ pub fn load_star_instances_from_file(
         load_from_file(path).with_context(|| format!("Reading catalog at {}", path.display()))?;
     Ok(stars
         .iter()
-        .map(|s| build_star_instance(s.position.into(), s.color, s.magnitude, limiting_magnitude))
+        .map(|s| {
+            build_star_instance(
+                s.position.into(),
+                s.proper_motion.into(),
+                s.color,
+                s.magnitude,
+                limiting_magnitude,
+            )
+        })
         .collect())
 }
 
@@ -253,10 +276,14 @@ mod tests {
         let atmosphere = atmosphere_from_args(
             false,
             AtmospherePresetArg::HazyUrban,
-            Some(4.0),
-            Some(1234.0),
-            Some(280.0),
-            Some(20.0),
+            AtmosphereOverrides {
+                turbidity: Some(4.0),
+                observer_altitude_m: Some(1234.0),
+                ozone_du: Some(280.0),
+                visibility_km: Some(20.0),
+                pressure_hpa: Some(900.0),
+                temperature_c: Some(5.0),
+            },
         );
         assert_eq!(
             atmosphere.extinction_k_rgb,
@@ -266,14 +293,20 @@ mod tests {
         assert_eq!(atmosphere.observer_altitude_m, 1234.0);
         assert_eq!(atmosphere.ozone_du, 280.0);
         assert_eq!(atmosphere.visibility_km, 20.0);
+        assert_eq!(atmosphere.pressure_hpa, 900.0);
+        assert_eq!(atmosphere.temperature_c, 5.0);
 
         let off = atmosphere_from_args(
             true,
             AtmospherePresetArg::ClearRural,
-            Some(4.0),
-            Some(1234.0),
-            Some(280.0),
-            Some(20.0),
+            AtmosphereOverrides {
+                turbidity: Some(4.0),
+                observer_altitude_m: Some(1234.0),
+                ozone_du: Some(280.0),
+                visibility_km: Some(20.0),
+                pressure_hpa: Some(900.0),
+                temperature_c: Some(5.0),
+            },
         );
         assert_eq!(off.extinction_k_rgb, Atmosphere::OFF.extinction_k_rgb);
         assert!(!off.sunlit_scattering);

@@ -3,6 +3,7 @@ import {
   MIN_FOV_DEG,
   isAtmospherePreset,
   isOverlayLayer,
+  DEFAULT_ATMOSPHERE_CONFIG,
   type AtmosphereConfig,
   type Observer,
   type OverlayConfig,
@@ -52,7 +53,8 @@ export function loadConfig(): PartialPersistedConfig | null {
     if (isObserver(obj.observer)) out.observer = obj.observer;
     if (isView(obj.view)) out.view = obj.view;
     if (isOverlayConfig(obj.overlays)) out.overlays = obj.overlays;
-    if (isAtmosphereConfig(obj.atmosphere)) out.atmosphere = obj.atmosphere;
+    const atmosphere = parseAtmosphereConfig(obj.atmosphere);
+    if (atmosphere) out.atmosphere = atmosphere;
     return out;
   } catch {
     return null;
@@ -105,6 +107,8 @@ const TURBIDITY_RANGE: [number, number] = [1.7, 10];
 const OBSERVER_ALTITUDE_RANGE: [number, number] = [0, 9000];
 const OZONE_RANGE: [number, number] = [0, 600];
 const VISIBILITY_RANGE: [number, number] = [1, 200];
+const PRESSURE_RANGE: [number, number] = [0, 1100];
+const TEMPERATURE_RANGE: [number, number] = [-80, 60];
 
 function isOverlayConfig(v: unknown): v is OverlayConfig {
   if (!v || typeof v !== "object") return false;
@@ -117,15 +121,31 @@ function isOverlayConfig(v: unknown): v is OverlayConfig {
   );
 }
 
-function isAtmosphereConfig(v: unknown): v is AtmosphereConfig {
-  if (!v || typeof v !== "object") return false;
+function parseAtmosphereConfig(v: unknown): AtmosphereConfig | null {
+  if (!v || typeof v !== "object") return null;
   const o = v as Partial<AtmosphereConfig>;
-  return (
-    typeof o.enabled === "boolean" &&
-    isAtmospherePreset(o.preset) &&
-    inRange(o.turbidity, TURBIDITY_RANGE) &&
-    inRange(o.observerAltitudeM, OBSERVER_ALTITUDE_RANGE) &&
-    inRange(o.ozoneDu, OZONE_RANGE) &&
-    inRange(o.visibilityKm, VISIBILITY_RANGE)
-  );
+  if (
+    typeof o.enabled !== "boolean" ||
+    !isAtmospherePreset(o.preset) ||
+    !inRange(o.turbidity, TURBIDITY_RANGE) ||
+    !inRange(o.observerAltitudeM, OBSERVER_ALTITUDE_RANGE) ||
+    !inRange(o.ozoneDu, OZONE_RANGE) ||
+    !inRange(o.visibilityKm, VISIBILITY_RANGE)
+  ) {
+    return null;
+  }
+  return {
+    enabled: o.enabled,
+    preset: o.preset,
+    turbidity: o.turbidity,
+    observerAltitudeM: o.observerAltitudeM,
+    ozoneDu: o.ozoneDu,
+    visibilityKm: o.visibilityKm,
+    pressureHpa: inRange(o.pressureHpa, PRESSURE_RANGE)
+      ? o.pressureHpa
+      : DEFAULT_ATMOSPHERE_CONFIG.pressureHpa,
+    temperatureC: inRange(o.temperatureC, TEMPERATURE_RANGE)
+      ? o.temperatureC
+      : DEFAULT_ATMOSPHERE_CONFIG.temperatureC,
+  };
 }

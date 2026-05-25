@@ -53,19 +53,22 @@ Coordinate conventions (all crates agree):
   caller supplies it, so unknown UT1−UTC can still move sidereal quantities by
   up to about 13.5 arcsec.
 - Catalog stars are **J2000/ICRS-like unit-sphere Cartesian**:
-  `x = cos δ cos α, y = cos δ sin α, z = sin δ`. Precession, nutation,
-  aberration, and proper motion are not applied yet.
+  `x = cos δ cos α, y = cos δ sin α, z = sin δ`, with a Cartesian tangent
+  `proper_motion` vector in radians per Julian year when HYG provides one.
+  The renderer applies proper motion, annual aberration, IAU 2006 precession,
+  and compact IAU-2000-style nutation per frame before projection.
 - The current Sun/Moon helpers are low-precision apparent/topocentric visual
-  inputs for rendering daylight, moonlight, and disks. They are not the final
-  VSOP87/ELP2000, IAU-2006/2000A precision stack tracked in README Phase 2.
+  inputs for rendering daylight, moonlight, and disks. They feed the same
+  apparent-date / refraction-aware renderer plumbing, but are not the final
+  publication-grade DE440/VSOP87 stack tracked in README Phase 3.
 - Local frame is **ENU** (East, North, Up). Observer latitude is treated as
   geodetic for topocentric solar-system parallax and as astronomical/geographic
-  for stellar ENU projection; the distinction is below Phase 1 star precision.
+  for stellar ENU projection; the distinction is below naked-eye star precision.
 - Azimuth is from **North toward East**. Catalog and overlay altitudes are
   geometric by definition; when the renderer's atmosphere is enabled, the star
-  shader applies a standard-pressure/temperature Saemundsson-style stellar
-  refraction correction before projection. Refraction for the Sun/Moon disks
-  and configurable weather inputs remain Phase 2 follow-up work.
+  shader applies a pressure/temperature-scaled Saemundsson-style refraction
+  correction before projection, and the same weather controls refract the
+  Sun/Moon disk directions.
 
 ---
 
@@ -129,7 +132,7 @@ let limiting_magnitude = NAKED_EYE_LIMITING_MAGNITUDE + 1.5;
 
 let instances: Vec<StarInstance> = stars
     .iter()
-    .map(|s| build_star_instance(s.position.into(), s.color, s.magnitude, limiting_magnitude))
+    .map(|s| build_star_instance(s.position.into(), s.proper_motion.into(), s.color, s.magnitude, limiting_magnitude))
     .collect();
 ```
 
@@ -267,7 +270,7 @@ load_from_file(path) -> io::Result<Vec<Star>>   // feature = "filesystem"
 load_embedded() -> Vec<Star>                    // feature = "embedded"
 bv_to_rgb(bv) -> [f32; 3]
 radec_hours_deg_to_cartesian(ra_hours, dec_degrees) -> Vec3
-struct Star { position: Vec3, magnitude: f32, color: [f32; 3] }
+struct Star { position: Vec3, proper_motion: Vec3, magnitude: f32, color: [f32; 3] }
 
 // renderer
 Renderer::new(&device, format, width, height, &[StarInstance]) -> Renderer
@@ -280,7 +283,7 @@ Camera::rotate_view(daz_rad, dalt_rad)
 Camera::zoom_fov(factor)
 
 LocalView { azimuth_rad, altitude_rad, fov_y_rad }
-StarInstance { position: [f32;3], size: f32, color: [f32;3], brightness: f32 }
+StarInstance { position: [f32;3], size: f32, color: [f32;3], brightness: f32, proper_motion: [f32;3], .. }
 magnitude_to_render_params(mag, limiting_magnitude) -> RenderParams { radius_px, brightness }
 NAKED_EYE_LIMITING_MAGNITUDE: f32      // 6.0; literature default
 DEFAULT_SCREEN_LIMITING_MAGNITUDE: f32 // 7.5; screen-host default

@@ -46,6 +46,11 @@ pub struct StarInstance {
     pub size: f32,
     pub color: [f32; 3],
     pub brightness: f32,
+    /// Cartesian tangent vector in radians per Julian year. The vertex shader
+    /// applies `position + proper_motion * years_since_j2000` before the
+    /// precession/nutation/aberration/refraction stack.
+    pub proper_motion: [f32; 3],
+    pub _pad0: f32,
 }
 
 impl StarInstance {
@@ -56,6 +61,7 @@ impl StarInstance {
     const OFFSET_SIZE: u64 = std::mem::offset_of!(Self, size) as u64;
     const OFFSET_COLOR: u64 = std::mem::offset_of!(Self, color) as u64;
     const OFFSET_BRIGHTNESS: u64 = std::mem::offset_of!(Self, brightness) as u64;
+    const OFFSET_PROPER_MOTION: u64 = std::mem::offset_of!(Self, proper_motion) as u64;
 
     pub(crate) fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
@@ -81,6 +87,11 @@ impl StarInstance {
                     offset: Self::OFFSET_BRIGHTNESS,
                     shader_location: 4,
                     format: wgpu::VertexFormat::Float32,
+                },
+                wgpu::VertexAttribute {
+                    offset: Self::OFFSET_PROPER_MOTION,
+                    shader_location: 5,
+                    format: wgpu::VertexFormat::Float32x3,
                 },
             ],
         }
@@ -223,6 +234,7 @@ pub(crate) fn limiting_magnitude_to_zeropoint(limiting_magnitude: f32) -> f32 {
 ///   Visual Performance*.
 pub fn build_star_instance(
     position: [f32; 3],
+    proper_motion: [f32; 3],
     photopic_color: [f32; 3],
     magnitude: f32,
     limiting_magnitude: f32,
@@ -235,6 +247,8 @@ pub fn build_star_instance(
         size: params.radius_px,
         color: perceived_color,
         brightness: params.brightness,
+        proper_motion,
+        _pad0: 0.0,
     }
 }
 
@@ -298,7 +312,7 @@ mod tests {
         let red = [1.0_f32, 0.3, 0.1];
         let lim = NAKED_EYE_LIMITING_MAGNITUDE;
 
-        let bright = build_star_instance([1.0, 0.0, 0.0], red, 0.0, lim);
+        let bright = build_star_instance([1.0, 0.0, 0.0], [0.0; 3], red, 0.0, lim);
         // Bright star: photopic, colour preserved within float error.
         for (got, want) in bright.color.iter().zip(red.iter()) {
             assert!(
@@ -309,7 +323,7 @@ mod tests {
             );
         }
 
-        let faint = build_star_instance([1.0, 0.0, 0.0], red, 6.0, lim);
+        let faint = build_star_instance([1.0, 0.0, 0.0], [0.0; 3], red, 6.0, lim);
         // Faint star: mid-mesopic, channels pulled toward the scotopic grey
         // of the input. The red channel must drop (rods don't see red);
         // the blue channel must rise (rod sensitivity peak near 507 nm).

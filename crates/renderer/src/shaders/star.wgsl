@@ -6,6 +6,11 @@ struct CameraUniform {
     inv_view_proj: mat4x4<f32>,
     eq_to_local: mat4x4<f32>,
     view_proj_local: mat4x4<f32>,
+    j2000_to_date: mat4x4<f32>,
+    // [Earth velocity x/c, y/c, z/c, years since J2000.0 TT].
+    aberration_pm: vec4<f32>,
+    // [pressure_hpa, temperature_c, unused, unused].
+    refraction_params: vec4<f32>,
     // [viewport_width, viewport_height, pixel_solid_angle_sr, magnitude_zeropoint].
     viewport_pixel_sr_zeropoint: vec4<f32>,
     // Local zenith expressed in J2000 equatorial coordinates. Dotted with
@@ -71,12 +76,27 @@ fn refracted_altitude_rad(true_altitude_rad: f32) -> f32 {
     if alt_deg < -1.0 || alt_deg > 89.9 {
         return true_altitude_rad;
     }
-    let r_arcmin = 1.02 / tan((alt_deg + 10.3 / (alt_deg + 5.11)) * (3.14159265359 / 180.0));
+    let pressure_scale = max(camera.refraction_params.x, 0.0) / 1010.0;
+    let temp_k = max(273.0 + camera.refraction_params.y, 150.0);
+    let weather_scale = pressure_scale * 283.0 / temp_k;
+    let r_arcmin = 1.02 / tan((alt_deg + 10.3 / (alt_deg + 5.11)) * (3.14159265359 / 180.0)) * weather_scale;
     return true_altitude_rad + (r_arcmin / 60.0) * (3.14159265359 / 180.0);
 }
 
-fn refract_equatorial_direction(eq_dir: vec3<f32>) -> vec3<f32> {
-    let local = (camera.eq_to_local * vec4<f32>(eq_dir, 0.0)).xyz;
+fn apply_annual_aberration(eq_j2000_dir: vec3<f32>) -> vec3<f32> {
+    let beta = camera.aberration_pm.xyz;
+    let dot_beta = dot(eq_j2000_dir, beta);
+    return normalize(eq_j2000_dir + beta - dot_beta * eq_j2000_dir);
+}
+
+fn corrected_j2000_direction(position: vec3<f32>, proper_motion: vec3<f32>) -> vec3<f32> {
+    let years = camera.aberration_pm.w;
+    let moved = normalize(position + proper_motion * years);
+    return apply_annual_aberration(moved);
+}
+
+fn refract_equatorial_direction(eq_date_dir: vec3<f32>) -> vec3<f32> {
+    let local = (camera.eq_to_local * vec4<f32>(eq_date_dir, 0.0)).xyz;
     let true_alt = asin(clamp(local.z, -1.0, 1.0));
     let apparent_alt = refracted_altitude_rad(true_alt);
     let az = atan2(local.x, local.y);
@@ -90,6 +110,7 @@ struct VertexInput {
     @location(2) star_size: f32,         // per-instance pixel half-width of the sprite quad
     @location(3) star_color: vec3<f32>,  // per-instance RGB color
     @location(4) star_brightness: f32,   // per-instance peak intensity multiplier
+    @location(5) proper_motion: vec3<f32>, // per-instance Cartesian radians/year tangent
 };
 
 struct VertexOutput {
@@ -106,9 +127,11 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
     let k_rgb = camera.extinction_k_rgb.xyz;
     let atmosphere_active = k_rgb.x + k_rgb.y + k_rgb.z > 0.0;
+    let corrected_j2000 = corrected_j2000_direction(input.star_pos, input.proper_motion);
+    let corrected_date = (camera.j2000_to_date * vec4<f32>(corrected_j2000, 0.0)).xyz;
     let clip = select(
-        camera.view_proj * vec4<f32>(input.star_pos, 1.0),
-        camera.view_proj_local * vec4<f32>(refract_equatorial_direction(input.star_pos), 1.0),
+        camera.view_proj * vec4<f32>(corrected_j2000, 1.0),
+        camera.view_proj_local * vec4<f32>(refract_equatorial_direction(corrected_date), 1.0),
         atmosphere_active,
     );
 
@@ -128,7 +151,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     // no-op identity rather than a hidden "horizon = invisible" rule.
     var attenuated_color = input.star_color;
     if atmosphere_active {
-        let sin_alt = clamp(dot(input.star_pos, camera.zenith_eq.xyz), -1.0, 1.0);
+        let sin_alt = clamp(dot(corrected_j2000, camera.zenith_eq.xyz), -1.0, 1.0);
         let alt_rad = asin(sin_alt);
         attenuated_color = input.star_color * atmospheric_attenuation(alt_rad, k_rgb);
     }

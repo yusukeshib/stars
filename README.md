@@ -55,12 +55,13 @@ That missing piece is tracked in Phase 2, after the Sun and Moon have apparent
 topocentric positions. The goal is for sky colour to be driven by physical
 illuminants and atmosphere parameters rather than by hard-coded gradients.
 
-**Current highest priority:** continue the remaining Phase 2 positional-
-precision work (precession, nutation, aberration, proper motion, and
-refraction). The Phase 1' dark-sky atmosphere, Phase 2 time systems, and the
-Phase 2 atmosphere illuminant/scattering ladder are now complete. A row is
-`✅ done` only when the model named in its references is implemented,
-documented, tested, and wired into all hosts.
+**Current highest priority:** continue the remaining Phase 2 solar-system and
+planning work (planets, Moon phase / Earth-shadow, rise-transit-set tables,
+twilight indicators, and session URLs). The Phase 1' dark-sky atmosphere,
+Phase 2 time systems, Phase 2 atmosphere illuminant/scattering ladder, and the
+core stellar apparent-place corrections are now complete. A row is `✅ done`
+only when the model named in its references is implemented, documented, tested,
+and wired into all hosts.
 
 ### Atmosphere implementation ladder
 
@@ -82,7 +83,7 @@ is split into independently shippable rungs:
    with the model limits.
 
 There are currently no `⏳ next` atmosphere rows; the active Phase 2 queue has
-moved back to positional precision.
+moved on to solar-system bodies and planning UI.
 
 ---
 
@@ -124,11 +125,11 @@ Columns:
 | `P1P-10` | 1' | **Per-fragment rod/cone tone reproduction** — tonemap computes fragment-local adaptation luminance, selects rod/cone response from the local CIE 191 mesopic state, and feeds the result through the Reinhard keyed operator | Pattanaik et al. 1998, SIGGRAPH '98; Ferwerda et al. 1996, SIGGRAPH '96; Durand & Dorsey 2002 (edge-aware local-adaptation refinement) | ✅ done (`shaders/tonemap.wgsl`) |
 | `P1P-11` | 1' | **Catalogue colour pipeline upgrade** — B−V → T_eff → blackbody spectrum → CIE 1931 XYZ → sRGB, replacing the current piecewise-polynomial fit so the photopic input to the mesopic blend is physically calibrated | Ballesteros, F. J. 2012, EPL 97, 34008 | ✅ done (`catalog::color`) |
 | `P2-01` | 2 | **Time systems** — separate UTC, UT1, TT, TAI; expose TDB for ephemerides | Built-in IERS/USNO leap-second table, explicit DUT1, TT, and approximate TDB exposed through `astronomy::TimeScales` and wired into all hosts | ✅ done (`astronomy::time`, `astronomy::Observer`) |
-| `P2-02` | 2 | **Precession** — star positions of date instead of J2000 | IAU 2006 (P03) | ⬜ |
-| `P2-03` | 2 | **Nutation** — ~9″ accuracy | IAU 2000A or 2000B | ⬜ |
-| `P2-04` | 2 | **Annual aberration** — up to 20″ | Standard formulas; folds into the equatorial→ENU matrix | ⬜ |
-| `P2-05` | 2 | **Stellar proper motion** — apply HYG's `pmra` / `pmdec` when epoch ≠ catalog epoch | HYG carries the columns already | ⬜ |
-| `P2-06` | 2 | **Atmospheric refraction** — up to 34′ at the horizon | Saemundsson 1986-style stellar apparent-altitude correction is implemented in `shaders/star.wgsl` when atmosphere is enabled; remaining work is weather/pressure controls plus Sun/Moon disk refraction before this can be marked done | ⬜ |
+| `P2-02` | 2 | **Precession** — star positions of date instead of J2000 | IAU 2006 (P03) Fukushima-Williams precession matrix in `astronomy::corrections`, applied in the renderer camera uniform | ✅ done (`astronomy::corrections`, `renderer::camera`, `shaders/star.wgsl`) |
+| `P2-03` | 2 | **Nutation** — ~9″ accuracy | Compact IAU-2000-style dominant luni-solar terms in `astronomy::corrections`, with equation-of-equinoxes sidereal-time wiring | ✅ done (`astronomy::corrections`, `renderer::camera`) |
+| `P2-04` | 2 | **Annual aberration** — up to 20″ | First-order annual aberration from Earth orbital velocity, uploaded per frame and applied in the star shader | ✅ done (`astronomy::corrections`, `shaders/star.wgsl`) |
+| `P2-05` | 2 | **Stellar proper motion** — apply HYG's `pmra` / `pmdec` when epoch ≠ catalog epoch | HYG `pmrarad` / `pmdecrad` are converted to Cartesian tangent vectors in both CSV and embedded catalogs and evaluated per frame | ✅ done (`catalog::coords`, `catalog::catalog`, `renderer::vertex`, `shaders/star.wgsl`) |
+| `P2-06` | 2 | **Atmospheric refraction** — up to 34′ at the horizon | Saemundsson 1986-style apparent-altitude correction with pressure/temperature controls, applied to stars plus Sun/Moon disk directions | ✅ done (`astronomy::corrections`, `renderer::Atmosphere`, `renderer::camera`, `shaders/star.wgsl`, `apps/{cli,viewer,web}`) |
 | `P2-07` | 2 | **Sun, Moon** — apparent topocentric direction, angular radius, phase, and disk rendering inputs | VSOP87/FK5 Sun + ELP2000-style Moon from `astro`, followed by WGS84 topocentric parallax; feeds scattering, twilight, moon phase, and disk rendering | ✅ done (`astronomy::ephemeris`, `renderer::skyglow`) |
 | `P2-08` | 2 | **Solar / lunar illuminants** — spectral or XYZ irradiance for direct sunlight and moonlight at the top of the atmosphere | CIE daylight-basis / ASTM G-173-scale solar XYZ irradiance plus Krisciunas & Schaefer 1991 lunar phase photometry exposed as lux and XYZ | ✅ done (`astronomy::illuminants`) |
 | `P2-09` | 2 | **Sunlit atmospheric scattering / sky colour** — Rayleigh + Mie aerosol + ozone absorption sky model driven by Sun altitude, view direction, observer altitude, and turbidity; produces blue daylight, golden-hour warmth, sunset reddening, and horizon haze | Preetham, Shirley & Smits 1999 daylight/Perez model, with renderer ozone and visibility controls plus Rust reference tests for daylight-domain luminance | ✅ done (`astronomy::atmosphere`, `shaders/skyglow.wgsl`) |

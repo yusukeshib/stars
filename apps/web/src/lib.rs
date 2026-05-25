@@ -106,7 +106,15 @@ impl StarView {
         log::info!("Loaded {} stars", stars.len());
         let instances: Vec<StarInstance> = stars
             .iter()
-            .map(|s| build_star_instance(s.position.into(), s.color, s.magnitude, LIMITING_MAGNITUDE))
+            .map(|s| {
+                build_star_instance(
+                    s.position.into(),
+                    s.proper_motion.into(),
+                    s.color,
+                    s.magnitude,
+                    LIMITING_MAGNITUDE,
+                )
+            })
             .collect();
 
         let renderer = Renderer::new(&device, format, width, height, &instances);
@@ -247,6 +255,8 @@ impl StarView {
         observer_altitude_m: f32,
         ozone_du: f32,
         visibility_km: f32,
+        pressure_hpa: f32,
+        temperature_c: f32,
     ) {
         self.state.borrow_mut().camera.atmosphere = if enabled {
             let mut atmosphere = AtmospherePreset::from_kebab_str(&preset)
@@ -256,6 +266,8 @@ impl StarView {
             atmosphere.observer_altitude_m = observer_altitude_m;
             atmosphere.ozone_du = ozone_du;
             atmosphere.visibility_km = visibility_km;
+            atmosphere.pressure_hpa = pressure_hpa;
+            atmosphere.temperature_c = temperature_c;
             atmosphere
         } else {
             Atmosphere::OFF

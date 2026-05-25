@@ -9,7 +9,7 @@ use renderer::{
 };
 use stars_host_common::{
     atmosphere_from_args, load_star_instances_from_file, overlay_config_from_args,
-    parse_time_to_time_scales, AtmospherePresetArg, OverlayArg,
+    parse_time_to_time_scales, AtmosphereOverrides, AtmospherePresetArg, OverlayArg,
 };
 
 /// Render the night sky as seen from a given observer to a PNG.
@@ -119,6 +119,14 @@ struct Args {
     #[arg(long)]
     visibility_km: Option<f32>,
 
+    /// Override surface pressure in hPa for atmospheric refraction.
+    #[arg(long)]
+    pressure_hpa: Option<f32>,
+
+    /// Override air temperature in °C for atmospheric refraction.
+    #[arg(long, allow_hyphen_values = true)]
+    temperature_c: Option<f32>,
+
     /// Disable the diffuse-sky (integrated starlight + diffuse galactic
     /// light) skyglow pass. With the default (skyglow on), the sky
     /// background includes the analytic Leinert et al. 1998 model so the
@@ -161,10 +169,14 @@ fn main() -> Result<()> {
     let atmosphere = atmosphere_from_args(
         args.no_extinction,
         args.atmosphere_preset,
-        args.turbidity,
-        args.observer_altitude_m,
-        args.ozone_du,
-        args.visibility_km,
+        AtmosphereOverrides {
+            turbidity: args.turbidity,
+            observer_altitude_m: args.observer_altitude_m,
+            ozone_du: args.ozone_du,
+            visibility_km: args.visibility_km,
+            pressure_hpa: args.pressure_hpa,
+            temperature_c: args.temperature_c,
+        },
     );
     let skyglow_enabled = !args.no_skyglow;
 
