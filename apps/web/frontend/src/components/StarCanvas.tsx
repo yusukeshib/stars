@@ -14,6 +14,7 @@ type StarViewHandle = {
     visibilityKm: number,
   ) => void;
   resize: (w: number, h: number) => void;
+  sun_altitude_deg: () => number;
   render_frame: () => void;
 };
 
@@ -26,6 +27,7 @@ type Props = {
   atmosphere: AtmosphereConfig;
   onDrag: (deltaAzDeg: number, deltaAltDeg: number) => void;
   onWheel: (zoomFactor: number) => void;
+  onSunAltitude: (sunAltitudeDeg: number) => void;
 };
 
 type PointerPoint = { x: number; y: number };
@@ -40,7 +42,16 @@ function firstTwoPointers(points: Map<number, PointerPoint>): [PointerPoint, Poi
   return [first.value, second.value];
 }
 
-export function StarCanvas({ observer, view, timeMs, overlays, atmosphere, onDrag, onWheel }: Props) {
+export function StarCanvas({
+  observer,
+  view,
+  timeMs,
+  overlays,
+  atmosphere,
+  onDrag,
+  onWheel,
+  onSunAltitude,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const handleRef = useRef<StarViewHandle | null>(null);
   const activePointers = useRef<Map<number, PointerPoint>>(new Map());
@@ -106,11 +117,17 @@ export function StarCanvas({ observer, view, timeMs, overlays, atmosphere, onDra
         at.visibilityKm,
       );
 
-      const tick = () => {
+      let lastSunAltitudePublish = 0;
+      const tick = (now: number) => {
         if (cancelled) return;
         const o = observerRef.current;
         const v = viewRef.current;
         handle.set_observer(o.latitudeDeg, o.longitudeDeg, timeRef.current);
+        if (now - lastSunAltitudePublish > 1000) {
+          lastSunAltitudePublish = now;
+          const sunAltitudeDeg = handle.sun_altitude_deg();
+          if (Number.isFinite(sunAltitudeDeg)) onSunAltitude(sunAltitudeDeg);
+        }
         handle.set_view(toRad(v.azimuthDeg), toRad(v.altitudeDeg), toRad(v.fovDeg));
         handle.render_frame();
         raf = requestAnimationFrame(tick);

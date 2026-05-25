@@ -1,7 +1,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use astronomy::{julian_date_from_unix_seconds, Observer};
+use astronomy::{
+    apparent_sun_topocentric, equatorial_to_horizontal, julian_date_from_unix_seconds,
+    lmst_radians, Observer,
+};
 use catalog::load_embedded;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, LocalView, OverlayConfig,
@@ -136,6 +139,26 @@ impl StarView {
     pub fn set_observer(&self, lat_deg: f64, lng_deg: f64, time_unix_ms: f64) {
         let jd = julian_date_from_unix_seconds(time_unix_ms / 1000.0);
         self.state.borrow_mut().camera.observer = Observer::from_degrees(lat_deg, lng_deg, jd);
+    }
+
+    /// Current apparent topocentric Sun altitude, in degrees.
+    ///
+    /// The HUD uses this for daylight/twilight labels so the user-visible sky
+    /// state is derived from the same Rust ephemeris and UT1≈UTC convention as
+    /// the renderer's daylight, twilight, and disk inputs. Keeping the formula
+    /// here avoids a second, drifting JavaScript solar-position implementation.
+    pub fn sun_altitude_deg(&self) -> f64 {
+        let observer = self.state.borrow().camera.observer;
+        let sun = apparent_sun_topocentric(observer);
+        let lst = lmst_radians(observer.julian_date, observer.longitude_rad);
+        equatorial_to_horizontal(
+            sun.right_ascension_rad,
+            sun.declination_rad,
+            lst,
+            observer.latitude_rad,
+        )
+        .altitude
+        .to_degrees()
     }
 
     /// Update the active overlay layers. `layers` is a list of kebab-case names

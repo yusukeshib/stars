@@ -18,10 +18,10 @@ web-build:
 	wasm-pack build apps/web --target web --out-dir frontend/pkg
 
 web-install:
-	bun install
+	cd apps/web/frontend && bun install
 
 web-dev:
-	bun run dev
+	cd apps/web/frontend && bun run dev
 
 # Download star catalog
 setup: web-build web-install
@@ -35,12 +35,12 @@ clippy:
 	cargo clippy --all-targets -- -D warnings
 
 test:
-	cargo test
+	cargo test --workspace
 
 ci: fmt
 	cargo fmt --all -- --check
 	cargo clippy --all-targets -- -D warnings
-	cargo test
+	cargo test --workspace
 	cargo check -p stars-web --target wasm32-unknown-unknown --manifest-path apps/web/Cargo.toml
 
 # Clean

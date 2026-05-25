@@ -54,9 +54,11 @@ Coordinate conventions (all crates agree):
 - Local frame is **ENU** (East, North, Up). Observer latitude is treated as
   geodetic for topocentric solar-system parallax and as astronomical/geographic
   for stellar ENU projection; the distinction is below Phase 1 star precision.
-- Azimuth is from **North toward East**; altitude is **geometric** altitude above
-  the horizon (radians). Atmospheric extinction is modeled, but atmospheric
-  refraction is not yet applied.
+- Azimuth is from **North toward East**. Catalog and overlay altitudes are
+  geometric by definition; when the renderer's atmosphere is enabled, the star
+  shader applies a standard-pressure/temperature Saemundsson-style stellar
+  refraction correction before projection. Refraction for the Sun/Moon disks
+  and configurable weather inputs remain Phase 2 follow-up work.
 
 ---
 

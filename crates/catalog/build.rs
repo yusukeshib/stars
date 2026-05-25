@@ -14,6 +14,11 @@ struct RawStar {
 }
 
 const MAX_MAGNITUDE: f64 = 8.0;
+/// Keep the embedded catalog's distance filter in lock-step with the runtime
+/// CSV loader: HYG uses `dist = 100000` as the sentinel for missing / invalid
+/// parallax, and the synthetic Sun row has `dist = 0`. Neither belongs in the
+/// background star catalog baked into the WASM bundle.
+const MIN_DISTANCE_PC: f64 = 0.0;
 const MAX_DISTANCE_PC: f64 = 100_000.0;
 const MAGIC: &[u8; 8] = b"STRBIN1\0";
 
@@ -40,7 +45,10 @@ fn main() {
         if raw.mag > MAX_MAGNITUDE {
             continue;
         }
-        if raw.dist.is_some_and(|dist| dist >= MAX_DISTANCE_PC) {
+        if raw
+            .dist
+            .is_some_and(|dist| dist <= MIN_DISTANCE_PC || dist >= MAX_DISTANCE_PC)
+        {
             continue;
         }
 
