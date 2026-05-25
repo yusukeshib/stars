@@ -11,7 +11,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use astronomy::TimeScales;
-use catalog::load_from_file;
+use catalog::{load_from_file, CatalogSource};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
@@ -345,6 +345,19 @@ pub fn load_star_instances_from_file(
         .collect())
 }
 
+/// Build the session catalog snapshot for the current HYG CSV backend.
+pub fn hyg_catalog_snapshot(path: impl AsRef<Path>, limiting_magnitude: f32) -> CatalogSnapshot {
+    let source = CatalogSource::HYG_CSV;
+    CatalogSnapshot {
+        backend: source.backend.as_kebab_str().to_string(),
+        source: source.name.to_string(),
+        version: source.version.map(str::to_string),
+        path: Some(path.as_ref().display().to_string()),
+        hash: None,
+        limiting_magnitude,
+    }
+}
+
 fn parse_time_to_unix_seconds(time: Option<&str>) -> Result<f64> {
     let unix_seconds = match time {
         Some(s) => {
@@ -549,6 +562,19 @@ mod tests {
         );
         assert_eq!(off.extinction_k_rgb, Atmosphere::OFF.extinction_k_rgb);
         assert!(!off.sunlit_scattering);
+    }
+
+    #[test]
+    fn hyg_catalog_snapshot_uses_catalog_source_metadata() {
+        let snapshot = hyg_catalog_snapshot("crates/catalog/data/hyg_v42.csv", 7.5);
+        assert_eq!(snapshot.backend, "hyg-csv");
+        assert_eq!(snapshot.source, "HYG");
+        assert_eq!(snapshot.version.as_deref(), Some("4.2"));
+        assert_eq!(
+            snapshot.path.as_deref(),
+            Some("crates/catalog/data/hyg_v42.csv")
+        );
+        assert_eq!(snapshot.limiting_magnitude, 7.5);
     }
 
     #[test]

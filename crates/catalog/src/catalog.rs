@@ -3,9 +3,13 @@ use serde::Deserialize;
 
 use crate::color::bv_to_rgb;
 use crate::coords::{proper_motion_vector_radians_per_year, radec_hours_deg_to_cartesian};
+use crate::CatalogIdentifiers;
 
 #[derive(Debug, Deserialize)]
 struct RawStar {
+    id: Option<u32>,
+    hip: Option<u32>,
+    hd: Option<u32>,
     ra: f64,
     dec: f64,
     dist: Option<f64>,
@@ -17,6 +21,11 @@ struct RawStar {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Star {
+    /// Stable catalog identifiers associated with this star when the backend
+    /// can supply them. The current HYG CSV path preserves HYG / Hipparcos / HD
+    /// numeric IDs; compact embedded catalogs omit IDs until Phase 3 identifier
+    /// preservation is wired through the renderer.
+    pub identifiers: CatalogIdentifiers,
     pub position: Vec3,
     /// Heliocentric distance in parsecs from HYG's `dist` column. Earth-centred
     /// sky rendering uses only [`Self::position`], but Phase-4 external
@@ -31,7 +40,7 @@ pub struct Star {
     pub color: [f32; 3],
 }
 
-const MAX_MAGNITUDE: f64 = 8.0;
+pub(crate) const DEFAULT_MAX_MAGNITUDE: f32 = 8.0;
 /// HYG fills its `dist` (parsecs) column with the sentinel value `100000` for
 /// rows where the parallax is missing, negative, or numerically meaningless.
 /// We drop those rows: their on-sky position may still be fine, but using
@@ -71,7 +80,7 @@ pub fn load_from_csv(data: &str) -> Vec<Star> {
             }
         };
 
-        if raw.mag > MAX_MAGNITUDE {
+        if raw.mag > DEFAULT_MAX_MAGNITUDE as f64 {
             continue;
         }
         let distance_pc = match raw.dist {
@@ -84,6 +93,7 @@ pub fn load_from_csv(data: &str) -> Vec<Star> {
         };
 
         stars.push(Star {
+            identifiers: CatalogIdentifiers::from_hyg_row(raw.id, raw.hip, raw.hd),
             position: radec_hours_deg_to_cartesian(raw.ra, raw.dec),
             distance_pc,
             proper_motion: proper_motion_vector_radians_per_year(
@@ -97,7 +107,10 @@ pub fn load_from_csv(data: &str) -> Vec<Star> {
         });
     }
 
-    log::info!("Loaded {} stars (mag <= {MAX_MAGNITUDE})", stars.len());
+    log::info!(
+        "Loaded {} stars (mag <= {DEFAULT_MAX_MAGNITUDE})",
+        stars.len()
+    );
     stars
 }
 
@@ -139,6 +152,7 @@ fn load_from_binary(data: &[u8]) -> Result<Vec<Star>, String> {
         );
         let distance_pc = decode_f32(record, 22);
         stars.push(Star {
+            identifiers: CatalogIdentifiers::default(),
             position: Vec3::new(x, y, z).normalize_or_zero(),
             distance_pc,
             proper_motion,
@@ -176,8 +190,15 @@ fn decode_f32(record: &[u8], offset: usize) -> f32 {
 
 #[cfg(feature = "filesystem")]
 pub fn load_from_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<Star>> {
-    let data = std::fs::read_to_string(path.as_ref())?;
-    Ok(load_from_csv(&data))
+    use crate::{CatalogBackend, CatalogError, CatalogQuery, HygCsvBackend};
+
+    let backend = HygCsvBackend::new(path.as_ref().to_path_buf());
+    backend
+        .load(CatalogQuery::default())
+        .map(|page| page.stars)
+        .map_err(|error| match error {
+            CatalogError::Io(error) => error,
+        })
 }
 
 #[cfg(test)]
@@ -193,6 +214,9 @@ mod tests {
         );
         let stars = load_from_csv(&csv);
         assert_eq!(stars.len(), 1);
+        assert_eq!(stars[0].identifiers.hyg, Some(1));
+        assert_eq!(stars[0].identifiers.hip, Some(1));
+        assert_eq!(stars[0].identifiers.hd, Some(224700));
         assert!((stars[0].magnitude - (-1.46)).abs() < 0.01);
         assert!((stars[0].distance_pc - 2.637).abs() < 0.001);
         assert!(stars[0].position.length() > 0.99);
@@ -207,7 +231,11 @@ mod tests {
              2,2,,,,,Star2,0.0,0.0,10.0,0.0,0.0,0.0,9.0,0.0,G2V,0.0,0,0,0,0,0,0,0,0,0,0,,,Psc,1,1,,1.0,,,\n"
         );
         let stars = load_from_csv(&csv);
-        assert_eq!(stars.len(), 1, "should filter mag > {MAX_MAGNITUDE}");
+        assert_eq!(
+            stars.len(),
+            1,
+            "should filter mag > {DEFAULT_MAX_MAGNITUDE}"
+        );
     }
 
     #[test]

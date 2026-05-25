@@ -17,8 +17,9 @@ Implemented phase groups:
 - Phase 2 time systems, apparent-place corrections, atmosphere, solar-system
   bodies, and planning UI.
 - Phase 3 schema-versioned JSON sessions, deterministic scene presets,
-  notebook reproducibility examples, a validation/demo gallery workflow,
-  citation metadata, and standards-compliance notes.
+  notebook reproducibility examples, catalog-backend scaling scaffold/design, a
+  validation/demo gallery workflow, citation metadata, and standards-compliance
+  notes.
 - Phase 4 full-sky projections and external galactic viewpoint.
 
 Still open:
@@ -318,6 +319,40 @@ Validation:
   documentation-only change;
 - the standards page cross-references the implementation files that contain the
   pinned numerical tests.
+
+### Catalog backend scaling scaffold
+
+Implemented the P3-00 catalog scaling seam before large catalog ingest. The
+current product remains HYG-backed, but future Hipparcos / Tycho-2 / Gaia DR3
+work now has explicit API and documentation boundaries.
+
+Shipped capabilities:
+
+- `CatalogBackend` trait with `CatalogQuery`, `CatalogPage`, and
+  `CatalogSource` metadata;
+- stable backend names for HYG CSV and embedded HYG sources;
+- CPU-side `CatalogIdentifiers` / `CatalogObjectId` fields on `Star` rows for
+  HYG, HIP, HD, Tycho-2, and Gaia DR3-style numeric IDs;
+- `HygCsvBackend` adapter used by the existing filesystem `load_from_file`
+  compatibility helper, plus `HygEmbeddedBackend` for compact embedded builds;
+- source-side magnitude / row-limit query shape, with paging fields reserved for
+  larger LOD backends;
+- `docs/catalog-backend-design.md` covering identifier policy, LOD / spatial
+  index strategy, streaming / paging, and WASM subset constraints.
+
+Primary implementation areas:
+
+- `crates/catalog/src/backend.rs`;
+- `crates/catalog/src/catalog.rs`;
+- `docs/catalog-backend-design.md`;
+- `ARCHITECTURE.md`.
+
+Validation:
+
+- catalog tests pin backend source labels, identifier preservation, and HYG
+  query filtering / truncation;
+- native session snapshot helpers now derive HYG backend/source/version strings
+  from `CatalogSource::HYG_CSV`.
 
 ### Scene presets, notebook examples, and validation gallery
 

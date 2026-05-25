@@ -10,9 +10,9 @@ between engine crates and host applications.
 ```txt
 ┌─────────────────────────────┐      ┌─────────────────────────────┐
 │ crates/astronomy            │      │ crates/catalog              │
-│  time scales                │      │  HYG CSV / embedded catalog │
-│  observer / local frame     │      │  Star records               │
-│  corrections                │      │  B-V colour conversion      │
+│  time scales                │      │  CatalogBackend trait       │
+│  observer / local frame     │      │  HYG CSV / embedded catalog │
+│  corrections                │      │  Star records + identifiers │
 │  Sun/Moon/planet apparent   │      │  proper-motion vectors      │
 │  atmosphere / skyglow       │      └──────────────┬──────────────┘
 │  planning helpers           │                     │
@@ -65,14 +65,19 @@ argument parsing.
 
 Owns star catalog ingestion and catalog-space conversions:
 
-- `load_from_csv(&str)` for generic CSV content;
-- `load_from_file(path)` behind the `filesystem` feature;
+- `CatalogBackend`, `CatalogQuery`, `CatalogPage`, and `CatalogSource` as the
+  Phase 3 backend seam for larger catalogs;
+- `HygCsvBackend` for filesystem-backed HYG loading;
+- `load_from_csv(&str)` and `load_from_file(path)` compatibility helpers;
 - `load_embedded()` behind the `embedded` feature;
 - HYG row filtering and conversion into `Star` records;
+- CPU-side `CatalogIdentifiers` for HYG / HIP / HD now, with Tycho-2 / Gaia DR3
+  slots reserved for later ingest;
 - B−V colour conversion and RA/Dec-to-Cartesian helpers.
 
 Catalog stars are renderer-independent. They should not know about `wgpu`,
-window size, camera state, or UI labels.
+window size, camera state, or UI labels. Large-catalog storage, paging, and LOD
+rules are specified in [`docs/catalog-backend-design.md`](docs/catalog-backend-design.md).
 
 ### `crates/renderer`
 
@@ -168,7 +173,9 @@ A typical frame is:
 
 1. Host parses UI / CLI state into observer, time, view, overlays, atmosphere,
    optional telescope eyepiece optics, and optional planning settings.
-2. Catalog stars are loaded into `catalog::Star` records.
+2. Catalog stars are loaded through a catalog backend into `catalog::Star`
+   records. The current native path uses `HygCsvBackend`; the web path uses the
+   compact embedded HYG artifact.
 3. Host or `crates/common` converts each star into `renderer::StarInstance`
    with perceptual radius, brightness, colour, and proper-motion fields.
 4. Host creates or resizes the `wgpu` surface / target texture.
@@ -370,6 +377,8 @@ apparent_planets_topocentric(...)
 evening_plan(...)
 
 // catalog
+CatalogBackend::load(CatalogQuery) -> Result<CatalogPage, CatalogError>
+CatalogSource::{HYG_CSV, HYG_EMBEDDED}
 load_from_csv(&str) -> Vec<Star>
 load_from_file(path) -> io::Result<Vec<Star>>   // feature = "filesystem"
 load_embedded() -> Vec<Star>                    // feature = "embedded"

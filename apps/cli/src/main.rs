@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 use astronomy::Observer;
@@ -8,11 +8,11 @@ use renderer::{
     DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
-    atmosphere_from_args, eyepiece_from_args, load_session, load_star_instances_from_file,
-    overlay_config_from_args, parse_time_to_time_scales, save_session, scene_from_preset,
-    scene_preset_infos, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
-    CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides, OverlayArg,
-    ProjectionArg, ScenePresetArg, SessionScene, StarSession, ViewpointArg,
+    atmosphere_from_args, eyepiece_from_args, hyg_catalog_snapshot, load_session,
+    load_star_instances_from_file, overlay_config_from_args, parse_time_to_time_scales,
+    save_session, scene_from_preset, scene_preset_infos, viewpoint_from_args, AtmosphereOverrides,
+    AtmospherePresetArg, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides,
+    OverlayArg, ProjectionArg, ScenePresetArg, SessionScene, StarSession, ViewpointArg,
 };
 
 /// Render the night sky as seen from a given observer to a PNG.
@@ -287,7 +287,7 @@ fn main() -> Result<()> {
                     field_stop_mm: args.eyepiece_field_stop_mm,
                 },
             ),
-            catalog: catalog_snapshot(&args.catalog, args.limiting_magnitude),
+            catalog: hyg_catalog_snapshot(&args.catalog, args.limiting_magnitude),
             corrections: CorrectionSnapshot::for_scene(atmosphere),
         }
     };
@@ -367,17 +367,6 @@ fn print_scene_presets() {
             info.title,
             info.validation_focus
         );
-    }
-}
-
-fn catalog_snapshot(path: &Path, limiting_magnitude: f32) -> CatalogSnapshot {
-    CatalogSnapshot {
-        backend: "hyg-csv".to_string(),
-        source: "HYG".to_string(),
-        version: Some("4.2".to_string()),
-        path: Some(path.display().to_string()),
-        hash: None,
-        limiting_magnitude,
     }
 }
 
