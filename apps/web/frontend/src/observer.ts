@@ -48,6 +48,8 @@ export type AtmosphereConfig = {
   observerAltitudeM: number;
   ozoneDu: number;
   visibilityKm: number;
+  pressureHpa: number;
+  temperatureC: number;
 };
 
 export const DEFAULT_ATMOSPHERE_CONFIG: AtmosphereConfig = {
@@ -57,12 +59,14 @@ export const DEFAULT_ATMOSPHERE_CONFIG: AtmosphereConfig = {
   observerAltitudeM: 0,
   ozoneDu: 300,
   visibilityKm: 50,
+  pressureHpa: 1010,
+  temperatureC: 10,
 };
 
-export const ATMOSPHERE_PRESET_DEFAULTS: Record<AtmospherePreset, Pick<AtmosphereConfig, "turbidity" | "observerAltitudeM" | "ozoneDu" | "visibilityKm">> = {
-  "clear-rural": { turbidity: 2.5, observerAltitudeM: 0, ozoneDu: 300, visibilityKm: 50 },
-  "hazy-urban": { turbidity: 5.0, observerAltitudeM: 0, ozoneDu: 325, visibilityKm: 12 },
-  "high-altitude": { turbidity: 2.0, observerAltitudeM: 2500, ozoneDu: 275, visibilityKm: 80 },
+export const ATMOSPHERE_PRESET_DEFAULTS: Record<AtmospherePreset, Pick<AtmosphereConfig, "turbidity" | "observerAltitudeM" | "ozoneDu" | "visibilityKm" | "pressureHpa" | "temperatureC">> = {
+  "clear-rural": { turbidity: 2.5, observerAltitudeM: 0, ozoneDu: 300, visibilityKm: 50, pressureHpa: 1010, temperatureC: 10 },
+  "hazy-urban": { turbidity: 5.0, observerAltitudeM: 0, ozoneDu: 325, visibilityKm: 12, pressureHpa: 1010, temperatureC: 15 },
+  "high-altitude": { turbidity: 2.0, observerAltitudeM: 2500, ozoneDu: 275, visibilityKm: 80, pressureHpa: 750, temperatureC: 0 },
 };
 
 export const ATMOSPHERE_PRESET_LABELS: Record<AtmospherePreset, string> = {

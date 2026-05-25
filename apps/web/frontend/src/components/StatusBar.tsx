@@ -311,6 +311,32 @@ export function StatusBar({
                 onSetAtmosphere({ ...atmosphere, visibilityKm: clamp(visibilityKm, 1, 200) })
               }
             />
+            <SliderNumberRow
+              id="atmosphere-pressure"
+              label="Pressure (hPa)"
+              value={atmosphere.pressureHpa}
+              min={0}
+              max={1100}
+              step={10}
+              decimals={0}
+              disabled={!atmosphere.enabled}
+              onChange={(pressureHpa) =>
+                onSetAtmosphere({ ...atmosphere, pressureHpa: clamp(pressureHpa, 0, 1100) })
+              }
+            />
+            <SliderNumberRow
+              id="atmosphere-temperature"
+              label="Temperature (°C)"
+              value={atmosphere.temperatureC}
+              min={-80}
+              max={60}
+              step={1}
+              decimals={0}
+              disabled={!atmosphere.enabled}
+              onChange={(temperatureC) =>
+                onSetAtmosphere({ ...atmosphere, temperatureC: clamp(temperatureC, -80, 60) })
+              }
+            />
           </Section>
           <p style={{ margin: "14px 0 0", fontSize: 11, opacity: 0.45 }}>
             drag the sky to look around · scroll to zoom

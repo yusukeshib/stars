@@ -1,6 +1,8 @@
 use astronomy::photometry::DEFAULT_EXTINCTION_K_RGB;
 use astronomy::{
-    equatorial_to_horizontal_matrix, illuminants, lmst_radians, Observer, SunMoonApparent,
+    earth_velocity_over_c_j2000, equation_of_equinoxes, equatorial_to_horizontal_matrix,
+    illuminants, lmst_radians, precession_nutation_matrix, years_since_j2000, Observer,
+    SunMoonApparent,
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -28,6 +30,15 @@ pub(crate) struct CameraUniform {
     /// View-projection matrix for local ENU geometry. Refracted star positions
     /// are local apparent directions, not unrefracted equatorial directions.
     pub view_proj_local: [[f32; 4]; 4],
+    /// IAU 2006 precession + compact IAU-2000 nutation matrix from J2000
+    /// equatorial vectors into the true equator/equinox of date.
+    pub j2000_to_date: [[f32; 4]; 4],
+    /// `[Earth velocity x/c, y/c, z/c, years since J2000.0 TT]` for annual
+    /// aberration and catalogue proper motion in the star shader.
+    pub aberration_pm: [f32; 4],
+    /// `[pressure_hpa, temperature_c, unused, unused]` for Saemundsson
+    /// atmospheric refraction scaling.
+    pub refraction_params: [f32; 4],
     /// `[viewport_width, viewport_height, pixel_solid_angle_sr, magnitude_zeropoint]`.
     /// Packed into one `vec4` for WGSL 16-byte alignment.
     ///
@@ -121,6 +132,12 @@ pub struct Atmosphere {
     /// Meteorological visibility in kilometres. This controls Mie/aerosol haze
     /// independently from the named turbidity presets.
     pub visibility_km: f32,
+    /// Surface pressure in hPa for apparent-altitude refraction. Standard
+    /// atmosphere is 1010 hPa; lower pressure reduces the horizon lift.
+    pub pressure_hpa: f32,
+    /// Air temperature in °C for apparent-altitude refraction. Saemundsson's
+    /// correction scales as 283 K / (273 + T).
+    pub temperature_c: f32,
     /// Whether direct solar scattering is enabled. `Atmosphere::OFF` disables
     /// both extinction and daylight/twilight scattering.
     pub sunlit_scattering: bool,
@@ -139,6 +156,8 @@ impl Atmosphere {
         observer_altitude_m: 0.0,
         ozone_du: 300.0,
         visibility_km: 50.0,
+        pressure_hpa: 1010.0,
+        temperature_c: 10.0,
         sunlit_scattering: true,
     };
 
@@ -148,6 +167,8 @@ impl Atmosphere {
         observer_altitude_m: 0.0,
         ozone_du: 325.0,
         visibility_km: 12.0,
+        pressure_hpa: 1010.0,
+        temperature_c: 15.0,
         sunlit_scattering: true,
     };
 
@@ -157,6 +178,8 @@ impl Atmosphere {
         observer_altitude_m: 2500.0,
         ozone_du: 275.0,
         visibility_km: 80.0,
+        pressure_hpa: 750.0,
+        temperature_c: 0.0,
         sunlit_scattering: true,
     };
 
@@ -179,6 +202,8 @@ impl Atmosphere {
         observer_altitude_m: 0.0,
         ozone_du: 0.0,
         visibility_km: 0.0,
+        pressure_hpa: 0.0,
+        temperature_c: 10.0,
         sunlit_scattering: false,
     };
 }
@@ -227,6 +252,72 @@ const MIN_FOV_Y_RAD: f32 = 5.0 * std::f32::consts::PI / 180.0;
 /// Widest supported vertical field of view. Larger values are better served by
 /// a full-sky projection (README Phase 4) rather than a perspective camera.
 const MAX_FOV_Y_RAD: f32 = 120.0 * std::f32::consts::PI / 180.0;
+
+fn mat3d_to_mat4(m: [[f64; 3]; 3]) -> Mat4 {
+    Mat4::from_cols_array(&[
+        m[0][0] as f32,
+        m[1][0] as f32,
+        m[2][0] as f32,
+        0.0,
+        m[0][1] as f32,
+        m[1][1] as f32,
+        m[2][1] as f32,
+        0.0,
+        m[0][2] as f32,
+        m[1][2] as f32,
+        m[2][2] as f32,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ])
+}
+
+fn refracted_local_direction(local: Vec3, pressure_hpa: f32, temperature_c: f32) -> Vec3 {
+    let true_alt = local.z.clamp(-1.0, 1.0).asin();
+    let alt_deg = true_alt.to_degrees();
+    if !alt_deg.is_finite() || !(-1.0..=89.9).contains(&alt_deg) {
+        return local.normalize_or_zero();
+    }
+    let pressure_scale = if pressure_hpa.is_finite() {
+        pressure_hpa.max(0.0) / 1010.0
+    } else {
+        1.0
+    };
+    let temp_k = if temperature_c.is_finite() {
+        (273.0 + temperature_c).max(150.0)
+    } else {
+        283.0
+    };
+    let weather_scale = pressure_scale * 283.0 / temp_k;
+    let r_arcmin = 1.02 / ((alt_deg + 10.3 / (alt_deg + 5.11)).to_radians()).tan() * weather_scale;
+    let apparent_alt = true_alt + (r_arcmin / 60.0).to_radians();
+    let az = local.x.atan2(local.y);
+    let cos_alt = apparent_alt.cos();
+    Vec3::new(az.sin() * cos_alt, az.cos() * cos_alt, apparent_alt.sin()).normalize_or_zero()
+}
+
+fn apparent_disk_direction_j2000(
+    direction_date: Vec3,
+    refract: bool,
+    pressure_hpa: f32,
+    temperature_c: f32,
+    date_to_local: Mat4,
+    local_to_date: Mat4,
+    date_to_j2000: Mat4,
+) -> Vec3 {
+    let direction_date = if refract {
+        let local = (date_to_local * direction_date.extend(0.0)).truncate();
+        let refracted = refracted_local_direction(local, pressure_hpa, temperature_c);
+        (local_to_date * refracted.extend(0.0)).truncate()
+    } else {
+        direction_date
+    };
+    (date_to_j2000 * direction_date.extend(0.0))
+        .truncate()
+        .normalize_or_zero()
+}
 
 impl LocalView {
     /// Return a finite, renderer-safe view.
@@ -286,10 +377,18 @@ impl Camera {
         }
     }
 
-    /// Rotation that maps a J2000 equatorial direction into the observer's local ENU frame.
+    /// Rotation that maps a true equator/equinox-of-date direction into the
+    /// observer's local ENU frame. Nutation contributes the equation of the
+    /// equinoxes, so local apparent sidereal time is used here rather than the
+    /// mean sidereal angle used by the Phase-1 J2000-only pipeline.
     fn equatorial_to_horizontal(&self) -> Mat4 {
-        let lst = lmst_radians(self.observer.time.jd_ut1, self.observer.longitude_rad);
-        equatorial_to_horizontal_matrix(self.observer.latitude_rad, lst)
+        let gast = lmst_radians(self.observer.time.jd_ut1, self.observer.longitude_rad)
+            + equation_of_equinoxes(self.observer.time.jd_tt);
+        equatorial_to_horizontal_matrix(self.observer.latitude_rad, gast)
+    }
+
+    fn j2000_to_date(&self) -> Mat4 {
+        mat3d_to_mat4(precession_nutation_matrix(self.observer.time.jd_tt))
     }
 
     fn effective_view(&self) -> LocalView {
@@ -317,7 +416,7 @@ impl Camera {
     /// View matrix in J2000 equatorial coordinates (includes the equatorial→horizontal
     /// rotation). Use this for star positions, RA/Dec grids, ecliptic, celestial equator.
     fn view_matrix(&self) -> Mat4 {
-        self.view_matrix_local() * self.equatorial_to_horizontal()
+        self.view_matrix_local() * self.equatorial_to_horizontal() * self.j2000_to_date()
     }
 
     fn projection_matrix(&self) -> Mat4 {
@@ -346,7 +445,7 @@ impl Camera {
         // (0, 0, 1) yields the third *column* of the transpose, which is
         // the third *row* of the original Eq→ENU matrix — i.e. the "Up"
         // basis vector expressed in equatorial coords.
-        let eq_to_enu = self.equatorial_to_horizontal();
+        let eq_to_enu = self.equatorial_to_horizontal() * self.j2000_to_date();
         let m = eq_to_enu.to_cols_array_2d();
         // Third row of `m`: take z-component of each column basis vector.
         Vec3::new(m[0][2], m[1][2], m[2][2])
@@ -389,13 +488,45 @@ impl Camera {
         } else {
             Atmosphere::DEFAULT.visibility_km
         };
+        let pressure_hpa = if self.atmosphere.pressure_hpa.is_finite() {
+            self.atmosphere.pressure_hpa.clamp(0.0, 1100.0)
+        } else {
+            Atmosphere::DEFAULT.pressure_hpa
+        };
+        let temperature_c = if self.atmosphere.temperature_c.is_finite() {
+            self.atmosphere.temperature_c.clamp(-80.0, 60.0)
+        } else {
+            Atmosphere::DEFAULT.temperature_c
+        };
+        let j2000_to_date = self.j2000_to_date();
+        let date_to_j2000 = j2000_to_date.transpose();
+        let date_to_local = self.equatorial_to_horizontal();
+        let local_to_date = date_to_local.transpose();
         let disks = SunMoonApparent::for_observer(self.observer);
         let sun = disks.sun;
-        let sun_dir = sun.direction_equatorial();
+        let sun_dir_date = sun.direction_equatorial();
+        let sun_dir = apparent_disk_direction_j2000(
+            sun_dir_date,
+            self.atmosphere.sunlit_scattering,
+            pressure_hpa,
+            temperature_c,
+            date_to_local,
+            local_to_date,
+            date_to_j2000,
+        );
         let solar_lux = illuminants::solar_illuminance_lux(sun.distance_au) as f32;
         let solar_rgb = illuminants::SOLAR_LINEAR_RGB;
         let moon = disks.moon;
-        let moon_dir = moon.direction_equatorial();
+        let moon_dir_date = moon.direction_equatorial();
+        let moon_dir = apparent_disk_direction_j2000(
+            moon_dir_date,
+            self.atmosphere.sunlit_scattering,
+            pressure_hpa,
+            temperature_c,
+            date_to_local,
+            local_to_date,
+            date_to_j2000,
+        );
         let moon_lux = illuminants::lunar_illuminance_lux(
             moon.illuminated_fraction,
             moon.distance_km,
@@ -410,11 +541,20 @@ impl Camera {
         let inv_view_proj = view_proj.inverse();
         let eq_to_local = self.equatorial_to_horizontal();
         let view_proj_local = self.view_proj_local();
+        let earth_velocity = earth_velocity_over_c_j2000(self.observer.time.jd_tdb);
         CameraUniform {
             view_proj: view_proj.to_cols_array_2d(),
             inv_view_proj: inv_view_proj.to_cols_array_2d(),
             eq_to_local: eq_to_local.to_cols_array_2d(),
             view_proj_local: view_proj_local.to_cols_array_2d(),
+            j2000_to_date: j2000_to_date.to_cols_array_2d(),
+            aberration_pm: [
+                earth_velocity[0] as f32,
+                earth_velocity[1] as f32,
+                earth_velocity[2] as f32,
+                years_since_j2000(self.observer.time.jd_tt) as f32,
+            ],
+            refraction_params: [pressure_hpa, temperature_c, 0.0, 0.0],
             viewport_pixel_sr_zeropoint: [
                 width as f32,
                 height as f32,
@@ -477,8 +617,9 @@ mod tests {
     use super::*;
 
     fn observer_at(lat_deg: f64) -> Observer {
-        // Use a fixed JD; LST cancels out for the celestial pole test below.
-        Observer::from_degrees(lat_deg, 0.0, 2_460_000.5)
+        // Use J2000 so the pole/zenith geometry tests are not asserting a
+        // particular modern precession offset.
+        Observer::from_degrees(lat_deg, 0.0, astronomy::J2000_JD)
     }
 
     #[test]
@@ -578,6 +719,8 @@ mod tests {
     fn atmosphere_defaults_and_off_are_pinned() {
         let d = Atmosphere::default();
         assert_eq!(d.extinction_k_rgb, [0.10, 0.16, 0.30]);
+        assert_eq!(d.pressure_hpa, 1010.0);
+        assert_eq!(d.temperature_c, 10.0);
         assert!(d.extinction_k_rgb[0] < d.extinction_k_rgb[2]);
         let off = Atmosphere::OFF;
         assert_eq!(off.extinction_k_rgb, [0.0, 0.0, 0.0]);
@@ -591,6 +734,8 @@ mod tests {
         cam.atmosphere.observer_altitude_m = f32::NAN;
         cam.atmosphere.ozone_du = f32::NAN;
         cam.atmosphere.visibility_km = f32::NAN;
+        cam.atmosphere.pressure_hpa = f32::NAN;
+        cam.atmosphere.temperature_c = f32::NAN;
         let uniform = cam.uniform(800, 600);
         assert_eq!(uniform.extinction_k_rgb, [0.0, 0.0, 0.3, 0.0]);
         assert_eq!(uniform.atmosphere_params[0], Atmosphere::DEFAULT.turbidity);
@@ -602,6 +747,14 @@ mod tests {
         assert_eq!(
             uniform.atmosphere_optics[1],
             Atmosphere::DEFAULT.visibility_km
+        );
+        assert_eq!(
+            uniform.refraction_params[0],
+            Atmosphere::DEFAULT.pressure_hpa
+        );
+        assert_eq!(
+            uniform.refraction_params[1],
+            Atmosphere::DEFAULT.temperature_c
         );
     }
 

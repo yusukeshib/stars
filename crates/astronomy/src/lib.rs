@@ -7,6 +7,7 @@
 //! - Angles internally are radians; helpers also accept degrees / hours where noted.
 
 pub mod atmosphere;
+pub mod corrections;
 mod ephemeris;
 mod horizontal;
 pub mod illuminants;
@@ -15,6 +16,11 @@ pub mod photometry;
 pub mod skyglow;
 mod time;
 
+pub use corrections::{
+    annual_aberration, earth_velocity_over_c_j2000, equation_of_equinoxes, mean_obliquity_iau2006,
+    nutation_iau2000b_approx, precession_matrix_iau2006, precession_nutation_matrix,
+    refracted_altitude_saemundsson, years_since_j2000, Nutation,
+};
 pub use ephemeris::{
     apparent_moon, apparent_moon_topocentric, apparent_sun, apparent_sun_topocentric, MoonApparent,
     SunApparent, SunMoonApparent,

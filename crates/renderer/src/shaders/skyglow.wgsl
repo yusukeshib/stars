@@ -22,6 +22,11 @@ struct CameraUniform {
     inv_view_proj: mat4x4<f32>,
     eq_to_local: mat4x4<f32>,
     view_proj_local: mat4x4<f32>,
+    j2000_to_date: mat4x4<f32>,
+    // [Earth velocity x/c, y/c, z/c, years since J2000.0 TT].
+    aberration_pm: vec4<f32>,
+    // [pressure_hpa, temperature_c, unused, unused].
+    refraction_params: vec4<f32>,
     // [viewport_width, viewport_height, pixel_solid_angle_sr, magnitude_zeropoint]
     viewport_pixel_sr_zeropoint: vec4<f32>,
     zenith_eq: vec4<f32>,

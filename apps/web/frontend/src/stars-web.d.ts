@@ -13,6 +13,8 @@ declare module "stars-web" {
       observerAltitudeM: number,
       ozoneDu: number,
       visibilityKm: number,
+      pressureHpa: number,
+      temperatureC: number,
     ): void;
     resize(width: number, height: number): void;
     sun_altitude_deg(): number;

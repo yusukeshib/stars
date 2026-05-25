@@ -11,6 +11,8 @@ struct RawStar {
     dist: Option<f64>,
     mag: f64,
     ci: Option<f64>,
+    pmrarad: Option<f64>,
+    pmdecrad: Option<f64>,
 }
 
 const MAX_MAGNITUDE: f64 = 8.0;
@@ -20,7 +22,7 @@ const MAX_MAGNITUDE: f64 = 8.0;
 /// background star catalog baked into the WASM bundle.
 const MIN_DISTANCE_PC: f64 = 0.0;
 const MAX_DISTANCE_PC: f64 = 100_000.0;
-const STAR_MAGIC: &[u8; 8] = b"STRBIN1\0";
+const STAR_MAGIC: &[u8; 8] = b"STRBIN2\0";
 
 fn main() {
     println!("cargo:rerun-if-changed=data/hyg_v42.csv");
@@ -57,12 +59,21 @@ fn generate_star_catalog() {
         }
 
         let (x, y, z) = radec_hours_deg_to_cartesian(raw.ra, raw.dec);
+        let (pmx, pmy, pmz) = proper_motion_vector_radians_per_year(
+            raw.ra,
+            raw.dec,
+            raw.pmrarad.unwrap_or(0.0),
+            raw.pmdecrad.unwrap_or(0.0),
+        );
         records.push(StarRecord {
             x: quantize_unit_f64(x),
             y: quantize_unit_f64(y),
             z: quantize_unit_f64(z),
             mag_cent: quantize_scaled(raw.mag, 100.0),
             ci_milli: quantize_scaled(raw.ci.unwrap_or(0.0), 1000.0),
+            pmx,
+            pmy,
+            pmz,
         });
     }
 
@@ -81,6 +92,15 @@ fn generate_star_catalog() {
         writer
             .write_all(&record.ci_milli.to_le_bytes())
             .expect("write color index");
+        writer
+            .write_all(&record.pmx.to_le_bytes())
+            .expect("write pmx");
+        writer
+            .write_all(&record.pmy.to_le_bytes())
+            .expect("write pmy");
+        writer
+            .write_all(&record.pmz.to_le_bytes())
+            .expect("write pmz");
     }
 }
 
@@ -90,12 +110,34 @@ struct StarRecord {
     z: i16,
     mag_cent: i16,
     ci_milli: i16,
+    pmx: f32,
+    pmy: f32,
+    pmz: f32,
 }
 
 fn radec_hours_deg_to_cartesian(ra_hours: f64, dec_degrees: f64) -> (f64, f64, f64) {
     let ra = ra_hours * (std::f64::consts::PI / 12.0);
     let dec = dec_degrees * (std::f64::consts::PI / 180.0);
     (dec.cos() * ra.cos(), dec.cos() * ra.sin(), dec.sin())
+}
+
+fn proper_motion_vector_radians_per_year(
+    ra_hours: f64,
+    dec_degrees: f64,
+    pmra_rad_year: f64,
+    pmdec_rad_year: f64,
+) -> (f32, f32, f32) {
+    let ra = ra_hours * (std::f64::consts::PI / 12.0);
+    let dec = dec_degrees * (std::f64::consts::PI / 180.0);
+    let (sin_ra, cos_ra) = ra.sin_cos();
+    let (sin_dec, cos_dec) = dec.sin_cos();
+    let e_ra = [-sin_ra, cos_ra, 0.0];
+    let e_dec = [-sin_dec * cos_ra, -sin_dec * sin_ra, cos_dec];
+    (
+        (pmra_rad_year * e_ra[0] + pmdec_rad_year * e_dec[0]) as f32,
+        (pmra_rad_year * e_ra[1] + pmdec_rad_year * e_dec[1]) as f32,
+        (pmra_rad_year * e_ra[2] + pmdec_rad_year * e_dec[2]) as f32,
+    )
 }
 
 fn quantize_unit_f64(value: f64) -> i16 {
