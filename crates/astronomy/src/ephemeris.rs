@@ -29,14 +29,40 @@ pub struct SunApparent {
 impl SunApparent {
     /// Unit vector from Earth toward the apparent Sun in equatorial coordinates.
     pub fn direction_equatorial(self) -> Vec3 {
-        let (sin_ra, cos_ra) = self.right_ascension_rad.sin_cos();
-        let (sin_dec, cos_dec) = self.declination_rad.sin_cos();
-        Vec3::new(
-            (cos_dec * cos_ra) as f32,
-            (cos_dec * sin_ra) as f32,
-            sin_dec as f32,
-        )
+        equatorial_unit_vector(self.right_ascension_rad, self.declination_rad)
     }
+}
+
+/// Apparent geocentric Moon state for rendering.
+#[derive(Debug, Clone, Copy)]
+pub struct MoonApparent {
+    /// Apparent right ascension in radians, J2000 mean equator/equinox frame.
+    pub right_ascension_rad: f64,
+    /// Apparent declination in radians, J2000 mean equator/equinox frame.
+    pub declination_rad: f64,
+    /// Approximate geocentric distance in kilometres.
+    pub distance_km: f64,
+    /// Apparent angular radius of the lunar disk in radians.
+    pub angular_radius_rad: f64,
+    /// Illuminated fraction, 0 = new Moon, 1 = full Moon.
+    pub illuminated_fraction: f64,
+}
+
+impl MoonApparent {
+    /// Unit vector from Earth toward the apparent Moon in equatorial coordinates.
+    pub fn direction_equatorial(self) -> Vec3 {
+        equatorial_unit_vector(self.right_ascension_rad, self.declination_rad)
+    }
+}
+
+fn equatorial_unit_vector(right_ascension_rad: f64, declination_rad: f64) -> Vec3 {
+    let (sin_ra, cos_ra) = right_ascension_rad.sin_cos();
+    let (sin_dec, cos_dec) = declination_rad.sin_cos();
+    Vec3::new(
+        (cos_dec * cos_ra) as f32,
+        (cos_dec * sin_ra) as f32,
+        sin_dec as f32,
+    )
 }
 
 /// Apparent geocentric position of the Sun for a Julian Date.
@@ -96,6 +122,71 @@ pub fn apparent_sun(julian_date: f64) -> SunApparent {
     }
 }
 
+/// Approximate geocentric Moon position for a Julian Date.
+///
+/// This is the compact low-precision lunar orbit from Paul Schlyter's
+/// reduction of the classical elements (node, inclination, argument of
+/// perigee, eccentricity, mean anomaly), with the result rotated from
+/// ecliptic to equatorial coordinates. It is intentionally a Phase-2-start
+/// visual model: good enough to place and phase the Moon for rendering and
+/// twilight/moonlight plumbing, but not the final ELP2000 implementation
+/// required by the roadmap's arcsecond-grade ephemeris target.
+pub fn apparent_moon(julian_date: f64) -> MoonApparent {
+    // Days since 2000 Jan 0.0, matching the epoch used by the compact element
+    // set. Angles are degrees until explicitly converted.
+    let d = julian_date - 2_451_543.5;
+    let n = (125.1228 - 0.052_953_808_3 * d).rem_euclid(360.0) * DEG_TO_RAD;
+    let i = 5.1454 * DEG_TO_RAD;
+    let w = (318.0634 + 0.164_357_322_3 * d).rem_euclid(360.0) * DEG_TO_RAD;
+    let a_earth_radii = 60.2666;
+    let e = 0.054_900;
+    let m = (115.3654 + 13.064_992_950_9 * d).rem_euclid(360.0) * DEG_TO_RAD;
+
+    // One Newton step is enough for this visual orbit because lunar e is small.
+    let mut eccentric_anomaly = m + e * m.sin() * (1.0 + e * m.cos());
+    eccentric_anomaly = eccentric_anomaly
+        - (eccentric_anomaly - e * eccentric_anomaly.sin() - m)
+            / (1.0 - e * eccentric_anomaly.cos());
+
+    let xv = a_earth_radii * (eccentric_anomaly.cos() - e);
+    let yv = a_earth_radii * (1.0 - e * e).sqrt() * eccentric_anomaly.sin();
+    let true_anomaly = yv.atan2(xv);
+    let distance_earth_radii = (xv * xv + yv * yv).sqrt();
+
+    let (sin_n, cos_n) = n.sin_cos();
+    let (sin_i, cos_i) = i.sin_cos();
+    let (sin_vw, cos_vw) = (true_anomaly + w).sin_cos();
+    let x_ecl = distance_earth_radii * (cos_n * cos_vw - sin_n * sin_vw * cos_i);
+    let y_ecl = distance_earth_radii * (sin_n * cos_vw + cos_n * sin_vw * cos_i);
+    let z_ecl = distance_earth_radii * (sin_vw * sin_i);
+
+    // Mean obliquity is sufficient for this low-precision Moon path.
+    let t = (julian_date - J2000_JD) / 36_525.0;
+    let mean_obliquity_arcsec = 21.448 - t * (46.8150 + t * (0.00059 - t * 0.001813));
+    let epsilon = (23.0 + (26.0 + mean_obliquity_arcsec / 60.0) / 60.0) * DEG_TO_RAD;
+    let y_eq = y_ecl * epsilon.cos() - z_ecl * epsilon.sin();
+    let z_eq = y_ecl * epsilon.sin() + z_ecl * epsilon.cos();
+    let x_eq = x_ecl;
+
+    let right_ascension_rad = y_eq.atan2(x_eq).rem_euclid(std::f64::consts::TAU);
+    let declination_rad = z_eq.atan2((x_eq * x_eq + y_eq * y_eq).sqrt());
+    let distance_km = distance_earth_radii * 6378.14;
+    let angular_radius_rad = (1737.4 / distance_km).asin();
+
+    let moon_dir = equatorial_unit_vector(right_ascension_rad, declination_rad);
+    let sun_dir = apparent_sun(julian_date).direction_equatorial();
+    let elongation = (moon_dir.dot(sun_dir) as f64).clamp(-1.0, 1.0).acos();
+    let illuminated_fraction = 0.5 * (1.0 - elongation.cos());
+
+    MoonApparent {
+        right_ascension_rad,
+        declination_rad,
+        distance_km,
+        angular_radius_rad,
+        illuminated_fraction,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,7 +209,18 @@ mod tests {
 
     #[test]
     fn direction_is_unit_length() {
-        let v = apparent_sun(2_460_000.5).direction_equatorial();
-        assert!((v.length() - 1.0).abs() < 1e-6);
+        let sun = apparent_sun(2_460_000.5).direction_equatorial();
+        let moon = apparent_moon(2_460_000.5).direction_equatorial();
+        assert!((sun.length() - 1.0).abs() < 1e-6);
+        assert!((moon.length() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn moon_visual_quantities_are_in_physical_ranges() {
+        let moon = apparent_moon(J2000_JD);
+        assert!((350_000.0..=410_000.0).contains(&moon.distance_km));
+        let radius_arcmin = moon.angular_radius_rad.to_degrees() * 60.0;
+        assert!((14.0..=17.5).contains(&radius_arcmin));
+        assert!((0.0..=1.0).contains(&moon.illuminated_fraction));
     }
 }
