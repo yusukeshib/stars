@@ -106,7 +106,9 @@ mod tests {
         let full = lunar_illuminance_lux(1.0, MEAN_MOON_DISTANCE_KM, 0.0);
         assert!((full - FULL_MOON_ILLUMINANCE_LUX).abs() < 1e-12);
         assert_eq!(lunar_illuminance_lux(0.0, MEAN_MOON_DISTANCE_KM, 0.0), 0.0);
-        assert!(lunar_illuminance_lux(0.5, MEAN_MOON_DISTANCE_KM, 90_f64.to_radians()) < full * 0.5);
+        assert!(
+            lunar_illuminance_lux(0.5, MEAN_MOON_DISTANCE_KM, 90_f64.to_radians()) < full * 0.5
+        );
         assert!(lunar_illuminance_lux(1.0, MEAN_MOON_DISTANCE_KM * 0.9, 0.0) > full);
     }
 }

@@ -1,5 +1,7 @@
 use astronomy::photometry::DEFAULT_EXTINCTION_K_RGB;
-use astronomy::{equatorial_to_horizontal_matrix, illuminants, lmst_radians, Observer, SunMoonApparent};
+use astronomy::{
+    equatorial_to_horizontal_matrix, illuminants, lmst_radians, Observer, SunMoonApparent,
+};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
@@ -597,7 +599,10 @@ mod tests {
             Atmosphere::DEFAULT.observer_altitude_m
         );
         assert_eq!(uniform.atmosphere_optics[0], Atmosphere::DEFAULT.ozone_du);
-        assert_eq!(uniform.atmosphere_optics[1], Atmosphere::DEFAULT.visibility_km);
+        assert_eq!(
+            uniform.atmosphere_optics[1],
+            Atmosphere::DEFAULT.visibility_km
+        );
     }
 
     #[test]
