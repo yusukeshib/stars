@@ -334,10 +334,10 @@ impl Camera {
 
     pub fn uniform(&self, width: u32, height: u32) -> CameraUniform {
         let zenith = self.zenith_in_equatorial();
-        let k =
-            self.atmosphere
-                .extinction_k_rgb
-                .map(|k| if k.is_finite() { k.max(0.0) } else { 0.0 });
+        let k = self
+            .atmosphere
+            .extinction_k_rgb
+            .map(|k| if k.is_finite() { k.max(0.0) } else { 0.0 });
         let turbidity = if self.atmosphere.turbidity.is_finite() {
             self.atmosphere.turbidity.max(0.0)
         } else {
