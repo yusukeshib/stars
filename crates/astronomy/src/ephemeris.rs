@@ -14,6 +14,7 @@ const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 const ARCSEC_TO_RAD: f64 = DEG_TO_RAD / 3600.0;
 const ASTRONOMICAL_UNIT_KM: f64 = 149_597_870.7;
 const EARTH_EQUATORIAL_RADIUS_KM: f64 = 6_378.14;
+const EARTH_FLATTENING: f64 = 1.0 / 298.257_223_563;
 const SOLAR_RADIUS_KM: f64 = 695_700.0;
 const LUNAR_RADIUS_KM: f64 = 1_737.4;
 
@@ -89,10 +90,18 @@ fn observer_equatorial_position_km(observer: Observer) -> [f64; 3] {
     let lst = lmst_radians(observer.julian_date, observer.longitude_rad);
     let (sin_lat, cos_lat) = observer.latitude_rad.sin_cos();
     let (sin_lst, cos_lst) = lst.sin_cos();
+    // Interpret `Observer::latitude_rad` as geodetic latitude and place the
+    // observer on the WGS84 ellipsoid at sea level. This matters for lunar
+    // parallax: a spherical Earth with geodetic latitude used as geocentric
+    // latitude is off by up to ≈11.5 arcmin at mid-latitudes.
+    let e2 = EARTH_FLATTENING * (2.0 - EARTH_FLATTENING);
+    let prime_vertical_radius = EARTH_EQUATORIAL_RADIUS_KM / (1.0 - e2 * sin_lat * sin_lat).sqrt();
+    let rho_equatorial = prime_vertical_radius * cos_lat;
+    let rho_polar = prime_vertical_radius * (1.0 - e2) * sin_lat;
     [
-        EARTH_EQUATORIAL_RADIUS_KM * cos_lat * cos_lst,
-        EARTH_EQUATORIAL_RADIUS_KM * cos_lat * sin_lst,
-        EARTH_EQUATORIAL_RADIUS_KM * sin_lat,
+        rho_equatorial * cos_lst,
+        rho_equatorial * sin_lst,
+        rho_polar,
     ]
 }
 

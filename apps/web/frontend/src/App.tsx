@@ -33,6 +33,19 @@ const normalizeWebOverlays = (overlays: OverlayConfig): OverlayConfig => ({
   layers: overlays.layers.filter((layer) => layer !== "cardinals"),
 });
 
+const numberParam = (
+  params: URLSearchParams,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number => {
+  const raw = params.get(key);
+  if (raw === null) return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+};
+
 function loadAtmosphereFromUrl(): AtmosphereConfig | null {
   if (typeof window === "undefined") return null;
   const params = new URLSearchParams(window.location.search);
@@ -47,18 +60,18 @@ function loadAtmosphereFromUrl(): AtmosphereConfig | null {
 
   const enabled = params.get("atmosphere") !== "off";
   const presetParam = params.get("atmospherePreset");
-  const turbidity = Number(params.get("turbidity"));
-  const observerAltitudeM = Number(params.get("observerAltitudeM"));
   return {
     ...DEFAULT_ATMOSPHERE_CONFIG,
     enabled,
     preset: isAtmospherePreset(presetParam) ? presetParam : DEFAULT_ATMOSPHERE_CONFIG.preset,
-    turbidity: Number.isFinite(turbidity)
-      ? Math.max(1.7, Math.min(10, turbidity))
-      : DEFAULT_ATMOSPHERE_CONFIG.turbidity,
-    observerAltitudeM: Number.isFinite(observerAltitudeM)
-      ? Math.max(0, Math.min(9000, observerAltitudeM))
-      : DEFAULT_ATMOSPHERE_CONFIG.observerAltitudeM,
+    turbidity: numberParam(params, "turbidity", DEFAULT_ATMOSPHERE_CONFIG.turbidity, 1.7, 10),
+    observerAltitudeM: numberParam(
+      params,
+      "observerAltitudeM",
+      DEFAULT_ATMOSPHERE_CONFIG.observerAltitudeM,
+      0,
+      9000,
+    ),
   };
 }
 
