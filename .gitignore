@@ -4,5 +4,6 @@ node_modules
 pkg
 *.wasm
 dist
+.semble-index/
 .vite
 Cargo.lock
