@@ -44,6 +44,21 @@ history retains the legacy name; everything else uses "Phase 1'".
 the rationale ordering. The status column below is the source of truth for
 what's done and what's left.
 
+### Atmosphere-rendering scope
+
+Phase 1' covers the **dark-sky** atmosphere: stellar extinction, night-sky
+background, zodiacal light, airglow, dust, glare, and human eye adaptation. It
+intentionally does **not** model the blue daytime sky, sunset reddening, or the
+colour of twilight caused by sunlight scattering through air.
+
+That missing piece is tracked in Phase 2, after the Sun and Moon have apparent
+topocentric positions. The goal is for sky colour to be driven by physical
+illuminants and atmosphere parameters rather than by hard-coded gradients.
+
+**Current highest priority:** implement the Sun/Moon inputs and sunlit
+atmospheric-scattering path before the remaining Phase 2 precision work. In the
+status column, these rows are marked `⏳ next`.
+
 ---
 
 ## Work items
@@ -84,12 +99,16 @@ Columns:
 | 2 | **Annual aberration** — up to 20″ | Standard formulas; folds into the equatorial→ENU matrix | ⬜ |
 | 2 | **Stellar proper motion** — apply HYG's `pmra` / `pmdec` when epoch ≠ catalog epoch | HYG carries the columns already | ⬜ |
 | 2 | **Atmospheric refraction** — up to 34′ at the horizon | Bennett 1982 / Saemundsson 1986; flag in UI when on | ⬜ |
-| 2 | **Sun, Moon** | VSOP87 (Sun) + ELP2000 (Moon) | ⬜ |
+| 2 | **Sun, Moon** — apparent topocentric direction, angular radius, phase, and disk rendering inputs | VSOP87 (Sun) + ELP2000 (Moon); feeds scattering, twilight, moon phase, and rise/set | ⏳ next |
+| 2 | **Solar / lunar illuminants** — spectral or XYZ irradiance for direct sunlight and moonlight at the top of the atmosphere | ASTM G-173 / CIE daylight basis for Sun; Krisciunas & Schaefer 1991 for moonlight brightness | ⏳ next |
+| 2 | **Sunlit atmospheric scattering / sky colour** — Rayleigh + Mie aerosol + ozone absorption sky model driven by Sun altitude, view direction, observer altitude, and turbidity; produces blue daylight, golden-hour warmth, sunset reddening, and horizon haze | Preetham, Shirley & Smits 1999; Hosek & Wilkie 2012; Bruneton & Neyret 2008 | ⏳ next |
+| 2 | **Twilight and day/night blend** — combine sunlit scattering, moonlit sky, Phase 1' dark-sky glow, and star visibility using solar depression angle instead of hard-coded background colours | Civil / nautical / astronomical bands remain UI annotations; renderer cross-fades radiance physically across 0°, −6°, −12°, −18° Sun altitude | ⏳ next |
+| 2 | **Atmosphere controls** — expose turbidity/aerosol, observer altitude, and optional ozone/visibility presets in CLI, viewer, and web settings | Defaults should match a clear rural sky; presets must be serializable in sessions | ⏳ next |
 | 2 | **Planets (Mercury → Neptune)** — ~1″ on a century | VSOP87 truncated | ⬜ |
 | 2 | **Moon phase + Earth-shadow** | Visual aid; trivial once Moon ephemeris lands | ⬜ |
 | 2 | **Rise / transit / set tables** — per object, per evening | UI table in the settings panel | ⬜ |
-| 2 | **Twilight indicators** — civil / nautical / astronomical bands | Time slider annotation | ⬜ |
-| 2 | **Session URL** — encode (lat, lng, jd, az, alt, fov, overlays, planets) | One URL, schema-versioned | ⬜ |
+| 2 | **Twilight indicators** — civil / nautical / astronomical bands | Time slider annotation plus labels for the scattering blend state | ⬜ |
+| 2 | **Session URL** — encode (lat, lng, jd, az, alt, fov, overlays, planets, atmosphere preset) | One URL, schema-versioned | ⬜ |
 | 3 | **Hipparcos / Tycho-2 / Gaia DR3 ingest** | Pluggable catalog backend; keep HYG for the embedded WASM build | ⬜ |
 | 3 | **Identifier preservation** — Hipparcos / HD / TYC / Gaia source_id passed through the renderer | For hover / click-to-copy | ⬜ |
 | 3 | **SIMBAD / VizieR deep links** | Hover a star → external link with the right query | ⬜ |
@@ -124,7 +143,11 @@ Columns:
   corrections are active; default-on subset matches what Stellarium calls
   "general" precision; differences against JPL Horizons for a fixed set
   of targets are < 1″ in unit tests. A new `astronomy::corrections`
-  module collects the IAU-2006-compliant transforms.
+  module collects the IAU-2006-compliant transforms. Daylight and twilight
+  rendering are no longer hard-coded colours: Sun/Moon illuminants plus
+  atmosphere parameters determine the sky radiance, with documented presets
+  and screenshots covering noon, sunset, civil/nautical/astronomical twilight,
+  and moonlit night.
 - **Phase 3.** Someone can `pip install` or `cargo add` the relevant
   pieces, render the same sky from a notebook and the web UI, get the
   same numbers as JPL Horizons within stated tolerances, and cite the
@@ -161,7 +184,10 @@ the things that make the difference between "a star plot" and "the sky".
 
 Phase 2 buys **trust**. Without precession alone, star positions drift
 ~50″/year — within a decade the labels are visibly wrong. Refraction and
-proper motion close the loop for naked-eye observers.
+proper motion close the loop for naked-eye observers. The Sun/Moon work also
+unlocks physically driven sky colour: the renderer can know where the primary
+illuminants are, then let Rayleigh/Mie scattering and aerosol/turbidity controls
+explain blue daylight, red sunsets, twilight gradients, and moonlit nights.
 
 Phase 3 buys **reach**. The Rust + wgpu + WASM combo applied to IAU-grade
 astronomy is genuinely under-served: it lets the same engine power a

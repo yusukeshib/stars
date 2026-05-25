@@ -24,6 +24,12 @@ struct CameraUniform {
     viewport_pixel_sr_zeropoint: vec4<f32>,
     zenith_eq: vec4<f32>,
     extinction_k_rgb: vec4<f32>,
+    // Apparent Sun direction in equatorial coordinates. `w` is angular radius.
+    sun_eq_radius: vec4<f32>,
+    // [turbidity, observer_altitude_m, solar_illuminance_lux, scattering_enabled].
+    atmosphere_params: vec4<f32>,
+    // D65-like top-of-atmosphere solar RGB; `w` reserved for moonlight.
+    solar_rgb: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -57,6 +63,10 @@ const RAD_TO_DEG: f32 = 57.295779513;
 const NEG_OH_FOUR_LN10: f32 = -0.9210340371976184; // -0.4 · ln(10)
 // 1 sr = (180·3600/π)² arcsec² ≈ 4.2545e10.
 const ARCSEC2_PER_SR: f32 = 4.2545e10;
+const PI: f32 = 3.14159265359;
+const DEG_TO_RAD: f32 = 0.017453292519943295;
+const LN10: f32 = 2.30258509299;
+const EYE_PSF_SOLID_ANGLE_SR: f32 = 8.461594994075e-8;
 
 // Skyglow surface brightness is written directly on the renderer's
 // physical brightness scale (no perceptual fudge). The Ferwerda 1996
@@ -91,6 +101,109 @@ fn dust_transmission(l_rad: f32, b_rad: f32) -> f32 {
     let b_abs = abs(b_rad * RAD_TO_DEG);
     let ebv = 0.015 + 0.12 * exp(-(b_abs / 8.0)) + 0.08 * exp(-pow(l_deg / 45.0, 2.0)) * exp(-(b_abs / 5.0));
     return exp(NEG_OH_FOUR_LN10 * 3.1 * ebv);
+}
+
+fn smoothstep01(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+fn sun_altitude_rad() -> f32 {
+    let sun_dir = normalize(camera.sun_eq_radius.xyz);
+    return asin(clamp(dot(sun_dir, camera.zenith_eq.xyz), -1.0, 1.0));
+}
+
+fn dark_sky_visibility() -> f32 {
+    if camera.atmosphere_params.w <= 0.0 {
+        return 1.0;
+    }
+    // Astronomical twilight (-18°) is where the sky is conventionally dark;
+    // civil twilight (-6°) is bright enough that the diffuse dark-sky terms
+    // should no longer be visible. Blend smoothly through nautical twilight.
+    return 1.0 - smoothstep01(-18.0 * DEG_TO_RAD, -6.0 * DEG_TO_RAD, sun_altitude_rad());
+}
+
+fn hdr_flux_from_cd_m2(luminance_cd_m2: vec3<f32>, zeropoint: f32) -> vec3<f32> {
+    let zp_illum = exp(-0.4 * (zeropoint + 13.99) * LN10);
+    let zp_luminance = zp_illum / EYE_PSF_SOLID_ANGLE_SR;
+    return luminance_cd_m2 / max(zp_luminance, 1e-20);
+}
+
+fn perez_distribution(theta: f32, gamma: f32, coeffs: vec4<f32>, e: f32) -> f32 {
+    let cos_theta = max(cos(theta), 0.01);
+    let cos_gamma = cos(gamma);
+    return (1.0 + coeffs.x * exp(coeffs.y / cos_theta))
+        * (1.0 + coeffs.z * exp(coeffs.w * gamma) + e * cos_gamma * cos_gamma);
+}
+
+fn xyy_to_linear_rgb(xyy: vec3<f32>) -> vec3<f32> {
+    let x = clamp(xyy.x, 1e-4, 0.9);
+    let y = clamp(xyy.y, 1e-4, 0.9);
+    let Y = max(xyy.z, 0.0);
+    let X = x * Y / y;
+    let Z = max(0.0, (1.0 - x - y) * Y / y);
+    let rgb = vec3<f32>(
+        3.2406 * X - 1.5372 * Y - 0.4986 * Z,
+        -0.9689 * X + 1.8758 * Y + 0.0415 * Z,
+        0.0557 * X - 0.2040 * Y + 1.0570 * Z,
+    );
+    return max(rgb, vec3<f32>(0.0));
+}
+
+fn preetham_sky_luminance_rgb(ray_dir: vec3<f32>, sin_alt: f32) -> vec3<f32> {
+    let sun_dir = normalize(camera.sun_eq_radius.xyz);
+    let sun_alt = sun_altitude_rad();
+    let twilight = smoothstep01(-18.0 * DEG_TO_RAD, 0.0, sun_alt);
+    if twilight <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+
+    let T = clamp(camera.atmosphere_params.x, 1.7, 10.0);
+    let theta = acos(clamp(sin_alt, 0.0, 1.0));
+    // Preetham's closed-form fit is defined for the Sun above the horizon.
+    // For civil/nautical twilight, clamp the solar zenith to just above the
+    // horizon and let the explicit twilight weight carry it to zero at -18°.
+    let theta_s = clamp(PI * 0.5 - max(sun_alt, 0.5 * DEG_TO_RAD), 0.0, PI * 0.5 - 0.01);
+    let gamma = acos(clamp(dot(ray_dir, sun_dir), -1.0, 1.0));
+
+    // Preetham, Shirley & Smits 1999 analytic daylight model: zenith
+    // luminance/chromaticity plus Perez all-weather angular distributions.
+    let chi = (4.0 / 9.0 - T / 120.0) * (PI - 2.0 * theta_s);
+    let Yz = max(0.0, ((4.0453 * T - 4.9710) * tan(chi) - 0.2155 * T + 2.4192) * 1000.0);
+
+    let ts2 = theta_s * theta_s;
+    let ts3 = ts2 * theta_s;
+    let T2 = T * T;
+    let xz = (0.00165 * ts3 - 0.00374 * ts2 + 0.00208 * theta_s) * T2
+        + (-0.02902 * ts3 + 0.06377 * ts2 - 0.03202 * theta_s + 0.00394) * T
+        + (0.11693 * ts3 - 0.21196 * ts2 + 0.06052 * theta_s + 0.25885);
+    let yz = (0.00275 * ts3 - 0.00610 * ts2 + 0.00317 * theta_s) * T2
+        + (-0.04214 * ts3 + 0.08970 * ts2 - 0.04153 * theta_s + 0.00516) * T
+        + (0.15346 * ts3 - 0.26756 * ts2 + 0.06670 * theta_s + 0.26688);
+
+    let coeff_y = vec4<f32>(0.1787 * T - 1.4630, -0.3554 * T + 0.4275, -0.0227 * T + 5.3251, 0.1206 * T - 2.5771);
+    let coeff_x = vec4<f32>(-0.0193 * T - 0.2592, -0.0665 * T + 0.0008, -0.0004 * T + 0.2125, -0.0641 * T - 0.8989);
+    let coeff_ch_y = vec4<f32>(-0.0167 * T - 0.2608, -0.0950 * T + 0.0092, -0.0079 * T + 0.2102, -0.0441 * T - 1.6537);
+
+    let denom_y = max(perez_distribution(0.0, theta_s, coeff_y, -0.0670 * T + 0.3703), 1e-4);
+    let denom_x = max(perez_distribution(0.0, theta_s, coeff_x, -0.0033 * T + 0.0452), 1e-4);
+    let denom_ch_y = max(perez_distribution(0.0, theta_s, coeff_ch_y, -0.0109 * T + 0.0529), 1e-4);
+
+    let Y = Yz * perez_distribution(theta, gamma, coeff_y, -0.0670 * T + 0.3703) / denom_y;
+    let x = xz * perez_distribution(theta, gamma, coeff_x, -0.0033 * T + 0.0452) / denom_x;
+    let y = yz * perez_distribution(theta, gamma, coeff_ch_y, -0.0109 * T + 0.0529) / denom_ch_y;
+
+    // Preetham assumes mean solar irradiance at sea level; retain the small
+    // Earth-Sun distance modulation from the ephemeris/illuminant pipeline.
+    let solar_scale = max(camera.atmosphere_params.z, 0.0) / 127000.0;
+    return xyy_to_linear_rgb(vec3<f32>(x, y, Y * twilight * solar_scale));
+}
+
+fn sunlit_scattering_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> vec3<f32> {
+    if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    return hdr_flux_from_cd_m2(preetham_sky_luminance_rgb(ray_dir, sin_alt), zeropoint);
 }
 
 fn diffuse_sky_mag_per_arcsec2(l_rad: f32, b_rad: f32, beta_rad: f32, sun_rel_lon_rad: f32) -> f32 {
@@ -170,10 +283,16 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // ε=23.4392911°. The longitude value is reserved for Phase 2's real solar
     // ephemeris; the current zodiacal component intentionally avoids drawing a
     // fake fixed gegenschein blob.
+    let x_ecl = ray_dir.x;
     let y_ecl = 0.917482062 * ray_dir.y + 0.397777156 * ray_dir.z;
     let z_ecl = -0.397777156 * ray_dir.y + 0.917482062 * ray_dir.z;
     let beta = asin(clamp(z_ecl, -1.0, 1.0));
-    let sun_rel_lon = 0.0;
+    let lambda = atan2(y_ecl, x_ecl);
+    let sun = normalize(camera.sun_eq_radius.xyz);
+    let sun_x_ecl = sun.x;
+    let sun_y_ecl = 0.917482062 * sun.y + 0.397777156 * sun.z;
+    let sun_lambda = atan2(sun_y_ecl, sun_x_ecl);
+    let sun_rel_lon = lambda - sun_lambda;
     let mu = diffuse_sky_mag_per_arcsec2(l_rad, b_rad, beta, sun_rel_lon) - PERCEPTUAL_BOOST_MAGS;
     let flux_per_arcsec2 = exp(NEG_OH_FOUR_LN10 * (mu - zeropoint));
     let flux_per_pixel = flux_per_arcsec2 * pixel_arcsec2;
@@ -183,9 +302,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // below-horizon → zero.
     let k_rgb = camera.extinction_k_rgb.xyz;
     let atmosphere_active = k_rgb.x + k_rgb.y + k_rgb.z > 0.0;
+    let sin_alt = clamp(dot(ray_dir, camera.zenith_eq.xyz), -1.0, 1.0);
     var attenuation = vec3<f32>(1.0);
     if atmosphere_active {
-        let sin_alt = clamp(dot(ray_dir, camera.zenith_eq.xyz), -1.0, 1.0);
         let alt_rad = asin(sin_alt);
         if alt_rad <= 0.0 {
             return vec4<f32>(0.0, 0.0, 0.0, 1.0);
@@ -202,6 +321,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Ballesteros blackbody pipeline.
     let tint = vec3<f32>(0.92, 0.94, 1.00);
 
-    let radiance = tint * flux_per_pixel * attenuation;
-    return vec4<f32>(radiance, 1.0);
+    let night_radiance = tint * flux_per_pixel * attenuation * dark_sky_visibility();
+    let day_radiance = sunlit_scattering_radiance(ray_dir, sin_alt, zeropoint);
+    return vec4<f32>(night_radiance + day_radiance, 1.0);
 }

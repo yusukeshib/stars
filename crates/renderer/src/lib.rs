@@ -6,7 +6,7 @@ mod skyglow;
 mod tonemap;
 mod vertex;
 
-pub use camera::{Atmosphere, Camera, CameraUniform, LocalView};
+pub use camera::{Atmosphere, AtmospherePreset, Camera, CameraUniform, LocalView};
 pub use overlay::{OverlayConfig, OverlayKind};
 pub use renderer::Renderer;
 pub use vertex::{
