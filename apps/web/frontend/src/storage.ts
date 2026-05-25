@@ -1,7 +1,9 @@
 import {
   MAX_FOV_DEG,
   MIN_FOV_DEG,
+  isAtmospherePreset,
   isOverlayLayer,
+  type AtmosphereConfig,
   type Observer,
   type OverlayConfig,
   type View,
@@ -23,6 +25,7 @@ export type PersistedConfig = {
   observer: Observer;
   view: View;
   overlays?: OverlayConfig;
+  atmosphere?: AtmosphereConfig;
 };
 
 export type PartialPersistedConfig = Partial<Omit<PersistedConfig, "version">>;
@@ -42,12 +45,14 @@ export function loadConfig(): PartialPersistedConfig | null {
       observer?: unknown;
       view?: unknown;
       overlays?: unknown;
+      atmosphere?: unknown;
     };
     if (obj.version !== CURRENT_VERSION) return null;
     const out: PartialPersistedConfig = {};
     if (isObserver(obj.observer)) out.observer = obj.observer;
     if (isView(obj.view)) out.view = obj.view;
     if (isOverlayConfig(obj.overlays)) out.overlays = obj.overlays;
+    if (isAtmosphereConfig(obj.atmosphere)) out.atmosphere = obj.atmosphere;
     return out;
   } catch {
     return null;
@@ -96,6 +101,8 @@ function isView(v: unknown): v is View {
 
 const GRID_STEP_RANGE: [number, number] = [1, 90];
 const OPACITY_RANGE: [number, number] = [0, 1];
+const TURBIDITY_RANGE: [number, number] = [1.7, 10];
+const OBSERVER_ALTITUDE_RANGE: [number, number] = [0, 9000];
 
 function isOverlayConfig(v: unknown): v is OverlayConfig {
   if (!v || typeof v !== "object") return false;
@@ -105,5 +112,16 @@ function isOverlayConfig(v: unknown): v is OverlayConfig {
     o.layers.every(isOverlayLayer) &&
     inRange(o.gridStepDeg, GRID_STEP_RANGE) &&
     inRange(o.opacity, OPACITY_RANGE)
+  );
+}
+
+function isAtmosphereConfig(v: unknown): v is AtmosphereConfig {
+  if (!v || typeof v !== "object") return false;
+  const o = v as Partial<AtmosphereConfig>;
+  return (
+    typeof o.enabled === "boolean" &&
+    isAtmospherePreset(o.preset) &&
+    inRange(o.turbidity, TURBIDITY_RANGE) &&
+    inRange(o.observerAltitudeM, OBSERVER_ALTITUDE_RANGE)
   );
 }

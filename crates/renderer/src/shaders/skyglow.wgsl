@@ -28,8 +28,11 @@ struct CameraUniform {
     sun_eq_radius: vec4<f32>,
     // [turbidity, observer_altitude_m, solar_illuminance_lux, scattering_enabled].
     atmosphere_params: vec4<f32>,
-    // D65-like top-of-atmosphere solar RGB; `w` reserved for moonlight.
+    // D65-like top-of-atmosphere solar RGB; `w` currently unused.
     solar_rgb: vec4<f32>,
+    // Apparent Moon direction in equatorial coordinates. `w` is approximate
+    // moonlight illuminance in lux before local horizon/airmass attenuation.
+    moon_eq_illuminance: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -218,6 +221,48 @@ fn sunlit_scattering_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) 
         * SUNLIT_SKY_STAR_ATLAS_EXPOSURE;
 }
 
+fn henyey_greenstein(cos_angle: f32, g: f32) -> f32 {
+    let gg = g * g;
+    let denom = pow(max(1.0 + gg - 2.0 * g * cos_angle, 1e-3), 1.5);
+    return (1.0 - gg) / max(4.0 * PI * denom, 1e-4);
+}
+
+fn moonlit_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> vec3<f32> {
+    if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+
+    let moon_lux = max(camera.moon_eq_illuminance.w, 0.0);
+    if moon_lux <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+
+    let moon_dir = normalize(camera.moon_eq_illuminance.xyz);
+    let moon_sin_alt = dot(moon_dir, camera.zenith_eq.xyz);
+    if moon_sin_alt <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+
+    let moon_alt = asin(clamp(moon_sin_alt, -1.0, 1.0));
+    let moon_airmass = airmass_kasten_young(max(moon_alt, 0.5 * DEG_TO_RAD));
+    let k_v = max(dot(camera.extinction_k_rgb.xyz, vec3<f32>(0.2126, 0.7152, 0.0722)), 0.0);
+    let moon_transmission = exp(NEG_OH_FOUR_LN10 * k_v * moon_airmass);
+
+    let cos_gamma = clamp(dot(ray_dir, moon_dir), -1.0, 1.0);
+    let rayleigh = 0.75 * (1.0 + cos_gamma * cos_gamma);
+    let mie = henyey_greenstein(cos_gamma, 0.72) / max(henyey_greenstein(0.0, 0.72), 1e-4);
+    let angular = 0.35 * rayleigh + 0.65 * clamp(mie, 0.0, 8.0);
+
+    // Clear full-moon skies are roughly a few 10^-3 cd/m² away from the lunar
+    // aureole. Scale from illuminance (lux) to diffuse sky luminance with a
+    // compact empirical factor until the Krisciunas-Schaefer model replaces it.
+    let horizon_haze = 1.0 + 0.25 * smoothstep01(0.35, 0.0, sin_alt);
+    let moon_alt_weight = smoothstep01(0.0, 10.0 * DEG_TO_RAD, moon_alt);
+    let luminance = moon_lux * 0.012 * moon_transmission * moon_alt_weight * angular * horizon_haze;
+    let rgb = vec3<f32>(0.78, 0.84, 1.00) * luminance;
+    return hdr_flux_from_cd_m2(rgb, zeropoint);
+}
+
 fn diffuse_sky_mag_per_arcsec2(l_rad: f32, b_rad: f32, beta_rad: f32, sun_rel_lon_rad: f32) -> f32 {
     let isl = mag_to_s10(isl_mag_per_arcsec2(l_rad, b_rad)) * dust_transmission(l_rad, b_rad);
     let zl = zodiacal_light_s10(beta_rad, sun_rel_lon_rad);
@@ -334,6 +379,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let tint = vec3<f32>(0.92, 0.94, 1.00);
 
     let night_radiance = tint * flux_per_pixel * attenuation * dark_sky_visibility();
+    let moon_radiance = moonlit_sky_radiance(ray_dir, sin_alt, zeropoint) * dark_sky_visibility();
     let day_radiance = sunlit_scattering_radiance(ray_dir, sin_alt, zeropoint);
-    return vec4<f32>(night_radiance + day_radiance, 1.0);
+    return vec4<f32>(night_radiance + moon_radiance + day_radiance, 1.0);
 }

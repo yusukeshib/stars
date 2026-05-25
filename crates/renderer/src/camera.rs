@@ -1,6 +1,7 @@
 use astronomy::photometry::DEFAULT_EXTINCTION_K_RGB;
 use astronomy::{
-    apparent_sun, equatorial_to_horizontal_matrix, illuminants, lmst_radians, Observer,
+    apparent_moon, apparent_sun, equatorial_to_horizontal_matrix, illuminants, lmst_radians,
+    Observer,
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -48,8 +49,11 @@ pub struct CameraUniform {
     /// `[turbidity, observer_altitude_m, solar_illuminance_lux, enabled]`.
     pub atmosphere_params: [f32; 4],
     /// Top-of-atmosphere solar RGB illuminant, normalised around D65. `w` is
-    /// reserved for moonlight intensity once the Moon ephemeris lands.
+    /// currently unused.
     pub solar_rgb: [f32; 4],
+    /// Apparent Moon direction in equatorial coordinates. `w` is approximate
+    /// moonlight illuminance in lux before local horizon/airmass attenuation.
+    pub moon_eq_illuminance: [f32; 4],
 }
 
 /// Named atmosphere presets shared by CLI, native viewer, and web hosts.
@@ -352,6 +356,10 @@ impl Camera {
         let sun_dir = sun.direction_equatorial();
         let solar_lux = illuminants::solar_illuminance_lux(sun.distance_au) as f32;
         let solar_rgb = illuminants::SOLAR_LINEAR_RGB;
+        let moon = apparent_moon(self.observer.julian_date);
+        let moon_dir = moon.direction_equatorial();
+        let moon_lux =
+            illuminants::lunar_illuminance_lux(moon.illuminated_fraction, moon.distance_km) as f32;
         let scattering_enabled = if self.atmosphere.sunlit_scattering {
             1.0
         } else {
@@ -388,6 +396,7 @@ impl Camera {
                 solar_rgb[2] as f32,
                 0.0,
             ],
+            moon_eq_illuminance: [moon_dir.x, moon_dir.y, moon_dir.z, moon_lux],
         }
     }
 

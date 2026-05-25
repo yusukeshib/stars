@@ -36,6 +36,27 @@ pub const SOLAR_LINEAR_RGB: [f64; 3] = [0.950, 1.000, 1.089];
 /// ELP2000 Moon geometry can modulate it instead of inventing a new unit.
 pub const FULL_MOON_ILLUMINANCE_LUX: f64 = 0.25;
 
+/// Mean geocentric lunar distance, in kilometres, used to scale first-order
+/// moonlight brightness before the final ELP2000 / photometric phase law lands.
+pub const MEAN_MOON_DISTANCE_KM: f64 = 384_400.0;
+
+/// Approximate moonlight illuminance for a given illuminated fraction and
+/// geocentric distance.
+///
+/// This deliberately stays conservative: the illuminated fraction already
+/// handles new/full Moon endpoints, and the `phase^1.5` term is a compact
+/// stand-in for the opposition surge and crescent darkening until the renderer
+/// adopts the Krisciunas & Schaefer 1991 lunar sky-brightness model.
+pub fn lunar_illuminance_lux(illuminated_fraction: f64, distance_km: f64) -> f64 {
+    let phase = illuminated_fraction.clamp(0.0, 1.0);
+    let distance = if distance_km.is_finite() && distance_km > 0.0 {
+        distance_km
+    } else {
+        MEAN_MOON_DISTANCE_KM
+    };
+    FULL_MOON_ILLUMINANCE_LUX * phase.powf(1.5) * (MEAN_MOON_DISTANCE_KM / distance).powi(2)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -50,5 +71,14 @@ mod tests {
     #[test]
     fn sun_is_many_orders_brighter_than_full_moon() {
         assert!(solar_illuminance_lux(1.0) / FULL_MOON_ILLUMINANCE_LUX > 100_000.0);
+    }
+
+    #[test]
+    fn lunar_illuminance_tracks_phase_and_distance() {
+        let full = lunar_illuminance_lux(1.0, MEAN_MOON_DISTANCE_KM);
+        assert!((full - FULL_MOON_ILLUMINANCE_LUX).abs() < 1e-12);
+        assert_eq!(lunar_illuminance_lux(0.0, MEAN_MOON_DISTANCE_KM), 0.0);
+        assert!(lunar_illuminance_lux(0.5, MEAN_MOON_DISTANCE_KM) < full * 0.5);
+        assert!(lunar_illuminance_lux(1.0, MEAN_MOON_DISTANCE_KM * 0.9) > full);
     }
 }
