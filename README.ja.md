@@ -24,6 +24,7 @@
 - OTA と接眼レンズの組み合わせから倍率、プレートスケール、射出瞳、実視野を求める望遠鏡接眼レンズシミュレーション。
 - CLI / desktop / web で共有できる schema-versioned JSON session と、短い共有向けの Web session URL。
 - 決定的な validation / demo 用 scene preset と、任意実行の screenshot review 用 gallery。
+- 引用用 metadata、Zenodo release archive 用 metadata、モデル選択を確認する standards-compliance page。
 
 ## CLI 生成ギャラリー
 
@@ -92,14 +93,16 @@ scripts            カタログ取得・README 画像生成・WASM build helper
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — セットアップ、チェック、PR 方針、数値変更時のルール。
 - [`VALIDATION.md`](VALIDATION.md) — 科学的・数値的な検証方針と現在の限界。
 - [`DATA_SOURCES.md`](DATA_SOURCES.md) — カタログ、星座データ、文献データの出典。
+- [`CITATION.cff`](CITATION.cff) と [`docs/citation.md`](docs/citation.md) — 推奨 citation text、Zenodo release DOI workflow、data/source caveat。
+- [`docs/standards-compliance.md`](docs/standards-compliance.md) — 実装済みの IAU/SOFA 系 routine、近似、non-goal。
 - [`docs/scene-presets.md`](docs/scene-presets.md) — 決定的な named scene と JSON session export workflow。
 - [`docs/validation-gallery.md`](docs/validation-gallery.md) — 生成式 demo gallery と任意実行の screenshot regression workflow。
 
 ## 現在の開発フォーカス
 
-Phase 1、Phase 1'、Phase 2、Phase 4 の全天投影、Phase 4 の地球外・銀河視点、そして Phase 4 の望遠鏡接眼レンズシミュレーションは実装済みです。次は、見た目の追加だけでなく、再現性・引用可能性・検証可能性・教育用途を強くする順番で進めるのが自然です。
+Phase 1、Phase 1'、Phase 2、citation / standards documentation、Phase 4 の全天投影、Phase 4 の地球外・銀河視点、そして Phase 4 の望遠鏡接眼レンズシミュレーションは実装済みです。次は、見た目の追加だけでなく、再現性・検証可能性・教育用途を強くする順番で進めるのが自然です。
 
-1. `CITATION.cff`、standards-compliance note、早期の notebook example。
+1. CLI / session output を使った早期の notebook example。
 2. Gaia / Tycho / Hipparcos ingest の前に、catalog backend のスケーリング設計。
 3. Messier / NGC などの deep-sky overlay。
 4. accessibility、観測計画機能の polish、変光星 light curve。

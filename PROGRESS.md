@@ -16,7 +16,9 @@ Implemented phase groups:
 - Phase 1' physical dark-sky visual pipeline.
 - Phase 2 time systems, apparent-place corrections, atmosphere, solar-system
   bodies, and planning UI.
-- Phase 3 schema-versioned JSON sessions, deterministic scene presets, and a validation/demo gallery workflow.
+- Phase 3 schema-versioned JSON sessions, deterministic scene presets, a
+  validation/demo gallery workflow, citation metadata, and standards-compliance
+  notes.
 - Phase 4 full-sky projections and external galactic viewpoint.
 
 Still open:
@@ -295,6 +297,28 @@ Primary implementation areas:
 - `apps/web/frontend/src/session.ts`
 - `apps/web/frontend/src/components/StatusBar.tsx`
 
+### Citation and standards baseline
+
+Implemented the first citable-platform baseline for Phase 3:
+
+- `CITATION.cff` provides repository-level software citation metadata and
+  preferred citation guidance for teaching, publications, validation reports,
+  and derivative software.
+- `.zenodo.json` records release-archive metadata so tagged GitHub releases can
+  be deposited in Zenodo and cited with version-specific DOIs once minted.
+- `docs/citation.md` gives the preferred citation text, Zenodo release
+  checklist, and caveats that must accompany scientific figures: code identity,
+  JSON session, catalog/data identity, model limits, and rendering limits.
+- `docs/standards-compliance.md` lists implemented IAU/SOFA-aligned constants
+  and routines, renderer-grade approximations, and deliberate non-goals.
+
+Validation:
+
+- metadata files are text/JSON/YAML and are syntax-checked as part of this
+  documentation-only change;
+- the standards page cross-references the implementation files that contain the
+  pinned numerical tests.
+
 ### Scene presets and validation gallery
 
 Implemented deterministic Phase 3 scene presets for reproducible demos,
@@ -463,7 +487,11 @@ The documentation has been split into purpose-specific files:
 - `ARCHITECTURE.md` for crate boundaries and host integration;
 - `CONTRIBUTING.md` for development process;
 - `VALIDATION.md` for scientific validation policy;
-- `DATA_SOURCES.md` for data provenance.
+- `DATA_SOURCES.md` for data provenance;
+- `CITATION.cff`, `.zenodo.json`, and `docs/citation.md` for citation and
+  release-archive metadata;
+- `docs/standards-compliance.md` for IAU/SOFA-aligned routines,
+  approximations, and non-goals.
 
 ## Next implementation log entries
 

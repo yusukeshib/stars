@@ -1,0 +1,39 @@
+cff-version: 1.2.0
+message: >-
+  If you use stars in teaching, publications, figures, validation reports, or
+  derivative software, please cite the archived release you used and include the
+  JSON session / data manifest needed to reproduce the scene.
+type: software
+title: "stars: a physically informed cross-platform sky renderer"
+authors:
+  - family-names: Shibata
+    given-names: Yusuke
+repository-code: "https://github.com/yusukeshib/stars"
+url: "https://github.com/yusukeshib/stars"
+abstract: >-
+  stars is a Rust sky-rendering engine and reference set of CLI, desktop, and
+  web hosts for reproducible planetarium scenes. It documents its time-scale,
+  coordinate, photometry, atmosphere, catalog, and rendering approximations so
+  rendered scenes can be reviewed, cited, and regenerated from portable JSON
+  sessions.
+keywords:
+  - astronomy
+  - planetarium
+  - sky renderer
+  - reproducibility
+  - Rust
+  - WebGPU
+  - astronomical visualization
+identifiers:
+  - type: url
+    value: "https://github.com/yusukeshib/stars/releases"
+  - type: url
+    value: "https://github.com/yusukeshib/stars/blob/main/docs/citation.md"
+preferred-citation:
+  type: software
+  title: "stars: a physically informed cross-platform sky renderer"
+  authors:
+    - family-names: Shibata
+      given-names: Yusuke
+  repository-code: "https://github.com/yusukeshib/stars"
+  url: "https://github.com/yusukeshib/stars"

@@ -67,9 +67,10 @@ large new data integrations, then continue the remaining visual Phase 4 work in
 small, shippable slices. Phase 1, Phase 1', Phase 2, the core stellar
 apparent-place corrections, full-sky projections, the fixed external galactic
 viewpoint, telescope eyepiece simulation, custom external viewpoint origins,
-scene presets, and the validation/demo gallery workflow are now complete. A row is
-`✅ done` only when the model named in its references is implemented,
-documented, tested, and wired into all relevant hosts.
+scene presets, the validation/demo gallery workflow, citation metadata, and the
+standards-compliance page are now complete. A row is `✅ done` only when the
+model named in its references is implemented, documented, tested, and wired into
+all relevant hosts.
 
 ### Atmosphere implementation ladder
 
@@ -91,17 +92,15 @@ is split into independently shippable rungs:
    with the model limits.
 
 There are currently no `⏳ next` atmosphere rows; the active queue has moved to
-reproducible sessions, validation scenes, citable platform work, and Phase 4
-visual polish.
+notebook examples, catalog scaling design, and Phase 4 visual polish.
 
 ### Recommended near-term sequence
 
 These items are intentionally ordered before the largest catalog additions so
 future features have stable scenes, source manifests, and review hooks:
 
-1. **Citable platform baseline:** `CITATION.cff`, standards-compliance notes,
-   and early notebook examples that can use CLI/session outputs before full
-   Python bindings land.
+1. **Notebook reproducibility examples:** examples that use CLI/session outputs
+   before full Python bindings land.
 2. **Catalog scaling design:** document the backend, identifier, LOD,
    streaming, and WASM-subset plan before Gaia / Tycho / Hipparcos ingest.
 3. **Visual and UX polish:** deep-sky overlays, accessibility, observation
@@ -170,8 +169,8 @@ Columns:
 | `P3-05` | 3 | **Python bindings (PyO3)** | `astronomy` + `catalog` callable from Jupyter; early notebook examples may use CLI renders and JSON sessions before full bindings land | ⬜ |
 | `P3-06` | 3 | **Headless server mode** | HTTP service that returns PNGs and metadata JSON from a supplied scene/session (already 90% there in `apps/cli`) | ⬜ |
 | `P3-07` | 3 | **Sharable JSON sessions** | Schema-versioned JSON sessions cover observer, time scales, view, overlays, projection/viewpoint, active corrections, atmosphere, catalog snapshot, eyepiece, and app version across CLI, desktop, and web hosts | ✅ done (`stars_host_common::session`, `apps/{cli,viewer,web}`) |
-| `P3-08` | 3 | **`CITATION.cff` + Zenodo DOI** | Citable per-release artifact; include data/source caveats and preferred citation text | ⏳ next |
-| `P3-09` | 3 | **Standards-compliance doc** | One page listing every IAU resolution / SOFA routine, approximation, and deliberate non-goal the code implements or does not implement | ⏳ next |
+| `P3-08` | 3 | **`CITATION.cff` + Zenodo DOI** | `CITATION.cff`, `.zenodo.json`, and `docs/citation.md` define preferred citation text, release DOI workflow, and data/source caveats | ✅ done |
+| `P3-09` | 3 | **Standards-compliance doc** | `docs/standards-compliance.md` lists implemented IAU/SOFA-aligned constants/routines, approximations, and deliberate non-goals | ✅ done |
 | `P3-10` | 3 | **Scene presets** | Deterministic named scenes for Tokyo tonight, dark sky, noon, sunset, civil/nautical/astronomical twilight, moonlit night, eclipse aid, all-sky maps, and external galactic viewpoints | ✅ done (`stars_host_common::presets`, `apps/{cli,viewer}`) |
 | `P3-11` | 3 | **Validation / demo gallery + visual regression** | Render preset PNGs with fixed inputs; publish a human gallery and run perceptual or tolerance-based screenshot comparisons where CI can do so reliably | ✅ done (`docs/validation-gallery.md`, `scripts/render-validation-gallery.sh`) |
 | `P3-12` | 3 | **Guided education mode** | Cross-host tour content explaining horizon, equator, ecliptic, galactic plane, time motion, twilight, and projection choices | ⬜ |
