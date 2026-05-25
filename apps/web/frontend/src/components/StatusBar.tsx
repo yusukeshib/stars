@@ -125,14 +125,6 @@ export function StatusBar({
   const setLongitude = (longitudeDeg: number) => {
     onSetObserver({ ...observer, longitudeDeg: clamp(longitudeDeg, -180, 180) });
   };
-  const setAtmospherePreset = (preset: AtmospherePreset) => {
-    onSetAtmosphere({
-      ...atmosphere,
-      preset,
-      ...ATMOSPHERE_PRESET_DEFAULTS[preset],
-    });
-  };
-
   const time = new Date(timeMs);
   const hour = time.getHours();
   const minute = time.getMinutes();
@@ -244,157 +236,18 @@ export function StatusBar({
 
       {openPopover === "settings" && (
         <PopoverPanel title="Settings" onClose={() => setOpenPopover(null)}>
-          <Section label="OVERLAYS">
-            <OverlayToggles config={overlays} onChange={onSetOverlays} />
-          </Section>
-          <Section label="PLANETS">
-            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <input
-                type="checkbox"
-                checked={planets.enabled}
-                onChange={(e) => onSetPlanets({ enabled: e.target.checked })}
-              />
-              Mercury → Neptune
-            </label>
-          </Section>
-          <Section label="PROJECTION">
-            <label htmlFor="sky-projection" style={labelStyle}>
-              Screen projection
-            </label>
-            <select
-              id="sky-projection"
-              value={projection.projection}
-              onChange={(e) =>
-                onSetProjection({ projection: e.target.value as SkyProjection })
-              }
-              style={{ ...inputStyle, width: "100%" }}
-            >
-              {SKY_PROJECTIONS.map((p) => (
-                <option key={p} value={p}>
-                  {SKY_PROJECTION_LABELS[p]}
-                </option>
-              ))}
-            </select>
-            <p style={{ margin: "8px 0 0", fontSize: 11, opacity: 0.55 }}>
-              Full-sky maps ignore FOV but still rotate with azimuth/altitude.
-            </p>
-          </Section>
-          {planning && <PlanningPanel planning={planning} />}
-          <Section label="ATMOSPHERE">
-            <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-              <input
-                type="checkbox"
-                checked={atmosphere.enabled}
-                onChange={(e) => onSetAtmosphere({ ...atmosphere, enabled: e.target.checked })}
-              />
-              Atmosphere / extinction
-            </label>
-
-            <label htmlFor="atmosphere-preset" style={labelStyle}>
-              Preset
-            </label>
-            <select
-              id="atmosphere-preset"
-              value={atmosphere.preset}
-              onChange={(e) => setAtmospherePreset(e.target.value as AtmospherePreset)}
-              disabled={!atmosphere.enabled}
-              style={{ ...inputStyle, width: "100%" }}
-            >
-              {ATMOSPHERE_PRESETS.map((preset) => (
-                <option key={preset} value={preset}>
-                  {ATMOSPHERE_PRESET_LABELS[preset]}
-                </option>
-              ))}
-            </select>
-
-            <SliderNumberRow
-              id="atmosphere-turbidity"
-              label="Turbidity"
-              value={atmosphere.turbidity}
-              min={1.7}
-              max={10}
-              step={0.1}
-              decimals={1}
-              disabled={!atmosphere.enabled}
-              onChange={(turbidity) =>
-                onSetAtmosphere({ ...atmosphere, turbidity: clamp(turbidity, 1.7, 10) })
-              }
-            />
-            <SliderNumberRow
-              id="atmosphere-altitude"
-              label="Observer altitude (m)"
-              value={atmosphere.observerAltitudeM}
-              min={0}
-              max={9000}
-              step={100}
-              decimals={0}
-              disabled={!atmosphere.enabled}
-              onChange={(observerAltitudeM) =>
-                onSetAtmosphere({
-                  ...atmosphere,
-                  observerAltitudeM: clamp(observerAltitudeM, 0, 9000),
-                })
-              }
-            />
-            <SliderNumberRow
-              id="atmosphere-ozone"
-              label="Ozone column (DU)"
-              value={atmosphere.ozoneDu}
-              min={0}
-              max={600}
-              step={25}
-              decimals={0}
-              disabled={!atmosphere.enabled}
-              onChange={(ozoneDu) =>
-                onSetAtmosphere({ ...atmosphere, ozoneDu: clamp(ozoneDu, 0, 600) })
-              }
-            />
-            <SliderNumberRow
-              id="atmosphere-visibility"
-              label="Visibility (km)"
-              value={atmosphere.visibilityKm}
-              min={1}
-              max={200}
-              step={1}
-              decimals={0}
-              disabled={!atmosphere.enabled}
-              onChange={(visibilityKm) =>
-                onSetAtmosphere({ ...atmosphere, visibilityKm: clamp(visibilityKm, 1, 200) })
-              }
-            />
-            <SliderNumberRow
-              id="atmosphere-pressure"
-              label="Pressure (hPa)"
-              value={atmosphere.pressureHpa}
-              min={0}
-              max={1100}
-              step={10}
-              decimals={0}
-              disabled={!atmosphere.enabled}
-              onChange={(pressureHpa) =>
-                onSetAtmosphere({ ...atmosphere, pressureHpa: clamp(pressureHpa, 0, 1100) })
-              }
-            />
-            <SliderNumberRow
-              id="atmosphere-temperature"
-              label="Temperature (°C)"
-              value={atmosphere.temperatureC}
-              min={-80}
-              max={60}
-              step={1}
-              decimals={0}
-              disabled={!atmosphere.enabled}
-              onChange={(temperatureC) =>
-                onSetAtmosphere({ ...atmosphere, temperatureC: clamp(temperatureC, -80, 60) })
-              }
-            />
-          </Section>
-          <button type="button" onClick={onCopySessionUrl} style={buttonStyle}>
-            Copy session URL
-          </button>
-          <p style={{ margin: "14px 0 0", fontSize: 11, opacity: 0.45 }}>
-            drag the sky to look around · scroll to zoom
-          </p>
+          <SettingsPanel
+            overlays={overlays}
+            atmosphere={atmosphere}
+            planets={planets}
+            projection={projection}
+            planning={planning}
+            onSetOverlays={onSetOverlays}
+            onSetAtmosphere={onSetAtmosphere}
+            onSetPlanets={onSetPlanets}
+            onSetProjection={onSetProjection}
+            onCopySessionUrl={onCopySessionUrl}
+          />
         </PopoverPanel>
       )}
 
@@ -476,12 +329,229 @@ function PopoverPanel({
   );
 }
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+type SettingsPanelProps = Pick<
+  Props,
+  | "overlays"
+  | "atmosphere"
+  | "planets"
+  | "projection"
+  | "planning"
+  | "onSetOverlays"
+  | "onSetAtmosphere"
+  | "onSetPlanets"
+  | "onSetProjection"
+  | "onCopySessionUrl"
+>;
+
+function SettingsPanel({
+  overlays,
+  atmosphere,
+  planets,
+  projection,
+  planning,
+  onSetOverlays,
+  onSetAtmosphere,
+  onSetPlanets,
+  onSetProjection,
+  onCopySessionUrl,
+}: SettingsPanelProps) {
+  const setAtmospherePreset = (preset: AtmospherePreset) => {
+    onSetAtmosphere({
+      ...atmosphere,
+      preset,
+      ...ATMOSPHERE_PRESET_DEFAULTS[preset],
+    });
+  };
+
   return (
-    <section style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 11, opacity: 0.55, marginBottom: 6, letterSpacing: 0.6 }}>
-        {label}
-      </div>
+    <div style={{ display: "grid", gap: 10 }}>
+      <SettingCard
+        title="View & objects"
+        description="Choose the map projection and the solar-system bodies drawn with the stars."
+      >
+        <label style={checkboxRowStyle}>
+          <input
+            type="checkbox"
+            checked={planets.enabled}
+            onChange={(e) => onSetPlanets({ enabled: e.target.checked })}
+            style={{ accentColor: "#8fb1ff" }}
+          />
+          Mercury → Neptune
+        </label>
+
+        <label htmlFor="sky-projection" style={{ ...labelStyle, marginTop: 10 }}>
+          Screen projection
+        </label>
+        <select
+          id="sky-projection"
+          value={projection.projection}
+          onChange={(e) => onSetProjection({ projection: e.target.value as SkyProjection })}
+          style={{ ...inputStyle, width: "100%" }}
+        >
+          {SKY_PROJECTIONS.map((p) => (
+            <option key={p} value={p}>
+              {SKY_PROJECTION_LABELS[p]}
+            </option>
+          ))}
+        </select>
+        <p style={helperTextStyle}>
+          Full-sky maps ignore FOV but still rotate with azimuth/altitude.
+        </p>
+      </SettingCard>
+
+      <SettingCard
+        title="Overlays"
+        description="Reference lines and labels are grouped by purpose so it is easier to find what to turn on."
+      >
+        <OverlayToggles config={overlays} onChange={onSetOverlays} />
+      </SettingCard>
+
+      {planning && <PlanningPanel planning={planning} />}
+
+      <SettingCard
+        title="Atmosphere & extinction"
+        description="Model sky colour, haze, refraction, and local air conditions."
+      >
+        <label style={{ ...checkboxRowStyle, marginBottom: 10 }}>
+          <input
+            type="checkbox"
+            checked={atmosphere.enabled}
+            onChange={(e) => onSetAtmosphere({ ...atmosphere, enabled: e.target.checked })}
+            style={{ accentColor: "#8fb1ff" }}
+          />
+          Atmosphere / extinction
+        </label>
+
+        <label htmlFor="atmosphere-preset" style={labelStyle}>
+          Preset
+        </label>
+        <select
+          id="atmosphere-preset"
+          value={atmosphere.preset}
+          onChange={(e) => setAtmospherePreset(e.target.value as AtmospherePreset)}
+          disabled={!atmosphere.enabled}
+          style={{ ...inputStyle, width: "100%" }}
+        >
+          {ATMOSPHERE_PRESETS.map((preset) => (
+            <option key={preset} value={preset}>
+              {ATMOSPHERE_PRESET_LABELS[preset]}
+            </option>
+          ))}
+        </select>
+
+        <div style={advancedControlGridStyle}>
+          <SliderNumberRow
+            id="atmosphere-turbidity"
+            label="Turbidity"
+            value={atmosphere.turbidity}
+            min={1.7}
+            max={10}
+            step={0.1}
+            decimals={1}
+            disabled={!atmosphere.enabled}
+            onChange={(turbidity) =>
+              onSetAtmosphere({ ...atmosphere, turbidity: clamp(turbidity, 1.7, 10) })
+            }
+          />
+          <SliderNumberRow
+            id="atmosphere-altitude"
+            label="Observer altitude (m)"
+            value={atmosphere.observerAltitudeM}
+            min={0}
+            max={9000}
+            step={100}
+            decimals={0}
+            disabled={!atmosphere.enabled}
+            onChange={(observerAltitudeM) =>
+              onSetAtmosphere({
+                ...atmosphere,
+                observerAltitudeM: clamp(observerAltitudeM, 0, 9000),
+              })
+            }
+          />
+          <SliderNumberRow
+            id="atmosphere-ozone"
+            label="Ozone column (DU)"
+            value={atmosphere.ozoneDu}
+            min={0}
+            max={600}
+            step={25}
+            decimals={0}
+            disabled={!atmosphere.enabled}
+            onChange={(ozoneDu) =>
+              onSetAtmosphere({ ...atmosphere, ozoneDu: clamp(ozoneDu, 0, 600) })
+            }
+          />
+          <SliderNumberRow
+            id="atmosphere-visibility"
+            label="Visibility (km)"
+            value={atmosphere.visibilityKm}
+            min={1}
+            max={200}
+            step={1}
+            decimals={0}
+            disabled={!atmosphere.enabled}
+            onChange={(visibilityKm) =>
+              onSetAtmosphere({ ...atmosphere, visibilityKm: clamp(visibilityKm, 1, 200) })
+            }
+          />
+          <SliderNumberRow
+            id="atmosphere-pressure"
+            label="Pressure (hPa)"
+            value={atmosphere.pressureHpa}
+            min={0}
+            max={1100}
+            step={10}
+            decimals={0}
+            disabled={!atmosphere.enabled}
+            onChange={(pressureHpa) =>
+              onSetAtmosphere({ ...atmosphere, pressureHpa: clamp(pressureHpa, 0, 1100) })
+            }
+          />
+          <SliderNumberRow
+            id="atmosphere-temperature"
+            label="Temperature (°C)"
+            value={atmosphere.temperatureC}
+            min={-80}
+            max={60}
+            step={1}
+            decimals={0}
+            disabled={!atmosphere.enabled}
+            onChange={(temperatureC) =>
+              onSetAtmosphere({ ...atmosphere, temperatureC: clamp(temperatureC, -80, 60) })
+            }
+          />
+        </div>
+      </SettingCard>
+
+      <SettingCard
+        title="Session"
+        description="Share this exact location, time, projection, and display setup."
+      >
+        <button type="button" onClick={onCopySessionUrl} style={buttonStyle}>
+          Copy session URL
+        </button>
+        <p style={{ ...helperTextStyle, marginTop: 10 }}>
+          Drag the sky to look around · scroll to zoom
+        </p>
+      </SettingCard>
+    </div>
+  );
+}
+
+function SettingCard({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section style={settingCardStyle}>
+      <div style={settingCardTitleStyle}>{title}</div>
+      <p style={settingCardDescriptionStyle}>{description}</p>
       {children}
     </section>
   );
@@ -495,7 +565,10 @@ function fmtEventTime(ms: number | null): string {
 
 function PlanningPanel({ planning }: { planning: PlanningTable }) {
   return (
-    <Section label="RISE / TRANSIT / SET">
+    <SettingCard
+      title="Planning"
+      description="Tonight's rise, transit, set, and twilight windows for major objects."
+    >
       <div style={{ maxHeight: 170, overflow: "auto", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
         {planning.rows.map((row) => (
           <div
@@ -523,7 +596,7 @@ function PlanningPanel({ planning }: { planning: PlanningTable }) {
           </div>
         ))}
       </div>
-    </Section>
+    </SettingCard>
   );
 }
 
@@ -640,7 +713,7 @@ const popoverStyle: React.CSSProperties = {
   position: "absolute",
   left: 0,
   bottom: "calc(100% + 10px)",
-  width: "min(360px, calc(100vw - 28px))",
+  width: "min(420px, calc(100vw - 28px))",
   maxHeight: "calc(100vh - 110px)",
   overflowY: "auto",
   overscrollBehavior: "contain",
@@ -658,6 +731,45 @@ const labelStyle: React.CSSProperties = {
   display: "block",
   marginBottom: 5,
   opacity: 0.7,
+};
+
+const helperTextStyle: React.CSSProperties = {
+  margin: "8px 0 0",
+  fontSize: 11,
+  opacity: 0.55,
+};
+
+const checkboxRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  cursor: "pointer",
+};
+
+const settingCardStyle: React.CSSProperties = {
+  padding: "11px 12px 12px",
+  background: "rgba(255, 255, 255, 0.035)",
+  border: "1px solid rgba(255, 255, 255, 0.09)",
+  borderRadius: 10,
+};
+
+const settingCardTitleStyle: React.CSSProperties = {
+  color: "#dbe7ff",
+  fontSize: 11,
+  letterSpacing: 0.65,
+  textTransform: "uppercase",
+};
+
+const settingCardDescriptionStyle: React.CSSProperties = {
+  margin: "4px 0 10px",
+  opacity: 0.55,
+  fontSize: 11,
+};
+
+const advancedControlGridStyle: React.CSSProperties = {
+  marginTop: 2,
+  display: "grid",
+  gap: 2,
 };
 
 const inputStyle: React.CSSProperties = {

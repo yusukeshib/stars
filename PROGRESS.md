@@ -57,7 +57,10 @@ Implemented overlay controls across the three reference hosts:
 
 - CLI flags for selecting overlays, disabling overlays, grid step, and opacity.
 - Desktop viewer flag parity with the CLI.
-- Web settings UI for overlay selection.
+- Web settings UI for overlay selection, organized into view/object,
+  overlay, planning, atmosphere, and session sections.
+- Web overlay controls grouped by reference geometry, constellations, labels,
+  and line styling.
 - Web localStorage persistence for observer and view state.
 
 Primary implementation areas:

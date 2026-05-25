@@ -108,7 +108,7 @@ Columns:
 | `P1-02` | 1 | **Overlay layers** — horizon, cardinals, alt-az grid, equatorial grid, ecliptic, celestial equator, meridian | All seven shipped in PR #1 | ✅ done |
 | `P1-03` | 1 | **CLI flags** — `--overlays`, `--no-overlays`, `--grid-step-deg`, `--overlay-opacity` | `apps/cli` | ✅ done |
 | `P1-04` | 1 | **Desktop viewer flags** — parity with CLI | `apps/viewer` | ✅ done |
-| `P1-05` | 1 | **Web HUD redesign** — gear button + modal settings panel | `apps/web/frontend` | ✅ done |
+| `P1-05` | 1 | **Web HUD redesign** — gear button + organized modal settings panel | `apps/web/frontend` | ✅ done |
 | `P1-06` | 1 | **localStorage persistence** — observer + view survive reloads | `apps/web/frontend` | ✅ done |
 | `P1-07` | 1 | **Web overlay toggles** — mirror CLI flags inside the settings panel | `apps/web/frontend` | ✅ done |
 | `P1-08` | 1 | **Galactic equator overlay** | Same line pipeline as ecliptic; uses the transform from Phase 1' | ✅ done (`renderer::overlay`) |
