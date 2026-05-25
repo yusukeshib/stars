@@ -1,8 +1,15 @@
 use std::f64::consts::TAU;
 
+/// Julian Date of the J2000.0 epoch: 2000-01-01 12:00 TT.
+///
+/// This is the IAU-standard epoch used for catalog-frame constants and is the
+/// zero point for the sidereal-time polynomial below.
 pub const J2000_JD: f64 = 2_451_545.0;
+/// Julian Date of the Unix/POSIX epoch, 1970-01-01 00:00 UTC.
 pub const UNIX_EPOCH_JD: f64 = 2_440_587.5;
+/// SI seconds per mean solar day, by definition of the Julian Date scale.
 pub const SECONDS_PER_DAY: f64 = 86_400.0;
+/// Fixed offset TT−TAI = 32.184 s, IAU 1976 time-scale definition.
 const TT_MINUS_TAI_SECONDS: f64 = 32.184;
 
 /// One row in the UTC leap-second table.
