@@ -29,6 +29,13 @@ const MAX_MAGNITUDE: f64 = 8.0;
 /// (HYG leaves the cell empty in that case). 100 kpc is far beyond the
 /// stellar Milky Way disc (≈30 kpc), so no real star is filtered out by
 /// this threshold.
+///
+/// HYG also contains the Sun (`proper=Sol`) as a synthetic row at `dist=0`,
+/// `ra=0`, `dec=0`, `mag=-26.7`. It is not a background catalogue star: if
+/// uploaded to the star renderer it becomes an enormous saturated PSF that
+/// looks like a bogus Moon/Sun disk. Solar-system bodies must be rendered by
+/// the ephemeris path instead, so non-positive distances are rejected here.
+const MIN_DISTANCE_PC: f64 = 0.0;
 const MAX_DISTANCE_PC: f64 = 100_000.0;
 
 pub fn load_from_csv(data: &str) -> Vec<Star> {
@@ -51,7 +58,7 @@ pub fn load_from_csv(data: &str) -> Vec<Star> {
             continue;
         }
         if let Some(dist) = raw.dist {
-            if dist >= MAX_DISTANCE_PC {
+            if dist <= MIN_DISTANCE_PC || dist >= MAX_DISTANCE_PC {
                 continue;
             }
         }
@@ -105,5 +112,17 @@ mod tests {
         );
         let stars = load_from_csv(&csv);
         assert_eq!(stars.len(), 1, "should filter mag > {MAX_MAGNITUDE}");
+    }
+
+    #[test]
+    fn filters_synthetic_sun_row() {
+        let csv = format!(
+            "{HEADER}\n\
+             0,,,,,,Sol,0.0,0.0,0.0,0.0,0.0,0.0,-26.7,4.85,G2V,0.656,0,0,0,0,0,0,0,0,0,0,,,Ori,1,1,,1.0,,,\n\
+             1,1,,,,,Sirius,6.752477,-16.716116,2.637,0.0,0.0,0.0,-1.46,1.45,A1V,-0.01,0,0,0,0,0,0,0,0,0,0,,,CMa,1,1,,1.0,,,\n"
+        );
+        let stars = load_from_csv(&csv);
+        assert_eq!(stars.len(), 1, "the Sun is not a catalogue star");
+        assert!((stars[0].magnitude - (-1.46)).abs() < 0.01);
     }
 }

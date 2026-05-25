@@ -182,18 +182,23 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 //    The PSF shape (relative falloff exponents) is preserved; only the
 //    central-amplitude mixing differs.
 
-const PSF_CORE_SIGMA_PX: f32 = 0.45;
+const PSF_CORE_SIGMA_PX: f32 = 0.6;
 const PSF_SOFT_OFFSET_PX: f32 = 1.0;
 
-// Peak-amplitude weights. The core dominates the centre, while the halo terms
-// are deliberately low-amplitude. Earlier values made the fixed 32px star
-// sprite tonemap as a filled white disk for the brightest catalogue stars —
-// visually indistinguishable from a bogus rendered Moon. Keep the Spencer
-// falloff shapes, but make the broad corneal term a subtle glare tail rather
-// than an apparent angular diameter.
+// Peak-amplitude weights. The core dominates the centre, the halos add a
+// visible glow only on stars bright enough for the (small) halo amplitude
+// to survive the Reinhard tonemap — i.e. exactly the brightest few stars,
+// which matches what a real eye sees.
+//
+// The 0.15 / 0.05 split between the two halo components is empirical: the
+// 1/r³ lenticular halo is the bright inner glow (visible by the 2nd or
+// 3rd magnitude); the 1/r² corneal halo is the very broad outer glow,
+// visible only on stars below 0 magnitude. These ratios preserve
+// Spencer's qualitative result that the lenticular component contributes
+// more visible light than the corneal one for typical bright sources.
 const PSF_W_CORE: f32 = 1.0;
-const PSF_W_LENTICULAR: f32 = 0.045;
-const PSF_W_CORNEAL: f32 = 0.006;
+const PSF_W_LENTICULAR: f32 = 0.15;
+const PSF_W_CORNEAL: f32 = 0.05;
 
 // =============================================================================
 // Ciliary corona (the cross-shaped 'spikes' on bright stars).
@@ -216,7 +221,7 @@ const PSF_W_CORNEAL: f32 = 0.006;
 
 const CORONA_RAYS_EXPONENT: f32 = 60.0;
 const CORONA_FALLOFF_PER_PX: f32 = 0.18;
-const CORONA_AMPLITUDE: f32 = 0.006;
+const CORONA_AMPLITUDE: f32 = 0.012;
 
 fn radial_psf(r_px: f32) -> f32 {
     // Each component normalised to peak 1 at r = 0, then mixed by
@@ -250,8 +255,8 @@ fn corona(uv: vec2<f32>, r_px: f32) -> f32 {
 // truncation has no academic cost because the literature integrates the
 // Spencer PSF over the visual field too — we are just imposing the same
 // kind of compact-support window that any finite-aperture rendering must.
-const APODIZATION_FADE_START: f32 = 0.45;
-const APODIZATION_FADE_END: f32 = 0.95;
+const APODIZATION_FADE_START: f32 = 0.85;
+const APODIZATION_FADE_END: f32 = 1.0;
 
 fn apodize(r_norm: f32) -> f32 {
     // Smooth Hermite interpolation from 1 -> 0 over [fade_start, fade_end].
