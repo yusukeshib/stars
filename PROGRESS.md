@@ -16,7 +16,7 @@ Implemented phase groups:
 - Phase 1' physical dark-sky visual pipeline.
 - Phase 2 time systems, apparent-place corrections, atmosphere, solar-system
   bodies, and planning UI.
-- Phase 4 full-sky projections.
+- Phase 4 full-sky projections and external galactic viewpoint.
 
 Still open:
 
@@ -297,6 +297,33 @@ Validation:
   and average all-sky pixel solid angle;
 - host-common tests pin native CLI enum mapping;
 - smoke renders cover perspective, Mollweide, Aitoff, and Hammer shader paths.
+
+### Out-of-Earth galactic viewpoint
+
+Implemented a Phase 4 external camera mode for viewing the local Milky Way from
+above the north galactic pole. The default Earth-centred view remains unchanged,
+but hosts can now select `galactic-north` / `SkyViewpoint::GalacticNorth` to:
+
+- move the camera off Earth into a parsec-scale IAU galactic Cartesian frame;
+- place HYG catalogue stars by their stored parsec distances;
+- skip atmosphere, refraction, and Earth-local overlays for the external map;
+- render an analytic top-down Milky Way disc in the skyglow pass so local stars
+  have galaxy-scale context.
+
+Primary implementation areas:
+
+- `renderer::SkyViewpoint` and camera viewpoint uniforms;
+- HYG distance plumbing in `catalog::Star` and `renderer::StarInstance`;
+- `crates/renderer/src/shaders/star.wgsl` for parsec-position projection;
+- `crates/renderer/src/shaders/skyglow.wgsl` for the top-down disc context;
+- viewpoint controls in `apps/cli`, `apps/viewer`, and `apps/web`.
+
+Validation:
+
+- catalog tests pin loaded distances;
+- renderer tests pin viewpoint string round-trips and the external camera
+  uniform;
+- host-common tests pin native CLI enum mapping.
 
 ## Documentation progress
 

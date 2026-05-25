@@ -47,6 +47,9 @@ struct CameraUniform {
     // [projection_mode, full_sky_scale_x, full_sky_scale_y, full_sky_flag].
     // mode: 0=perspective, 1=Mollweide, 2=Aitoff, 3=Hammer.
     projection_params: vec4<f32>,
+    // [viewpoint_mode, external_eye_x_pc, external_eye_y_pc, external_eye_z_pc].
+    // mode: 0=Earth-centred sky dome, 1=external north-galactic-pole map.
+    viewpoint_params: vec4<f32>,
     // Mercury through Neptune: xyz = direction, w = angular radius.
     planet_eq_radius: array<vec4<f32>, 7>,
     // xyz = display colour, w = apparent visual magnitude.
@@ -553,6 +556,53 @@ fn ray_dir_from_ndc(ndc: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(normalize((camera.inv_view_proj * vec4<f32>(view.xyz, 0.0)).xyz), 1.0);
 }
 
+fn external_world_ray_from_ndc(ndc: vec2<f32>) -> vec4<f32> {
+    let near4 = camera.inv_view_proj * vec4<f32>(ndc, 0.0, 1.0);
+    let far4 = camera.inv_view_proj * vec4<f32>(ndc, 1.0, 1.0);
+    let near = near4.xyz / near4.w;
+    let far = far4.xyz / far4.w;
+    return vec4<f32>(normalize(far - near), 1.0);
+}
+
+fn spiral_arm_modulation(phi: f32, r_kpc: f32) -> f32 {
+    // Log-spiral arms as a deliberately compact visual context model. It is
+    // not a star-count catalogue; it gives the external Phase-4 view enough
+    // Milky-Way-disc structure to orient the local HYG stars.
+    let pitch = 0.32;
+    let arm_phase = phi - log(max(r_kpc, 0.2)) / pitch;
+    let four_arms = 0.5 + 0.5 * cos(4.0 * arm_phase);
+    return 0.65 + 0.35 * pow(max(four_arms, 0.0), 8.0);
+}
+
+fn external_galaxy_disc_radiance(ndc: vec2<f32>, zeropoint: f32) -> vec4<f32> {
+    let origin = camera.viewpoint_params.yzw;
+    let ray = external_world_ray_from_ndc(ndc).xyz;
+    if abs(ray.z) < 1e-5 {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    let t = -origin.z / ray.z;
+    if t <= 0.0 {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+
+    let hit = origin + ray * t;
+    let r_pc = length(hit.xy);
+    let r_kpc = r_pc / 1000.0;
+    if r_kpc > 35.0 {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+
+    let phi = atan2(hit.y, hit.x);
+    let disk = exp(-r_kpc / 3.0) * spiral_arm_modulation(phi, r_kpc);
+    let thin_lane = 0.75 + 0.25 * exp(-pow(abs(hit.y) / 900.0, 2.0));
+    let bulge = 3.0 * exp(-pow(r_kpc / 1.2, 2.0));
+    let local = 0.20 * exp(-pow((r_kpc - 8.2) / 2.5, 2.0));
+    let flux = (0.020 * disk * thin_lane + 0.015 * bulge + local * 0.01)
+        * exp(-0.4 * LN10 * (7.5 - zeropoint));
+    let tint = mix(vec3<f32>(1.0, 0.78, 0.55), vec3<f32>(0.78, 0.84, 1.0), clamp(r_kpc / 18.0, 0.0, 1.0));
+    return vec4<f32>(tint * flux, 1.0);
+}
+
 // Fullscreen triangle (big-triangle trick, no vertex buffer).
 @vertex
 fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
@@ -568,6 +618,11 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    let zeropoint = camera.viewport_pixel_sr_zeropoint.w;
+    if camera.viewpoint_params.x > 0.5 {
+        return external_galaxy_disc_radiance(input.ndc, zeropoint);
+    }
+
     // Reconstruct the camera ray direction in equatorial coordinates. The
     // perspective path unprojects through the inverse view-projection matrix;
     // all-sky maps invert the selected spherical projection first and then
@@ -587,7 +642,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Surface brightness → per-pixel linear flux on the renderer's
     // brightness scale (where a point source of magnitude `zeropoint`
     // produces unit flux; the same scale used by the star pass).
-    let zeropoint = camera.viewport_pixel_sr_zeropoint.w;
     let pixel_sr = camera.viewport_pixel_sr_zeropoint.z;
     let pixel_arcsec2 = pixel_sr * ARCSEC2_PER_SR;
     // Convert J2000 equatorial rays into the fixed J2000 ecliptic frame.

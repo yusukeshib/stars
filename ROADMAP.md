@@ -60,11 +60,12 @@ topocentric positions. The goal is for sky colour to be driven by physical
 illuminants and atmosphere parameters rather than by hard-coded gradients.
 
 **Current highest priority:** continue the remaining visual Phase 4 work in a
-small, shippable sequence: out-of-Earth / galactic viewpoints, deep-sky
-overlays, and telescope eyepiece simulation. Phase 1, Phase 1', Phase 2, the
-core stellar apparent-place corrections, and full-sky projections are now
-complete. A row is `✅ done` only when the model named in its references is
-implemented, documented, tested, and wired into all relevant hosts.
+small, shippable sequence: custom external viewpoint origins, deep-sky overlays,
+and telescope eyepiece simulation. Phase 1, Phase 1', Phase 2, the core stellar
+apparent-place corrections, full-sky projections, and the fixed external
+galactic viewpoint are now complete. A row is `✅ done` only when the model
+named in its references is implemented, documented, tested, and wired into all
+relevant hosts.
 
 ### Atmosphere implementation ladder
 
@@ -153,11 +154,12 @@ Columns:
 | `P3-08` | 3 | **`CITATION.cff` + Zenodo DOI** | Citable per-release artifact | ⬜ |
 | `P3-09` | 3 | **Standards-compliance doc** | One page listing every IAU resolution / SOFA routine the code implements | ⬜ |
 | `P4-01` | 4 | **Full-sky projections** | Mollweide, Aitoff, and Hammer all-sky maps selectable in CLI, desktop, and web; perspective remains the default | ✅ done (`renderer::SkyProjection`, `shaders/{star,skyglow,overlay}.wgsl`, `apps/{cli,viewer,web}`) |
-| `P4-02` | 4 | **Out-of-Earth viewpoint** | Camera not centered on Earth; render the Milky Way disc from above | ⬜ |
+| `P4-02` | 4 | **Out-of-Earth viewpoint** | `SkyViewpoint::GalacticNorth` moves the camera above the IAU galactic plane, places HYG stars by parsec distance, and draws an analytic top-down Milky Way disc in CLI, desktop, and web | ✅ done (`renderer::SkyViewpoint`, `shaders/{star,skyglow}.wgsl`, `apps/{cli,viewer,web}`) |
 | `P4-03` | 4 | **Deep-sky overlay** (Messier, NGC) | Light catalogs first; full NGC/IC is large | ⬜ |
 | `P4-04` | 4 | **Variable star light curves** | Pull AAVSO; show on the side panel for a hovered variable | ⬜ |
 | `P4-05` | 4 | **Sound + screen-reader accessibility** | Az/Alt audio cues; ARIA labels on every control | ⬜ |
 | `P4-06` | 4 | **Telescope eyepiece simulation** | Plate scale + true field of view from OTA + eyepiece pair | ⬜ |
+| `P4-07` | 4 | **Custom external viewpoint origin** | Generalize `SkyViewpoint::GalacticNorth` into a user-selectable parsec-scale origin + orientation (`origin_pc`, target/up or yaw/pitch/roll), expose it in CLI / desktop / web session URLs, and document which coordinate frame is used | ⏳ next |
 
 ---
 

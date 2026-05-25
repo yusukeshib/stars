@@ -22,7 +22,7 @@ const MAX_MAGNITUDE: f64 = 8.0;
 /// background star catalog baked into the WASM bundle.
 const MIN_DISTANCE_PC: f64 = 0.0;
 const MAX_DISTANCE_PC: f64 = 100_000.0;
-const STAR_MAGIC: &[u8; 8] = b"STRBIN2\0";
+const STAR_MAGIC: &[u8; 8] = b"STRBIN3\0";
 
 fn main() {
     println!("cargo:rerun-if-changed=data/hyg_v42.csv");
@@ -51,12 +51,11 @@ fn generate_star_catalog() {
         if raw.mag > MAX_MAGNITUDE {
             continue;
         }
-        if raw
-            .dist
-            .is_some_and(|dist| dist <= MIN_DISTANCE_PC || dist >= MAX_DISTANCE_PC)
-        {
-            continue;
-        }
+        let distance_pc = match raw.dist {
+            Some(dist) if dist > MIN_DISTANCE_PC && dist < MAX_DISTANCE_PC => dist as f32,
+            Some(_) => continue,
+            None => 1.0,
+        };
 
         let (x, y, z) = radec_hours_deg_to_cartesian(raw.ra, raw.dec);
         let (pmx, pmy, pmz) = proper_motion_vector_radians_per_year(
@@ -74,6 +73,7 @@ fn generate_star_catalog() {
             pmx,
             pmy,
             pmz,
+            distance_pc,
         });
     }
 
@@ -101,6 +101,9 @@ fn generate_star_catalog() {
         writer
             .write_all(&record.pmz.to_le_bytes())
             .expect("write pmz");
+        writer
+            .write_all(&record.distance_pc.to_le_bytes())
+            .expect("write distance");
     }
 }
 
@@ -113,6 +116,7 @@ struct StarRecord {
     pmx: f32,
     pmy: f32,
     pmz: f32,
+    distance_pc: f32,
 }
 
 fn radec_hours_deg_to_cartesian(ra_hours: f64, dec_degrees: f64) -> (f64, f64, f64) {

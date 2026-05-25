@@ -5,6 +5,8 @@ import {
   ATMOSPHERE_PRESETS,
   SKY_PROJECTION_LABELS,
   SKY_PROJECTIONS,
+  SKY_VIEWPOINT_LABELS,
+  SKY_VIEWPOINTS,
   type AtmosphereConfig,
   type AtmospherePreset,
   type Observer,
@@ -13,6 +15,7 @@ import {
   type PlanningTable,
   type ProjectionConfig,
   type SkyProjection,
+  type SkyViewpoint,
   type View,
 } from "../observer";
 import { OverlayToggles } from "./OverlayToggles";
@@ -477,10 +480,15 @@ export function StatusBar({
           {fmtDeg(view.altitudeDeg)}
           <span style={separatorStyle}>  ·  </span>
           <span style={mutedStyle}>FOV </span>
-          {projection.projection === "perspective" ? fmtDeg(view.fovDeg) : "full sky"}
+          {projection.viewpoint === "earth" && projection.projection !== "perspective"
+            ? "full sky"
+            : fmtDeg(view.fovDeg)}
           <span style={separatorStyle}>  ·  </span>
           <span style={mutedStyle}>Projection </span>
           {SKY_PROJECTION_LABELS[projection.projection]}
+          <span style={separatorStyle}>  ·  </span>
+          <span style={mutedStyle}>Viewpoint </span>
+          {SKY_VIEWPOINT_LABELS[projection.viewpoint]}
           <span style={separatorStyle}>  ·  </span>
           <span style={mutedStyle}>Sky </span>
           {twilight}
@@ -572,13 +580,30 @@ function SettingsPanel({
           Mercury → Neptune
         </label>
 
+        <label htmlFor="sky-viewpoint" style={{ ...labelStyle, marginTop: 10 }}>
+          Viewpoint
+        </label>
+        <select
+          id="sky-viewpoint"
+          value={projection.viewpoint}
+          onChange={(e) => onSetProjection({ ...projection, viewpoint: e.target.value as SkyViewpoint })}
+          style={{ ...inputStyle, width: "100%" }}
+        >
+          {SKY_VIEWPOINTS.map((v) => (
+            <option key={v} value={v}>
+              {SKY_VIEWPOINT_LABELS[v]}
+            </option>
+          ))}
+        </select>
+
         <label htmlFor="sky-projection" style={{ ...labelStyle, marginTop: 10 }}>
           Screen projection
         </label>
         <select
           id="sky-projection"
           value={projection.projection}
-          onChange={(e) => onSetProjection({ projection: e.target.value as SkyProjection })}
+          onChange={(e) => onSetProjection({ ...projection, projection: e.target.value as SkyProjection })}
+          disabled={projection.viewpoint !== "earth"}
           style={{ ...inputStyle, width: "100%" }}
         >
           {SKY_PROJECTIONS.map((p) => (
@@ -588,7 +613,7 @@ function SettingsPanel({
           ))}
         </select>
         <p style={helperTextStyle}>
-          Full-sky maps ignore FOV but still rotate with azimuth/altitude.
+          Earth full-sky maps ignore FOV but still rotate with azimuth/altitude. The galactic viewpoint uses a perspective parsec-scale camera above the Milky Way disc and hides Earth-local overlays.
         </p>
       </SettingCard>
 

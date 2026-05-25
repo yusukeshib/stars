@@ -33,6 +33,8 @@ The current engine already includes:
   and twilight sky colour;
 - web planning helpers for rise / transit / set and twilight intervals;
 - perspective plus Mollweide, Aitoff, and Hammer full-sky projections;
+- an out-of-Earth `galactic-north` viewpoint that renders the local Milky Way
+  disc from above;
 - shareable web session URLs.
 
 See [`PROGRESS.md`](PROGRESS.md) for the implementation log and
@@ -94,13 +96,12 @@ More detail lives in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Current focus
 
-Phase 1, Phase 1', Phase 2, and Phase 4 full-sky projection work are
-implemented. The most useful remaining visual work is now Phase 4 rendering
-polish, in this order:
+Phase 1, Phase 1', Phase 2, Phase 4 full-sky projection work, and the Phase 4
+out-of-Earth galactic viewpoint are implemented. The most useful remaining
+visual work is now Phase 4 rendering polish, in this order:
 
-1. out-of-Earth / galactic viewpoint experiments;
-2. deep-sky overlays for Messier / NGC-style objects;
-3. telescope eyepiece simulation.
+1. deep-sky overlays for Messier / NGC-style objects;
+2. telescope eyepiece simulation.
 
 ## Contributing
 

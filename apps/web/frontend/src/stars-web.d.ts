@@ -8,6 +8,7 @@ declare module "stars-web" {
     set_overlays(layers: string[], gridStepDeg: number, opacity: number): void;
     set_planets_enabled(enabled: boolean): void;
     set_projection(projection: string): void;
+    set_viewpoint(viewpoint: string): void;
     planning_table_json(): string;
     set_atmosphere_config(
       enabled: boolean,

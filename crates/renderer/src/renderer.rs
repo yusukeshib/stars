@@ -160,11 +160,11 @@ impl Renderer {
         }
     }
 
-    /// Enable or disable the diffuse skyglow pass. When disabled the HDR
+    /// Enable or disable the skyglow/background pass. When disabled the HDR
     /// scene buffer is cleared to black and the star + overlay passes
-    /// composite directly on top — useful for debugging or for views from
-    /// outside the Earth-atmosphere context (where the Milky Way's
-    /// integrated starlight model also stops making physical sense).
+    /// composite directly on top — useful for debugging. Earth-centred views
+    /// use this pass for diffuse sky brightness; the external galactic
+    /// viewpoint uses it for the top-down Milky Way disc context.
     pub fn set_skyglow_enabled(&mut self, enabled: bool) {
         self.skyglow_enabled = enabled;
     }

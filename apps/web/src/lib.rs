@@ -8,7 +8,8 @@ use astronomy::{
 use catalog::load_embedded;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, LocalView, OverlayConfig,
-    OverlayKind, Renderer, SkyProjection, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    OverlayKind, Renderer, SkyProjection, SkyViewpoint, StarInstance,
+    DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -129,6 +130,7 @@ impl StarView {
                     s.color,
                     s.magnitude,
                     LIMITING_MAGNITUDE,
+                    s.distance_pc,
                 )
             })
             .collect();
@@ -247,6 +249,13 @@ impl StarView {
     pub fn set_projection(&self, projection: String) {
         self.state.borrow_mut().camera.projection =
             SkyProjection::from_kebab_str(&projection).unwrap_or_default();
+    }
+
+    /// Select the camera viewpoint by kebab-case name: `earth` or
+    /// `galactic-north`. Unknown names fall back to the Earth-centred sky dome.
+    pub fn set_viewpoint(&self, viewpoint: String) {
+        self.state.borrow_mut().camera.viewpoint =
+            SkyViewpoint::from_kebab_str(&viewpoint).unwrap_or_default();
     }
 
     /// Return the current local-evening rise/transit/set table and twilight

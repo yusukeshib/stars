@@ -77,6 +77,10 @@ fn all_sky_project(view_dir: vec3<f32>, other_view_dir: vec3<f32>) -> vec4<f32> 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var out: VertexOutput;
+    if overlay.projection_params.x < -0.5 {
+        out.clip_position = vec4<f32>(2.0, 2.0, 0.0, 1.0);
+        return out;
+    }
     if overlay.projection_params.w > 0.5 {
         out.clip_position = all_sky_project(
             (overlay.view_proj * vec4<f32>(input.position, 0.0)).xyz,

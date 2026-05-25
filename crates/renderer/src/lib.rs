@@ -8,7 +8,7 @@ mod text;
 mod tonemap;
 mod vertex;
 
-pub use camera::{Atmosphere, AtmospherePreset, Camera, LocalView, SkyProjection};
+pub use camera::{Atmosphere, AtmospherePreset, Camera, LocalView, SkyProjection, SkyViewpoint};
 pub use overlay::{OverlayConfig, OverlayKind};
 pub use renderer::Renderer;
 pub use vertex::{

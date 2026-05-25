@@ -64,12 +64,17 @@ export type PlanetsConfig = {
 export const SKY_PROJECTIONS = ["perspective", "mollweide", "aitoff", "hammer"] as const;
 export type SkyProjection = (typeof SKY_PROJECTIONS)[number];
 
+export const SKY_VIEWPOINTS = ["earth", "galactic-north"] as const;
+export type SkyViewpoint = (typeof SKY_VIEWPOINTS)[number];
+
 export type ProjectionConfig = {
   projection: SkyProjection;
+  viewpoint: SkyViewpoint;
 };
 
 export const DEFAULT_PROJECTION_CONFIG: ProjectionConfig = {
   projection: "perspective",
+  viewpoint: "earth",
 };
 
 export const DEFAULT_PLANETS_CONFIG: PlanetsConfig = {
@@ -126,11 +131,19 @@ export const isAtmospherePreset = (s: unknown): s is AtmospherePreset =>
 export const isSkyProjection = (s: unknown): s is SkyProjection =>
   typeof s === "string" && (SKY_PROJECTIONS as readonly string[]).includes(s);
 
+export const isSkyViewpoint = (s: unknown): s is SkyViewpoint =>
+  typeof s === "string" && (SKY_VIEWPOINTS as readonly string[]).includes(s);
+
 export const SKY_PROJECTION_LABELS: Record<SkyProjection, string> = {
   perspective: "Perspective",
   mollweide: "Mollweide (full sky)",
   aitoff: "Aitoff (full sky)",
   hammer: "Hammer (full sky)",
+};
+
+export const SKY_VIEWPOINT_LABELS: Record<SkyViewpoint, string> = {
+  earth: "Earth-centred sky",
+  "galactic-north": "Milky Way from above",
 };
 
 /// Human-readable labels for the UI; order also drives display order.

@@ -37,6 +37,9 @@ struct CameraUniform {
     // [projection_mode, full_sky_scale_x, full_sky_scale_y, full_sky_flag].
     // mode: 0=perspective, 1=Mollweide, 2=Aitoff, 3=Hammer.
     projection_params: vec4<f32>,
+    // [viewpoint_mode, external_eye_x_pc, external_eye_y_pc, external_eye_z_pc].
+    // mode: 0=Earth-centred sky dome, 1=external north-galactic-pole map.
+    viewpoint_params: vec4<f32>,
 };
 
 fn viewport_size() -> vec2<f32> {
@@ -48,6 +51,15 @@ var<uniform> camera: CameraUniform;
 
 const PI: f32 = 3.14159265359;
 const HALF_PI: f32 = 1.57079632679;
+
+// IAU 1958 / J2000 equatorial → galactic rotation. Columns are the
+// equatorial basis vectors expressed in galactic coordinates, so
+// `EQ_TO_GAL * v_eq` yields `(x toward l=0, y toward l=90, z=N galactic pole)`.
+const EQ_TO_GAL = mat3x3<f32>(
+    vec3<f32>(-0.054875560, 0.494109427, -0.867666149),
+    vec3<f32>(-0.873437090, -0.444829629, -0.198076373),
+    vec3<f32>(-0.483835015, 0.746982244, 0.455983776),
+);
 
 fn all_sky_lon_lat_from_view_dir(view_dir: vec3<f32>) -> vec2<f32> {
     let d = normalize(view_dir);
@@ -179,6 +191,7 @@ struct VertexInput {
     @location(3) star_color: vec3<f32>,  // per-instance RGB color
     @location(4) star_brightness: f32,   // per-instance peak intensity multiplier
     @location(5) proper_motion: vec3<f32>, // per-instance Cartesian radians/year tangent
+    @location(6) distance_pc: f32,         // per-instance heliocentric distance in parsecs
 };
 
 struct VertexOutput {
@@ -194,11 +207,18 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
     let k_rgb = camera.extinction_k_rgb.xyz;
-    let atmosphere_active = k_rgb.x + k_rgb.y + k_rgb.z > 0.0;
+    let atmosphere_active = (camera.viewpoint_params.x < 0.5) && (k_rgb.x + k_rgb.y + k_rgb.z > 0.0);
     let corrected_j2000 = corrected_j2000_direction(input.star_pos, input.proper_motion);
-    let corrected_date = (camera.j2000_to_date * vec4<f32>(corrected_j2000, 0.0)).xyz;
-    let local_or_refracted = refract_equatorial_direction(corrected_date);
-    let clip = project_equatorial_direction(corrected_j2000, local_or_refracted, atmosphere_active);
+    var clip: vec4<f32>;
+    if camera.viewpoint_params.x > 0.5 {
+        let distance_pc = max(input.distance_pc, 0.0);
+        let galactic_position_pc = (EQ_TO_GAL * corrected_j2000) * distance_pc;
+        clip = camera.view_proj * vec4<f32>(galactic_position_pc, 1.0);
+    } else {
+        let corrected_date = (camera.j2000_to_date * vec4<f32>(corrected_j2000, 0.0)).xyz;
+        let local_or_refracted = refract_equatorial_direction(corrected_date);
+        clip = project_equatorial_direction(corrected_j2000, local_or_refracted, atmosphere_active);
+    }
 
     let pixel_offset = input.quad_pos * input.star_size;
     let ndc_offset = pixel_offset / viewport_size() * 2.0;
