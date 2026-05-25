@@ -101,7 +101,10 @@ For visual features, prefer small shippable slices:
 When a feature changes output appearance, include at least one of:
 
 - a deterministic unit test for the underlying model;
-- a screenshot in the PR description;
+- a screenshot in the PR description, preferably generated from a named scene
+  preset or `scripts/generate-readme-images.sh` when updating README images;
+- a visual-regression baseline or update when the change affects a covered
+  gallery scene;
 - a short before / after explanation;
 - a documented limitation if the model is deliberately approximate.
 
@@ -127,6 +130,8 @@ When adding catalog or reference data:
 4. Keep large data out of the repository unless there is a clear reason to
    embed it.
 5. If the data affects numerical output, add a validation test.
+6. For generated documentation images or gallery scenes, record the command or
+   session used to regenerate them.
 
 ## Documentation policy
 
@@ -159,7 +164,9 @@ Before asking for review:
 - [ ] WASM check passes if web-facing code changed.
 - [ ] Frontend typecheck passes if web UI changed.
 - [ ] Numerical output changes have pinned tests.
-- [ ] New data sources are documented.
+- [ ] Visual output changes include screenshots, scene presets, or a clear
+      before / after note.
+- [ ] New data sources and generated artifacts are documented.
 - [ ] README / roadmap / progress docs are updated if user-facing status changed.
 
 ## Good first areas
@@ -170,5 +177,6 @@ Useful self-contained areas include:
   directions, and degree marks;
 - Phase 4 full-sky projection plumbing;
 - Messier-only first pass for deep-sky overlays;
+- README / validation-gallery scene generation;
 - documentation improvements and validation notes;
 - additional tests around boundary cases in planning and time systems.

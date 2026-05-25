@@ -24,6 +24,15 @@
 - OTA と接眼レンズの組み合わせから倍率、プレートスケール、射出瞳、実視野を求める望遠鏡接眼レンズシミュレーション。
 - 共有可能な Web セッション URL。
 
+## CLI 生成ギャラリー
+
+以下の README 画像は `apps/cli` が生成した決定的な PNG です。更新する場合は
+`./scripts/generate-readme-images.sh` を実行します。
+
+| 東京の夏の空 | Hammer 全天投影 | 銀河北極からの外部視点 |
+|---|---|---|
+| ![東京の夏の空と overlay](docs/assets/readme/tokyo-summer-sky.png) | ![Hammer 全天投影と星座 overlay](docs/assets/readme/hammer-all-sky.png) | ![銀河北極からの外部視点](docs/assets/readme/galactic-north.png) |
+
 実装済み機能の記録は [`PROGRESS.md`](PROGRESS.md)、今後の計画は [`ROADMAP.md`](ROADMAP.md) を見てください。
 
 ## すぐ試す
@@ -61,7 +70,7 @@ crates/common      CLI / desktop viewer 向けの native host 共通処理
 apps/cli           PNG を出力する headless renderer
 apps/viewer        native desktop viewer
 apps/web           WASM engine wrapper と frontend UI
-scripts            カタログ取得・WASM build helper
+scripts            カタログ取得・README 画像生成・WASM build helper
 ```
 
 詳しい構造は [`ARCHITECTURE.md`](ARCHITECTURE.md) にあります。
@@ -77,10 +86,14 @@ scripts            カタログ取得・WASM build helper
 
 ## 現在の開発フォーカス
 
-Phase 1、Phase 1'、Phase 2、Phase 4 の全天投影、Phase 4 の地球外・銀河視点、そして Phase 4 の望遠鏡接眼レンズシミュレーションは実装済みです。今後の見た目に関わる大きな作業は、以下の順番で進めるのが自然です。
+Phase 1、Phase 1'、Phase 2、Phase 4 の全天投影、Phase 4 の地球外・銀河視点、そして Phase 4 の望遠鏡接眼レンズシミュレーションは実装済みです。次は、見た目の追加だけでなく、再現性・引用可能性・検証可能性・教育用途を強くする順番で進めるのが自然です。
 
-1. Messier / NGC などの deep-sky overlay。
-2. 変光星のサイドパネル光度曲線。
+1. schema-versioned JSON session と、決定的に再現できる scene preset。
+2. 代表的な空を集めた validation / demo gallery と visual regression check。
+3. `CITATION.cff`、standards-compliance note、早期の notebook example。
+4. Gaia / Tycho / Hipparcos ingest の前に、catalog backend のスケーリング設計。
+5. Messier / NGC などの deep-sky overlay。
+6. accessibility、観測計画機能の polish、変光星 light curve。
 
 ## 開発に参加する場合
 
