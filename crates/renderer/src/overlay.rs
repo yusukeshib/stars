@@ -1,5 +1,6 @@
 //! Sky overlays: horizon, cardinal marks, alt-az grid, equatorial grid,
-//! ecliptic, celestial equator, galactic equator, local meridian.
+//! ecliptic, celestial equator, galactic equator, local meridian,
+//! constellation lines, and IAU constellation boundaries.
 //!
 //! Two coordinate frames are supported per-layer:
 //! - **Equatorial** (J2000): geometry rotates with the celestial sphere as time
@@ -17,6 +18,11 @@ use std::f64::consts::{PI, TAU};
 use wgpu::util::DeviceExt;
 
 use crate::camera::Camera;
+
+mod data {
+    include!("data/constellation_boundaries.rs");
+    include!("data/constellation_lines.rs");
+}
 
 /// Mean obliquity of the ecliptic **at J2000.0**, IAU 2006 value
 /// (ε₀ = 84381.406″ = 23.4392911°), in radians.
@@ -68,6 +74,10 @@ pub enum OverlayKind {
     Meridian,
     /// Great circle at galactic latitude b = 0 (the Milky Way mid-plane).
     GalacticEquator,
+    /// Modern western constellation stick figures from Stellarium's HIP-pair skyculture.
+    ConstellationLines,
+    /// IAU/Delporte constellation boundaries, precessed from B1875 to J2000.
+    ConstellationBoundaries,
 }
 
 impl OverlayKind {
@@ -86,6 +96,8 @@ impl OverlayKind {
             OverlayKind::CelestialEquator => "celestial-equator",
             OverlayKind::Meridian => "meridian",
             OverlayKind::GalacticEquator => "galactic-equator",
+            OverlayKind::ConstellationLines => "constellation-lines",
+            OverlayKind::ConstellationBoundaries => "constellation-boundaries",
         }
     }
 
@@ -101,6 +113,8 @@ impl OverlayKind {
             "celestial-equator" => OverlayKind::CelestialEquator,
             "meridian" => OverlayKind::Meridian,
             "galactic-equator" => OverlayKind::GalacticEquator,
+            "constellation-lines" => OverlayKind::ConstellationLines,
+            "constellation-boundaries" => OverlayKind::ConstellationBoundaries,
             _ => return None,
         })
     }
@@ -402,6 +416,16 @@ fn build_layer(
             galactic_equator_circle(256),
             [0.55, 0.80, 1.00],
         ),
+        OverlayKind::ConstellationLines => (
+            OverlayFrame::Equatorial,
+            segments_to_vertices(&data::CONSTELLATION_LINE_SEGMENTS),
+            [0.35, 0.65, 1.00],
+        ),
+        OverlayKind::ConstellationBoundaries => (
+            OverlayFrame::Equatorial,
+            segments_to_vertices(&data::CONSTELLATION_BOUNDARY_SEGMENTS),
+            [0.45, 0.45, 0.55],
+        ),
     }
 }
 
@@ -590,6 +614,19 @@ fn galactic_equator_circle(n: usize) -> Vec<OverlayVertex> {
     verts
 }
 
+fn segments_to_vertices(segments: &[[f32; 6]]) -> Vec<OverlayVertex> {
+    let mut verts = Vec::with_capacity(segments.len() * 2);
+    for s in segments {
+        verts.push(OverlayVertex {
+            position: [s[0], s[1], s[2]],
+        });
+        verts.push(OverlayVertex {
+            position: [s[3], s[4], s[5]],
+        });
+    }
+    verts
+}
+
 fn meridian_local(n: usize) -> Vec<OverlayVertex> {
     let p = |t: f64| {
         let (s, c) = t.sin_cos();
@@ -681,6 +718,8 @@ mod tests {
             OverlayKind::CelestialEquator,
             OverlayKind::Meridian,
             OverlayKind::GalacticEquator,
+            OverlayKind::ConstellationLines,
+            OverlayKind::ConstellationBoundaries,
         ] {
             let s = kind.as_kebab_str();
             assert_eq!(
@@ -718,5 +757,36 @@ mod tests {
         // produce a degenerate buffer.
         let v = equatorial_grid(GRID_STEP_MAX_DEG);
         assert_eq!(v.len() % 2, 0);
+    }
+
+    #[test]
+    fn constellation_line_data_is_well_formed() {
+        let v = segments_to_vertices(&data::CONSTELLATION_LINE_SEGMENTS);
+        assert_eq!(v.len(), data::CONSTELLATION_LINE_SEGMENTS.len() * 2);
+        assert_eq!(v.len() % 2, 0);
+        for vertex in &v {
+            let r = (vertex.position[0].powi(2)
+                + vertex.position[1].powi(2)
+                + vertex.position[2].powi(2))
+            .sqrt();
+            assert!(
+                (r - 1.0).abs() < 1e-4,
+                "constellation vertex is not unit length"
+            );
+        }
+    }
+
+    #[test]
+    fn constellation_boundary_data_is_well_formed() {
+        let v = segments_to_vertices(&data::CONSTELLATION_BOUNDARY_SEGMENTS);
+        assert_eq!(v.len(), data::CONSTELLATION_BOUNDARY_SEGMENTS.len() * 2);
+        assert_eq!(v.len() % 2, 0);
+        for vertex in &v {
+            let r = (vertex.position[0].powi(2)
+                + vertex.position[1].powi(2)
+                + vertex.position[2].powi(2))
+            .sqrt();
+            assert!((r - 1.0).abs() < 1e-4, "boundary vertex is not unit length");
+        }
     }
 }
