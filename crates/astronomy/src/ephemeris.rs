@@ -7,9 +7,15 @@
 
 use glam::Vec3;
 
+use crate::{lmst_radians, Observer};
+
 const J2000_JD: f64 = 2_451_545.0;
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 const ARCSEC_TO_RAD: f64 = DEG_TO_RAD / 3600.0;
+const ASTRONOMICAL_UNIT_KM: f64 = 149_597_870.7;
+const EARTH_EQUATORIAL_RADIUS_KM: f64 = 6_378.14;
+const SOLAR_RADIUS_KM: f64 = 695_700.0;
+const LUNAR_RADIUS_KM: f64 = 1_737.4;
 
 /// Apparent geocentric Sun state for rendering.
 #[derive(Debug, Clone, Copy)]
@@ -62,13 +68,32 @@ impl MoonApparent {
 }
 
 fn equatorial_unit_vector(right_ascension_rad: f64, declination_rad: f64) -> Vec3 {
+    let [x, y, z] = equatorial_unit_vector_f64(right_ascension_rad, declination_rad);
+    Vec3::new(x as f32, y as f32, z as f32)
+}
+
+fn equatorial_unit_vector_f64(right_ascension_rad: f64, declination_rad: f64) -> [f64; 3] {
     let (sin_ra, cos_ra) = right_ascension_rad.sin_cos();
     let (sin_dec, cos_dec) = declination_rad.sin_cos();
-    Vec3::new(
-        (cos_dec * cos_ra) as f32,
-        (cos_dec * sin_ra) as f32,
-        sin_dec as f32,
-    )
+    [cos_dec * cos_ra, cos_dec * sin_ra, sin_dec]
+}
+
+fn ra_dec_from_equatorial_vector(v: [f64; 3]) -> (f64, f64, f64) {
+    let distance = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    let right_ascension_rad = v[1].atan2(v[0]).rem_euclid(std::f64::consts::TAU);
+    let declination_rad = (v[2] / distance).clamp(-1.0, 1.0).asin();
+    (right_ascension_rad, declination_rad, distance)
+}
+
+fn observer_equatorial_position_km(observer: Observer) -> [f64; 3] {
+    let lst = lmst_radians(observer.julian_date, observer.longitude_rad);
+    let (sin_lat, cos_lat) = observer.latitude_rad.sin_cos();
+    let (sin_lst, cos_lst) = lst.sin_cos();
+    [
+        EARTH_EQUATORIAL_RADIUS_KM * cos_lat * cos_lst,
+        EARTH_EQUATORIAL_RADIUS_KM * cos_lat * sin_lst,
+        EARTH_EQUATORIAL_RADIUS_KM * sin_lat,
+    ]
 }
 
 /// Apparent geocentric position of the Sun for a Julian Date.
@@ -128,6 +153,34 @@ pub fn apparent_sun(julian_date: f64) -> SunApparent {
     }
 }
 
+/// Apparent topocentric Sun state for an observer on Earth.
+///
+/// The solar parallax is only ≈8.8 arcsec, but applying it here keeps the
+/// renderer's Sun/Moon plumbing consistently observer-local before the future
+/// VSOP87 upgrade. The underlying geocentric solar longitude remains the
+/// compact Meeus value from [`apparent_sun`].
+pub fn apparent_sun_topocentric(observer: Observer) -> SunApparent {
+    let geo = apparent_sun(observer.julian_date);
+    let dir = equatorial_unit_vector_f64(geo.right_ascension_rad, geo.declination_rad);
+    let distance_km = geo.distance_au * ASTRONOMICAL_UNIT_KM;
+    let observer_km = observer_equatorial_position_km(observer);
+    let topo = [
+        dir[0] * distance_km - observer_km[0],
+        dir[1] * distance_km - observer_km[1],
+        dir[2] * distance_km - observer_km[2],
+    ];
+    let (right_ascension_rad, declination_rad, topocentric_distance_km) =
+        ra_dec_from_equatorial_vector(topo);
+
+    SunApparent {
+        right_ascension_rad,
+        declination_rad,
+        ecliptic_longitude_rad: geo.ecliptic_longitude_rad,
+        distance_au: topocentric_distance_km / ASTRONOMICAL_UNIT_KM,
+        angular_radius_rad: (SOLAR_RADIUS_KM / topocentric_distance_km).asin(),
+    }
+}
+
 /// Approximate geocentric Moon position for a Julian Date.
 ///
 /// This is the compact low-precision lunar orbit from Paul Schlyter's
@@ -176,8 +229,8 @@ pub fn apparent_moon(julian_date: f64) -> MoonApparent {
 
     let right_ascension_rad = y_eq.atan2(x_eq).rem_euclid(std::f64::consts::TAU);
     let declination_rad = z_eq.atan2((x_eq * x_eq + y_eq * y_eq).sqrt());
-    let distance_km = distance_earth_radii * 6378.14;
-    let angular_radius_rad = (1737.4 / distance_km).asin();
+    let distance_km = distance_earth_radii * EARTH_EQUATORIAL_RADIUS_KM;
+    let angular_radius_rad = (LUNAR_RADIUS_KM / distance_km).asin();
 
     let moon_dir = equatorial_unit_vector(right_ascension_rad, declination_rad);
     let sun_dir = apparent_sun(julian_date).direction_equatorial();
@@ -190,6 +243,32 @@ pub fn apparent_moon(julian_date: f64) -> MoonApparent {
         distance_km,
         angular_radius_rad,
         illuminated_fraction,
+    }
+}
+
+/// Apparent topocentric Moon state for an observer on Earth.
+///
+/// This subtracts the observer's geocentric position from the compact
+/// geocentric Moon vector. The correction reaches about one degree near the
+/// horizon, which is large enough to matter for moonlit-sky directionality,
+/// disk rendering, and rise/set timing even before the final ELP2000 model.
+pub fn apparent_moon_topocentric(observer: Observer) -> MoonApparent {
+    let geo = apparent_moon(observer.julian_date);
+    let dir = equatorial_unit_vector_f64(geo.right_ascension_rad, geo.declination_rad);
+    let observer_km = observer_equatorial_position_km(observer);
+    let topo = [
+        dir[0] * geo.distance_km - observer_km[0],
+        dir[1] * geo.distance_km - observer_km[1],
+        dir[2] * geo.distance_km - observer_km[2],
+    ];
+    let (right_ascension_rad, declination_rad, distance_km) = ra_dec_from_equatorial_vector(topo);
+
+    MoonApparent {
+        right_ascension_rad,
+        declination_rad,
+        distance_km,
+        angular_radius_rad: (LUNAR_RADIUS_KM / distance_km).asin(),
+        illuminated_fraction: geo.illuminated_fraction,
     }
 }
 
@@ -228,5 +307,47 @@ mod tests {
         let radius_arcmin = moon.angular_radius_rad.to_degrees() * 60.0;
         assert!((14.0..=17.5).contains(&radius_arcmin));
         assert!((0.0..=1.0).contains(&moon.illuminated_fraction));
+    }
+
+    fn angular_separation_rad(a_ra: f64, a_dec: f64, b_ra: f64, b_dec: f64) -> f64 {
+        let a = equatorial_unit_vector_f64(a_ra, a_dec);
+        let b = equatorial_unit_vector_f64(b_ra, b_dec);
+        (a[0] * b[0] + a[1] * b[1] + a[2] * b[2])
+            .clamp(-1.0, 1.0)
+            .acos()
+    }
+
+    #[test]
+    fn topocentric_moon_applies_diurnal_parallax() {
+        let observer = Observer::from_degrees(35.0, 139.0, 2_460_000.5);
+        let geo = apparent_moon(observer.julian_date);
+        let topo = apparent_moon_topocentric(observer);
+        let separation = angular_separation_rad(
+            geo.right_ascension_rad,
+            geo.declination_rad,
+            topo.right_ascension_rad,
+            topo.declination_rad,
+        )
+        .to_degrees();
+        assert!(separation > 0.01, "separation too small: {separation}°");
+        assert!(separation < 1.2, "separation too large: {separation}°");
+        assert_ne!(geo.distance_km, topo.distance_km);
+    }
+
+    #[test]
+    fn topocentric_sun_parallax_is_small_but_finite() {
+        let observer = Observer::from_degrees(35.0, 139.0, 2_460_000.5);
+        let geo = apparent_sun(observer.julian_date);
+        let topo = apparent_sun_topocentric(observer);
+        let separation_arcsec = angular_separation_rad(
+            geo.right_ascension_rad,
+            geo.declination_rad,
+            topo.right_ascension_rad,
+            topo.declination_rad,
+        )
+        .to_degrees()
+            * 3600.0;
+        assert!(separation_arcsec > 0.01);
+        assert!(separation_arcsec < 10.0);
     }
 }

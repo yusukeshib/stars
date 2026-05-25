@@ -4,12 +4,14 @@ struct CameraUniform {
     // struct layout matches the Rust-side `CameraUniform`); used by
     // shaders/skyglow.wgsl to recover per-pixel ray directions.
     inv_view_proj: mat4x4<f32>,
+    eq_to_local: mat4x4<f32>,
+    view_proj_local: mat4x4<f32>,
     // [viewport_width, viewport_height, pixel_solid_angle_sr, magnitude_zeropoint].
     viewport_pixel_sr_zeropoint: vec4<f32>,
     // Local zenith expressed in J2000 equatorial coordinates. Dotted with
-    // the unit-vector star position yields sin(altitude) directly, so
-    // per-star altitude is computed here on the GPU without uploading a
-    // separate rotation matrix.
+    // the unit-vector star position yields sin(altitude) directly for
+    // extinction; `eq_to_local` carries the full horizontal-frame rotation
+    // for atmospheric refraction.
     zenith_eq: vec4<f32>,
     // Per-channel extinction coefficients (mag per airmass). All zero
     // disables extinction.
@@ -56,6 +58,28 @@ fn atmospheric_attenuation(altitude_rad: f32, k_rgb: vec3<f32>) -> vec3<f32> {
     return exp(neg_oh_four_ln10 * k_rgb * x);
 }
 
+fn refracted_altitude_rad(true_altitude_rad: f32) -> f32 {
+    // Saemundsson 1986 / Meeus ch. 16 apparent refraction for standard
+    // pressure/temperature. Returns apparent altitude from true altitude.
+    // The expression is well-behaved down to about -1°, below which a simple
+    // stellar renderer should keep objects hidden rather than invent ducting.
+    let alt_deg = true_altitude_rad * (180.0 / 3.14159265359);
+    if alt_deg < -1.0 || alt_deg > 89.9 {
+        return true_altitude_rad;
+    }
+    let r_arcmin = 1.02 / tan((alt_deg + 10.3 / (alt_deg + 5.11)) * (3.14159265359 / 180.0));
+    return true_altitude_rad + (r_arcmin / 60.0) * (3.14159265359 / 180.0);
+}
+
+fn refract_equatorial_direction(eq_dir: vec3<f32>) -> vec3<f32> {
+    let local = (camera.eq_to_local * vec4<f32>(eq_dir, 0.0)).xyz;
+    let true_alt = asin(clamp(local.z, -1.0, 1.0));
+    let apparent_alt = refracted_altitude_rad(true_alt);
+    let az = atan2(local.x, local.y);
+    let cos_alt = cos(apparent_alt);
+    return vec3<f32>(sin(az) * cos_alt, cos(az) * cos_alt, sin(apparent_alt));
+}
+
 struct VertexInput {
     @location(0) quad_pos: vec2<f32>,    // per-vertex quad corner
     @location(1) star_pos: vec3<f32>,    // per-instance world position
@@ -76,7 +100,13 @@ struct VertexOutput {
 fn vs_main(input: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    let clip = camera.view_proj * vec4<f32>(input.star_pos, 1.0);
+    let k_rgb = camera.extinction_k_rgb.xyz;
+    let atmosphere_active = k_rgb.x + k_rgb.y + k_rgb.z > 0.0;
+    let clip = select(
+        camera.view_proj * vec4<f32>(input.star_pos, 1.0),
+        camera.view_proj_local * vec4<f32>(refract_equatorial_direction(input.star_pos), 1.0),
+        atmosphere_active,
+    );
 
     let pixel_offset = input.quad_pos * input.star_size;
     let ndc_offset = pixel_offset / viewport_size() * 2.0;
@@ -92,8 +122,6 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     // altitude in the observer's local horizontal frame. Skipped when the
     // host disables atmosphere (k_rgb = 0) so the multiplication is a
     // no-op identity rather than a hidden "horizon = invisible" rule.
-    let k_rgb = camera.extinction_k_rgb.xyz;
-    let atmosphere_active = k_rgb.x + k_rgb.y + k_rgb.z > 0.0;
     var attenuated_color = input.star_color;
     if atmosphere_active {
         let sin_alt = clamp(dot(input.star_pos, camera.zenith_eq.xyz), -1.0, 1.0);

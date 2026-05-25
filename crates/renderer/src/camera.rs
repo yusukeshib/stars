@@ -1,7 +1,7 @@
 use astronomy::photometry::DEFAULT_EXTINCTION_K_RGB;
 use astronomy::{
-    apparent_moon, apparent_sun, equatorial_to_horizontal_matrix, illuminants, lmst_radians,
-    Observer,
+    apparent_moon_topocentric, apparent_sun_topocentric, equatorial_to_horizontal_matrix,
+    illuminants, lmst_radians, Observer,
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -22,6 +22,13 @@ pub struct CameraUniform {
     /// coordinate — used by the skyglow pass to sample the
     /// surface-brightness model in galactic coordinates.
     pub inv_view_proj: [[f32; 4]; 4],
+    /// Rotation from equatorial coordinates into local ENU. The star shader
+    /// uses this to apply atmospheric refraction in the observer's horizontal
+    /// frame before projecting with [`Self::view_proj_local`].
+    pub eq_to_local: [[f32; 4]; 4],
+    /// View-projection matrix for local ENU geometry. Refracted star positions
+    /// are local apparent directions, not unrefracted equatorial directions.
+    pub view_proj_local: [[f32; 4]; 4],
     /// `[viewport_width, viewport_height, pixel_solid_angle_sr, magnitude_zeropoint]`.
     /// Packed into one `vec4` for WGSL 16-byte alignment.
     ///
@@ -352,11 +359,11 @@ impl Camera {
         } else {
             Atmosphere::DEFAULT.observer_altitude_m
         };
-        let sun = apparent_sun(self.observer.julian_date);
+        let sun = apparent_sun_topocentric(self.observer);
         let sun_dir = sun.direction_equatorial();
         let solar_lux = illuminants::solar_illuminance_lux(sun.distance_au) as f32;
         let solar_rgb = illuminants::SOLAR_LINEAR_RGB;
-        let moon = apparent_moon(self.observer.julian_date);
+        let moon = apparent_moon_topocentric(self.observer);
         let moon_dir = moon.direction_equatorial();
         let moon_lux =
             illuminants::lunar_illuminance_lux(moon.illuminated_fraction, moon.distance_km) as f32;
@@ -367,9 +374,13 @@ impl Camera {
         };
         let view_proj = self.view_proj();
         let inv_view_proj = view_proj.inverse();
+        let eq_to_local = self.equatorial_to_horizontal();
+        let view_proj_local = self.view_proj_local();
         CameraUniform {
             view_proj: view_proj.to_cols_array_2d(),
             inv_view_proj: inv_view_proj.to_cols_array_2d(),
+            eq_to_local: eq_to_local.to_cols_array_2d(),
+            view_proj_local: view_proj_local.to_cols_array_2d(),
             viewport_pixel_sr_zeropoint: [
                 width as f32,
                 height as f32,
