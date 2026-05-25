@@ -14,15 +14,11 @@
 //! matrix and the layer's RGBA color so a single shader handles every overlay.
 
 use bytemuck::{Pod, Zeroable};
+use catalog::{constellation_boundaries, constellation_lines, ConstellationSegment};
 use std::f64::consts::{PI, TAU};
 use wgpu::util::DeviceExt;
 
 use crate::camera::Camera;
-
-mod data {
-    include!(concat!(env!("OUT_DIR"), "/constellation_boundaries.rs"));
-    include!(concat!(env!("OUT_DIR"), "/constellation_lines.rs"));
-}
 
 /// Mean obliquity of the ecliptic **at J2000.0**, IAU 2006 value
 /// (ε₀ = 84381.406″ = 23.4392911°), in radians.
@@ -74,9 +70,9 @@ pub enum OverlayKind {
     Meridian,
     /// Great circle at galactic latitude b = 0 (the Milky Way mid-plane).
     GalacticEquator,
-    /// Modern western constellation stick figures from Stellarium's HIP-pair skyculture.
+    /// Modern western constellation stick figures from the catalog crate.
     ConstellationLines,
-    /// IAU/Delporte constellation boundaries, precessed from B1875 to J2000.
+    /// IAU/Delporte constellation boundaries from the catalog crate.
     ConstellationBoundaries,
 }
 
@@ -418,12 +414,12 @@ fn build_layer(
         ),
         OverlayKind::ConstellationLines => (
             OverlayFrame::Equatorial,
-            segments_to_vertices(&data::CONSTELLATION_LINE_SEGMENTS),
+            segments_to_vertices(&constellation_lines()),
             [0.35, 0.65, 1.00],
         ),
         OverlayKind::ConstellationBoundaries => (
             OverlayFrame::Equatorial,
-            segments_to_vertices(&data::CONSTELLATION_BOUNDARY_SEGMENTS),
+            segments_to_vertices(&constellation_boundaries()),
             [0.45, 0.45, 0.55],
         ),
     }
@@ -614,14 +610,14 @@ fn galactic_equator_circle(n: usize) -> Vec<OverlayVertex> {
     verts
 }
 
-fn segments_to_vertices(segments: &[[f32; 6]]) -> Vec<OverlayVertex> {
+fn segments_to_vertices(segments: &[ConstellationSegment]) -> Vec<OverlayVertex> {
     let mut verts = Vec::with_capacity(segments.len() * 2);
-    for s in segments {
+    for segment in segments {
         verts.push(OverlayVertex {
-            position: [s[0], s[1], s[2]],
+            position: segment.start,
         });
         verts.push(OverlayVertex {
-            position: [s[3], s[4], s[5]],
+            position: segment.end,
         });
     }
     verts
@@ -760,11 +756,22 @@ mod tests {
     }
 
     #[test]
-    fn constellation_line_data_is_well_formed() {
-        let v = segments_to_vertices(&data::CONSTELLATION_LINE_SEGMENTS);
-        assert_eq!(v.len(), data::CONSTELLATION_LINE_SEGMENTS.len() * 2);
-        assert_eq!(v.len() % 2, 0);
-        for vertex in &v {
+    fn constellation_line_vertices_are_well_formed() {
+        let v = segments_to_vertices(&constellation_lines());
+        assert_eq!(v.len(), 743 * 2);
+        assert_constellation_vertices_are_unit_length(&v);
+    }
+
+    #[test]
+    fn constellation_boundary_vertices_are_well_formed() {
+        let v = segments_to_vertices(&constellation_boundaries());
+        assert_eq!(v.len(), 1565 * 2);
+        assert_constellation_vertices_are_unit_length(&v);
+    }
+
+    fn assert_constellation_vertices_are_unit_length(vertices: &[OverlayVertex]) {
+        assert_eq!(vertices.len() % 2, 0);
+        for vertex in vertices {
             let r = (vertex.position[0].powi(2)
                 + vertex.position[1].powi(2)
                 + vertex.position[2].powi(2))
@@ -773,20 +780,6 @@ mod tests {
                 (r - 1.0).abs() < 1e-4,
                 "constellation vertex is not unit length"
             );
-        }
-    }
-
-    #[test]
-    fn constellation_boundary_data_is_well_formed() {
-        let v = segments_to_vertices(&data::CONSTELLATION_BOUNDARY_SEGMENTS);
-        assert_eq!(v.len(), data::CONSTELLATION_BOUNDARY_SEGMENTS.len() * 2);
-        assert_eq!(v.len() % 2, 0);
-        for vertex in &v {
-            let r = (vertex.position[0].powi(2)
-                + vertex.position[1].powi(2)
-                + vertex.position[2].powi(2))
-            .sqrt();
-            assert!((r - 1.0).abs() < 1e-4, "boundary vertex is not unit length");
         }
     }
 }
