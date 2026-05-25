@@ -57,8 +57,13 @@ Implemented overlay controls across the three reference hosts:
 
 - CLI flags for selecting overlays, disabling overlays, grid step, and opacity.
 - Desktop viewer flag parity with the CLI.
-- Web settings UI for overlay selection.
+- Web settings UI for overlay selection, organized into view/object,
+  overlay, planning, atmosphere, and session sections.
+- Web overlay controls grouped by reference geometry, constellations, labels,
+  and line styling.
 - Web localStorage persistence for observer and view state.
+- Web location panel address lookup that geocodes a place name into latitude /
+  longitude for the observer.
 
 Primary implementation areas:
 
@@ -251,6 +256,8 @@ Implemented web planning helpers and UI for:
 - local-evening rise / transit / set table;
 - Sun, Moon, and planet planning objects;
 - civil / nautical / astronomical twilight indicators;
+- draggable web status-bar date / time controls, stepping by one local day or
+  ten minutes respectively;
 - session URLs using plain query parameters, with no version gate.
 
 Primary implementation areas:

@@ -101,6 +101,34 @@ Maintenance rule:
 - Keep the coordinate epoch and preprocessing method explicit. Boundary data is
   easy to misuse if B1875 and J2000 coordinates are mixed.
 
+## Runtime web services
+
+### OpenStreetMap Nominatim search API
+
+Runtime endpoint:
+
+- `https://nominatim.openstreetmap.org/search`
+
+Used for:
+
+- browser-only address / place-name lookup in the web location panel;
+- converting a typed address into observer latitude / longitude.
+
+License / terms:
+
+- OpenStreetMap data is available under the Open Database License (ODbL);
+- Nominatim public API usage is subject to the OpenStreetMap Foundation
+  Nominatim usage policy.
+
+Implementation areas:
+
+- `apps/web/frontend/src/components/StatusBar.tsx`
+
+Preprocessing / local storage:
+
+- none; results are fetched at runtime and only the selected coordinates are
+  applied to the current browser session state.
+
 ## Literature-derived model inputs
 
 The roadmap names the primary references for implemented physical and
