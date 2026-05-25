@@ -86,14 +86,11 @@ const DEG_TO_RAD: f32 = 0.017453292519943295;
 const LN10: f32 = 2.30258509299;
 const EYE_PSF_SOLID_ANGLE_SR: f32 = 8.461594994075e-8;
 
-// Dark-sky surface brightness is written directly on the renderer's
-// physical brightness scale (no perceptual fudge). The Ferwerda 1996
-// adaptive tone-reproduction operator in `shaders/tonemap.wgsl` takes
-// care of mapping the dark-sky adaptation regime onto the display, so
-// the diffuse glow ends up visible against a genuinely-dark sky without
-// any constant boost being needed in this shader. The separate sunlit
-// scattering path below intentionally uses a star-atlas exposure
-// compression so the atmosphere layer does not erase the catalogue.
+// Dark-sky surface brightness is written directly on the renderer's physical
+// brightness scale (no perceptual fudge). The Ferwerda 1996 / Reinhard 2002
+// tone-reproduction operator maps that radiance to display space; sunlit and
+// twilight sky terms below also stay in the same HDR scale rather than using
+// visibility gates or star-atlas exposure cheats.
 const PERCEPTUAL_BOOST_MAGS: f32 = 0.0;
 
 fn s10_to_mag(s10: f32) -> f32 {
