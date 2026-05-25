@@ -68,12 +68,14 @@ const DEG_TO_RAD: f32 = 0.017453292519943295;
 const LN10: f32 = 2.30258509299;
 const EYE_PSF_SOLID_ANGLE_SR: f32 = 8.461594994075e-8;
 
-// Skyglow surface brightness is written directly on the renderer's
+// Dark-sky surface brightness is written directly on the renderer's
 // physical brightness scale (no perceptual fudge). The Ferwerda 1996
 // adaptive tone-reproduction operator in `shaders/tonemap.wgsl` takes
 // care of mapping the dark-sky adaptation regime onto the display, so
 // the diffuse glow ends up visible against a genuinely-dark sky without
-// any constant boost being needed in this shader.
+// any constant boost being needed in this shader. The separate sunlit
+// scattering path below intentionally uses a star-atlas exposure
+// compression so the atmosphere layer does not erase the catalogue.
 const PERCEPTUAL_BOOST_MAGS: f32 = 0.0;
 
 fn s10_to_mag(s10: f32) -> f32 {
@@ -199,11 +201,21 @@ fn preetham_sky_luminance_rgb(ray_dir: vec3<f32>, sin_alt: f32) -> vec3<f32> {
     return xyy_to_linear_rgb(vec3<f32>(x, y, Y * twilight * solar_scale));
 }
 
+// Artistic exposure compression for the daytime/twilight atmosphere layer.
+// The Preetham model returns physical cd/m² values; if those are converted
+// one-to-one into the same HDR buffer as point-source stars, the sky radiance
+// is so dominant that the catalogue appears to vanish. This renderer is an
+// interactive star atlas rather than a daylight visibility simulator, so keep
+// the sunlit sky colour/directionality while compressing its radiance relative
+// to stars enough that the star layer remains present for orientation.
+const SUNLIT_SKY_STAR_ATLAS_EXPOSURE: f32 = 3.0e-5;
+
 fn sunlit_scattering_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> vec3<f32> {
     if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
         return vec3<f32>(0.0);
     }
-    return hdr_flux_from_cd_m2(preetham_sky_luminance_rgb(ray_dir, sin_alt), zeropoint);
+    return hdr_flux_from_cd_m2(preetham_sky_luminance_rgb(ray_dir, sin_alt), zeropoint)
+        * SUNLIT_SKY_STAR_ATLAS_EXPOSURE;
 }
 
 fn diffuse_sky_mag_per_arcsec2(l_rad: f32, b_rad: f32, beta_rad: f32, sun_rel_lon_rad: f32) -> f32 {
