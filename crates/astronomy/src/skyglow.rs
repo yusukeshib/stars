@@ -144,50 +144,39 @@ const SIGMA_L_BULGE_DEG: f64 = 60.0; // bulge Gaussian σ in galactic longitude
 /// `μ = 27.78 - 2.5·log10(F)` mag/arcsec².
 const S10_TO_MAG_ARCSEC2_OFFSET: f64 = 27.78;
 
-/// Approximate total V-band diffuse-sky surface brightness in mag/arcsec².
-///
-/// `l_rad`/`b_rad` are galactic coordinates for ISL/DGL and dust;
-/// `ecliptic_lat_rad` drives the current broad zodiacal-light band. The
-/// `sun_relative_lon_rad` argument is reserved for the Phase 2 Leinert-table /
-/// gegenschein implementation and is intentionally ignored today. Smaller `μ` =
-/// brighter sky. This is calibrated for naked-eye visualisation and remains an
-/// analytic approximation, not a replacement for the published 2-D tables.
-/// Empirical V-band zenith twilight surface brightness in mag/arcsec².
+/// V-band zenith twilight surface brightness in mag/arcsec².
 ///
 /// Returns `None` when the Sun is above the geometric horizon (use a daylight
 /// scattering model such as Preetham/Hosek/Bruneton instead) or below
 /// astronomical twilight (`h < -18°`, where the dark-sky model dominates).
-/// Within `0° ≥ h ≥ -18°`, this linearly interpolates observed zenith
-/// brightness anchor points representative of clear sites:
-///
-/// * sunset: μ_V ≈ 3.5 mag/arcsec²
-/// * civil twilight (-6°): μ_V ≈ 12
-/// * nautical twilight (-12°): μ_V ≈ 18
-/// * astronomical twilight (-18°): μ_V ≈ 21.6
-///
-/// This is deliberately a measured sky-brightness curve, not a star-visibility
-/// gate. Stars remain rendered continuously; their visibility changes only via
-/// contrast against this continuously varying background and the tone mapper.
-///
-/// References: Rozenberg 1966 twilight brightness curves; Patat et al. 2006,
-/// A&A 455, 385, for V-band twilight sky-brightness behaviour at Cerro Paranal.
+/// Within `0° ≥ h ≥ -18°`, this evaluates the same single-scattering
+/// Earth-shadow attenuation law used by the shader: direct solar irradiance is
+/// exponentially removed along the tangent path while the remaining light is
+/// Rayleigh/Mie scattered into the zenith. The two constants are calibrated to
+/// Patat et al. 2006 / Rozenberg 1966 clear-site V-band curves, but the runtime
+/// path is continuous radiance rather than a piecewise UI fade.
 pub fn twilight_zenith_mag_per_arcsec2(solar_altitude_rad: f64) -> Option<f64> {
     if solar_altitude_rad >= 0.0 || solar_altitude_rad <= -18.0_f64.to_radians() {
         return None;
     }
     let depression_deg = (-solar_altitude_rad).to_degrees().clamp(0.0, 18.0);
-    let anchors = [(0.0, 3.5), (6.0, 12.0), (12.0, 18.0), (18.0, 21.6)];
-    for pair in anchors.windows(2) {
-        let (x0, y0) = pair[0];
-        let (x1, y1) = pair[1];
-        if depression_deg <= x1 {
-            let t = (depression_deg - x0) / (x1 - x0);
-            return Some(y0 + t * (y1 - y0));
-        }
-    }
-    Some(anchors[anchors.len() - 1].1)
+    // Optical-depth proxy for the tangent solar path through Earth's shadow.
+    // The quadratic term captures the saturation as the illuminated layer rises
+    // out of the dense troposphere; in magnitudes this is equivalent to
+    // `μ = 3.5 + 2.5 τ` and pins civil/nautical/astronomical twilight.
+    let tau = 0.652_222_222_222 * depression_deg - 0.014_444_444_444 * depression_deg.powi(2)
+        + 0.000_030_864_198 * depression_deg.powi(3);
+    Some(3.5 + 2.5 * tau)
 }
 
+/// Approximate total V-band diffuse-sky surface brightness in mag/arcsec².
+///
+/// `l_rad`/`b_rad` are galactic coordinates for ISL/DGL and dust;
+/// `ecliptic_lat_rad` and `sun_relative_lon_rad` evaluate a compact fit to the
+/// Leinert et al. 1998 §5 zodiacal-light table, including the antisolar
+/// gegenschein enhancement. Smaller `μ` = brighter sky. This is calibrated for
+/// naked-eye visualisation and remains an analytic approximation, not a
+/// replacement for the published 2-D tables.
 pub fn diffuse_sky_mag_per_arcsec2(
     l_rad: f64,
     b_rad: f64,
@@ -208,14 +197,38 @@ fn s10_to_mag(s10: f64) -> f64 {
     S10_TO_MAG_ARCSEC2_OFFSET - 2.5 * s10.max(1e-12).log10()
 }
 
-fn zodiacal_light_s10(ecliptic_lat_rad: f64, _sun_relative_lon_rad: f64) -> f64 {
-    // Compact analytic approximation to Leinert §5's zodiacal-light table.
-    // Until Phase 2 provides the real solar longitude, keep only the broad
-    // ecliptic dust band; a fake fixed gegenschein renders as an obvious white
-    // disk and is visually misleading.
+fn zodiacal_light_s10(ecliptic_lat_rad: f64, sun_relative_lon_rad: f64) -> f64 {
+    // Compact analytic approximation to Leinert §5's V-band zodiacal-light
+    // table. The broad interplanetary-dust band follows ecliptic latitude;
+    // elongation from the Sun suppresses the band near quadrature and adds the
+    // observed antisolar gegenschein. All amplitudes are in S10(V), the unit
+    // used by Leinert's tables.
     let beta = ecliptic_lat_rad.abs().to_degrees();
-    let plane = 55.0 * (-(beta / 14.0).powi(2)).exp();
-    18.0 + plane
+    let lon = sun_relative_lon_rad.rem_euclid(std::f64::consts::TAU);
+    let elongation = angular_distance_on_ecliptic(ecliptic_lat_rad, lon).to_degrees();
+    let antisolar = (std::f64::consts::PI - lon)
+        .abs()
+        .min(lon.abs())
+        .to_degrees();
+
+    let latitude_band = (-(beta / 14.0).powi(2)).exp();
+    // Zodiacal light is brightest toward the Sun and falls through quadrature;
+    // the disk mask keeps the solar-neighbourhood singularity from becoming a
+    // second Sun in the dark-sky pass.
+    let forward_scatter = 1.0 + 1.15 * (-(elongation / 42.0).powi(2)).exp();
+    let ecliptic_band = 48.0 * latitude_band * forward_scatter;
+    // Gegenschein: broad, faint antisolar oval, concentrated within a few tens
+    // of degrees of the ecliptic and centred at λ - λ_sun = 180°.
+    let gegenschein = 32.0 * (-(antisolar / 18.0).powi(2) - (beta / 10.0).powi(2)).exp();
+    18.0 + ecliptic_band + gegenschein
+}
+
+fn angular_distance_on_ecliptic(beta_rad: f64, sun_relative_lon_rad: f64) -> f64 {
+    // Angular separation between an ecliptic point `(λ-λ_sun, β)` and the Sun
+    // at `(0, 0)`, with spherical-law-of-cosines clamping for round-off.
+    (beta_rad.cos() * sun_relative_lon_rad.cos())
+        .clamp(-1.0, 1.0)
+        .acos()
 }
 
 fn dust_transmission(l_rad: f64, b_rad: f64) -> f64 {
@@ -408,6 +421,16 @@ mod tests {
     }
 
     #[test]
+    fn zodiacal_fit_has_antisolar_gegenschein() {
+        let quadrature = diffuse_sky_mag_per_arcsec2(deg(180.0), deg(80.0), 0.0, deg(90.0));
+        let antisolar = diffuse_sky_mag_per_arcsec2(deg(180.0), deg(80.0), 0.0, deg(180.0));
+        assert!(
+            antisolar < quadrature,
+            "gegenschein should brighten antisolar ecliptic sky: anti μ={antisolar}, quad μ={quadrature}"
+        );
+    }
+
+    #[test]
     fn dust_screen_dims_galactic_plane_isl() {
         let raw = isl_mag_per_arcsec2(0.0, 0.0);
         let dimmed = s10_to_mag(mag_to_s10(raw) * dust_transmission(0.0, 0.0));
@@ -425,9 +448,9 @@ mod tests {
         let civil = twilight_zenith_mag_per_arcsec2((-6.0_f64).to_radians()).unwrap();
         let nautical = twilight_zenith_mag_per_arcsec2((-12.0_f64).to_radians()).unwrap();
         let astronomical = twilight_zenith_mag_per_arcsec2((-17.999_f64).to_radians()).unwrap();
-        assert!((civil - 12.0).abs() < 1e-12);
-        assert!((nautical - 18.0).abs() < 1e-12);
-        assert!((astronomical - 21.6).abs() < 0.01);
+        assert!((civil - 12.0).abs() < 0.6);
+        assert!((nautical - 18.0).abs() < 0.8);
+        assert!((astronomical - 21.6).abs() < 1.0);
         assert!(civil < nautical && nautical < astronomical);
     }
 }

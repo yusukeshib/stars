@@ -22,10 +22,8 @@ pub fn solar_illuminance_lux(distance_au: f64) -> f64 {
 /// CIE standard illuminant D65 white point converted to linear RGB and
 /// normalised to the green channel.
 ///
-/// This is a rendering convenience: the scattering shader still applies the
-/// wavelength-dependent Rayleigh/Mie terms, but it needs a white solar input
-/// colour in RGB space. D65 is a defensible daylight white until the renderer
-/// grows a sampled spectrum.
+/// This is a rendering convenience derived from the CIE daylight basis. The
+/// absolute photopic scale comes from [`solar_illuminance_lux`].
 pub const SOLAR_LINEAR_RGB: [f64; 3] = [0.950, 1.000, 1.089];
 
 /// Full-moon horizontal illuminance at sea level under a clear atmosphere,
@@ -47,6 +45,37 @@ pub const MEAN_MOON_DISTANCE_KM: f64 = 384_400.0;
 /// exposed in XYZ so renderers that work spectrally or colourimetrically do not
 /// need to reverse-engineer the RGB convenience value.
 pub const SOLAR_XYZ_Y_NORMALIZED: [f64; 3] = [0.95047, 1.0, 1.08883];
+
+/// Solar top-of-atmosphere XYZ illuminance in lux-equivalent units.
+///
+/// The chromaticity is the CIE daylight-series D65 basis (the colour of direct
+/// daylight used by ASTM G-173 / CIE daylight renderers at this abstraction
+/// level) while `Y` follows the inverse-square solar illuminance. Returning XYZ
+/// keeps the illuminant physically scaled even when a renderer later swaps the
+/// RGB sky shader for sampled spectra.
+pub fn solar_xyz_illuminance(distance_au: f64) -> [f64; 3] {
+    let y = solar_illuminance_lux(distance_au);
+    [
+        SOLAR_XYZ_Y_NORMALIZED[0] * y,
+        y,
+        SOLAR_XYZ_Y_NORMALIZED[2] * y,
+    ]
+}
+
+/// Moonlight XYZ illuminance in lux-equivalent units using the same
+/// Krisciunas-Schaefer phase law as [`lunar_illuminance_lux`].
+pub fn lunar_xyz_illuminance(
+    illuminated_fraction: f64,
+    distance_km: f64,
+    phase_angle_rad: f64,
+) -> [f64; 3] {
+    let y = lunar_illuminance_lux(illuminated_fraction, distance_km, phase_angle_rad);
+    [
+        FULL_MOON_XYZ_Y_NORMALIZED[0] * y,
+        y,
+        FULL_MOON_XYZ_Y_NORMALIZED[2] * y,
+    ]
+}
 
 /// Approximate full-Moon XYZ colour, normalised to `Y=1`.
 ///
@@ -115,5 +144,19 @@ mod tests {
             lunar_illuminance_lux(0.5, MEAN_MOON_DISTANCE_KM, 90_f64.to_radians()) < full * 0.5
         );
         assert!(lunar_illuminance_lux(1.0, MEAN_MOON_DISTANCE_KM * 0.9, 0.0) > full);
+    }
+
+    #[test]
+    fn xyz_illuminants_preserve_photopic_y_scale() {
+        let sun = solar_xyz_illuminance(1.0);
+        assert!((sun[1] - solar_illuminance_lux(1.0)).abs() < 1e-9);
+        assert!(sun[0] > 0.0 && sun[2] > sun[1]);
+
+        let moon = lunar_xyz_illuminance(1.0, MEAN_MOON_DISTANCE_KM, 0.0);
+        assert!((moon[1] - FULL_MOON_ILLUMINANCE_LUX).abs() < 1e-12);
+        assert!(
+            moon[0] > moon[2],
+            "moonlight white point should be warmer than D65"
+        );
     }
 }
