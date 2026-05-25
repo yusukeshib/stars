@@ -62,6 +62,8 @@ Implemented overlay controls across the three reference hosts:
 - Web overlay controls grouped by reference geometry, constellations, labels,
   and line styling.
 - Web localStorage persistence for observer and view state.
+- Web location panel address lookup that geocodes a place name into latitude /
+  longitude for the observer.
 
 Primary implementation areas:
 

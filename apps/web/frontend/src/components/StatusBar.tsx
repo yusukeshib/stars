@@ -38,6 +38,19 @@ type Props = {
 };
 
 type Popover = "location" | "time" | "settings";
+type AddressLookupStatus = "idle" | "loading" | "success" | "error";
+
+type AddressLookupState = {
+  status: AddressLookupStatus;
+  message: string | null;
+};
+
+type NominatimPlace = {
+  lat?: string;
+  lon?: string;
+  display_name?: string;
+  name?: string;
+};
 
 const fmtDeg = (n: number) => `${n.toFixed(1)}°`;
 const COMPASS_DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -84,6 +97,13 @@ function setLocalTimePart(ms: number, hour: number, minute: number): number {
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
 
+function firstGeocodingResult(value: unknown): NominatimPlace | null {
+  if (!Array.isArray(value)) return null;
+  const first = value[0];
+  if (typeof first !== "object" || first === null) return null;
+  return first as NominatimPlace;
+}
+
 /// Interactive status strip in the bottom-left. Location, time, and settings
 /// open lightweight popups for common changes without covering the sky.
 export function StatusBar({
@@ -106,6 +126,11 @@ export function StatusBar({
   onUseGeolocation,
 }: Props) {
   const [openPopover, setOpenPopover] = useState<Popover | null>(null);
+  const [addressQuery, setAddressQuery] = useState("");
+  const [addressLookup, setAddressLookup] = useState<AddressLookupState>({
+    status: "idle",
+    message: null,
+  });
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -124,6 +149,53 @@ export function StatusBar({
   };
   const setLongitude = (longitudeDeg: number) => {
     onSetObserver({ ...observer, longitudeDeg: clamp(longitudeDeg, -180, 180) });
+  };
+  const lookupAddress = async () => {
+    const query = addressQuery.trim();
+    if (!query) {
+      setAddressLookup({ status: "error", message: "Enter an address or place name." });
+      return;
+    }
+
+    setAddressLookup({ status: "loading", message: "Searching address…" });
+    try {
+      const params = new URLSearchParams({
+        q: query,
+        format: "jsonv2",
+        limit: "1",
+      });
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error(`geocoding request failed: ${response.status}`);
+
+      const place = firstGeocodingResult(await response.json());
+      if (!place) {
+        setAddressLookup({ status: "error", message: "No matching place found." });
+        return;
+      }
+
+      const latitudeDeg = Number(place.lat);
+      const longitudeDeg = Number(place.lon);
+      if (!Number.isFinite(latitudeDeg) || !Number.isFinite(longitudeDeg)) {
+        throw new Error("geocoding result is missing coordinates");
+      }
+
+      onSetObserver({
+        ...observer,
+        latitudeDeg: clamp(latitudeDeg, -90, 90),
+        longitudeDeg: clamp(longitudeDeg, -180, 180),
+      });
+      setAddressLookup({
+        status: "success",
+        message: place.display_name ?? place.name ?? "Location updated from address.",
+      });
+    } catch {
+      setAddressLookup({
+        status: "error",
+        message: "Address lookup failed. Check your connection and try again.",
+      });
+    }
   };
   const time = new Date(timeMs);
   const hour = time.getHours();
@@ -152,6 +224,49 @@ export function StatusBar({
             step={0.1}
             onChange={setLongitude}
           />
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void lookupAddress();
+            }}
+            style={addressLookupFormStyle}
+          >
+            <label htmlFor="quick-address" style={labelStyle}>
+              Address / place lookup
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+              <input
+                id="quick-address"
+                type="search"
+                value={addressQuery}
+                placeholder="Tokyo Tower, Paris, Mauna Kea…"
+                onChange={(e) => {
+                  setAddressQuery(e.target.value);
+                  if (addressLookup.status !== "idle") {
+                    setAddressLookup({ status: "idle", message: null });
+                  }
+                }}
+                style={inputStyle}
+              />
+              <button
+                type="submit"
+                disabled={addressLookup.status === "loading"}
+                style={buttonStyle}
+              >
+                {addressLookup.status === "loading" ? "Finding…" : "Find"}
+              </button>
+            </div>
+            {addressLookup.message && (
+              <p
+                role={addressLookup.status === "error" ? "alert" : "status"}
+                style={lookupMessageStyle(addressLookup.status)}
+              >
+                {addressLookup.message}
+              </p>
+            )}
+          </form>
+
           <button type="button" onClick={onUseGeolocation} style={buttonStyle}>
             Use my location
           </button>
@@ -732,6 +847,21 @@ const labelStyle: React.CSSProperties = {
   marginBottom: 5,
   opacity: 0.7,
 };
+
+const addressLookupFormStyle: React.CSSProperties = {
+  margin: "12px 0 10px",
+  padding: "10px",
+  background: "rgba(255, 255, 255, 0.035)",
+  border: "1px solid rgba(255, 255, 255, 0.08)",
+  borderRadius: 8,
+};
+
+const lookupMessageStyle = (status: AddressLookupStatus): React.CSSProperties => ({
+  margin: "8px 0 0",
+  fontSize: 11,
+  opacity: status === "error" ? 0.85 : 0.62,
+  color: status === "error" ? "#ffb4a8" : "#cfd8e3",
+});
 
 const helperTextStyle: React.CSSProperties = {
   margin: "8px 0 0",
