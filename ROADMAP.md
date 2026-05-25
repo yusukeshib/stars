@@ -6,13 +6,16 @@ history is tracked separately in [`PROGRESS.md`](PROGRESS.md).
 
 The aim is for `stars` to be useful both as a casual night-sky viewer and as a
 piece of software that astronomers, educators, and researchers can defend
-using. Two axes drive the work:
+using. Three axes drive the work:
 
 1. **Pedagogy** — let users *see* the relationship between coordinate systems
    (equatorial, horizontal, ecliptic, galactic), reference circles, and time.
 2. **Precision** — match the IAU's published standards for the conversions we
    perform, so positions on screen are defensible to arcsecond level and the
    choice of model is explicit.
+3. **Reproducibility** — make scenes, data sources, validation images, and
+   citations portable enough that a teacher, reviewer, or researcher can repeat
+   the same render later.
 
 The phases below are written so each one is independently shippable: anyone
 can stop at the end of a phase and have a coherent product. Estimates assume
@@ -59,11 +62,12 @@ That missing piece is tracked in Phase 2, after the Sun and Moon have apparent
 topocentric positions. The goal is for sky colour to be driven by physical
 illuminants and atmosphere parameters rather than by hard-coded gradients.
 
-**Current highest priority:** continue the remaining visual Phase 4 work in a
-small, shippable sequence: deep-sky overlays and variable-star side-panel data.
-Phase 1, Phase 1', Phase 2, the core stellar apparent-place corrections,
-full-sky projections, the fixed external galactic viewpoint, telescope eyepiece
-simulation, and custom external viewpoint origins are now complete. A row is
+**Current highest priority:** strengthen reproducibility and reviewability before
+large new data integrations, then continue the remaining visual Phase 4 work in
+small, shippable slices. Phase 1, Phase 1', Phase 2, the core stellar
+apparent-place corrections, full-sky projections, the fixed external galactic
+viewpoint, telescope eyepiece simulation, and custom external viewpoint origins
+are now complete. A row is
 `✅ done` only when the model named in its references is implemented,
 documented, tested, and wired into all relevant hosts.
 
@@ -86,8 +90,27 @@ is split into independently shippable rungs:
    moonlit-night reference scenes are pinned by tests/screenshots and documented
    with the model limits.
 
-There are currently no `⏳ next` atmosphere rows; the active Phase 2 queue has
-moved on to solar-system bodies and planning UI.
+There are currently no `⏳ next` atmosphere rows; the active queue has moved to
+reproducible sessions, validation scenes, citable platform work, and Phase 4
+visual polish.
+
+### Recommended near-term sequence
+
+These items are intentionally ordered before the largest catalog additions so
+future features have stable scenes, source manifests, and review hooks:
+
+1. **Portable reproduction:** schema-versioned JSON sessions plus deterministic
+   scene presets for common validation/demo skies.
+2. **Validation visibility:** a validation/demo gallery and visual-regression
+   checks for noon, sunset, twilight, moonlit night, dark sky, all-sky maps, and
+   external galactic viewpoints.
+3. **Citable platform baseline:** `CITATION.cff`, standards-compliance notes,
+   and early notebook examples that can use CLI/session outputs before full
+   Python bindings land.
+4. **Catalog scaling design:** document the backend, identifier, LOD,
+   streaming, and WASM-subset plan before Gaia / Tycho / Hipparcos ingest.
+5. **Visual and UX polish:** deep-sky overlays, accessibility, observation
+   planning polish, variable-star light curves, and eyepiece preset provenance.
 
 ---
 
@@ -144,22 +167,30 @@ Columns:
 | `P2-14` | 2 | **Rise / transit / set tables** — per object, per evening | Local-evening Sun/Moon/planet rise-transit-set table in the web settings panel | ✅ done (`astronomy::planning`, `apps/web/frontend`) |
 | `P2-15` | 2 | **Twilight indicators** — civil / nautical / astronomical bands | Solar-depression twilight labels plus planning-panel band intervals | ✅ done (`astronomy::planning`, `apps/web/frontend`) |
 | `P2-16` | 2 | **Session URL** — encode (lat, lng, jd, az, alt, fov, overlays, planets, projection, atmosphere preset) | URL load/copy path using plain query parameters; no version gate | ✅ done (`apps/web/frontend`) |
-| `P3-01` | 3 | **Hipparcos / Tycho-2 / Gaia DR3 ingest** | Pluggable catalog backend; keep HYG for the embedded WASM build | ⬜ |
-| `P3-02` | 3 | **Identifier preservation** — Hipparcos / HD / TYC / Gaia source_id passed through the renderer | For hover / click-to-copy | ⬜ |
-| `P3-03` | 3 | **SIMBAD / VizieR deep links** | Hover a star → external link with the right query | ⬜ |
-| `P3-04` | 3 | **DE440 / VSOP87 ephemeris** | Move from "good enough for amateurs" (Phase 2) to publication-quality | ⬜ |
-| `P3-05` | 3 | **Python bindings (PyO3)** | `astronomy` + `catalog` callable from Jupyter | ⬜ |
-| `P3-06` | 3 | **Headless server mode** | HTTP service that returns PNGs (already 90% there in `apps/cli`) | ⬜ |
-| `P3-07` | 3 | **Sharable JSON sessions** | Schema-versioned: observer + time + overlays + active corrections + catalog snapshot | ⬜ |
-| `P3-08` | 3 | **`CITATION.cff` + Zenodo DOI** | Citable per-release artifact | ⬜ |
-| `P3-09` | 3 | **Standards-compliance doc** | One page listing every IAU resolution / SOFA routine the code implements | ⬜ |
+| `P3-00` | 3 | **Catalog backend scaling design** | Document backend trait boundaries, identifier mapping, LOD / spatial index strategy, streaming / paging, and the small embedded WASM subset before ingesting large catalogs | ⬜ |
+| `P3-01` | 3 | **Hipparcos / Tycho-2 / Gaia DR3 ingest** | Pluggable catalog backend; keep HYG for the embedded WASM build; land only after `P3-00` defines storage and filtering rules | ⬜ |
+| `P3-02` | 3 | **Identifier preservation** — Hipparcos / HD / TYC / Gaia source_id passed through the renderer | Needed for hover, click-to-copy, session reproducibility, SIMBAD / VizieR links, and catalog snapshots | ⬜ |
+| `P3-03` | 3 | **SIMBAD / VizieR deep links** | Hover a star → external link with the right query; keep external services optional and out of deterministic renders | ⬜ |
+| `P3-04` | 3 | **DE440 / VSOP87 ephemeris** | Move from "good enough for amateurs" (Phase 2) to publication-quality; preserve documented fallback for offline / lightweight builds | ⬜ |
+| `P3-05` | 3 | **Python bindings (PyO3)** | `astronomy` + `catalog` callable from Jupyter; early notebook examples may use CLI renders and JSON sessions before full bindings land | ⬜ |
+| `P3-06` | 3 | **Headless server mode** | HTTP service that returns PNGs and metadata JSON from a supplied scene/session (already 90% there in `apps/cli`) | ⬜ |
+| `P3-07` | 3 | **Sharable JSON sessions** | Schema-versioned: observer + time scales + view + overlays + projection/viewpoint + active corrections + atmosphere + catalog snapshot + app version | ⏳ next |
+| `P3-08` | 3 | **`CITATION.cff` + Zenodo DOI** | Citable per-release artifact; include data/source caveats and preferred citation text | ⏳ next |
+| `P3-09` | 3 | **Standards-compliance doc** | One page listing every IAU resolution / SOFA routine, approximation, and deliberate non-goal the code implements or does not implement | ⏳ next |
+| `P3-10` | 3 | **Scene presets** | Deterministic named scenes for Tokyo tonight, dark sky, noon, sunset, civil/nautical/astronomical twilight, moonlit night, eclipse aid, all-sky maps, and external galactic viewpoints | ⏳ next |
+| `P3-11` | 3 | **Validation / demo gallery + visual regression** | Render preset PNGs with fixed inputs; publish a human gallery and run perceptual or tolerance-based screenshot comparisons where CI can do so reliably | ⏳ next |
+| `P3-12` | 3 | **Guided education mode** | Cross-host tour content explaining horizon, equator, ecliptic, galactic plane, time motion, twilight, and projection choices | ⬜ |
+| `P3-13` | 3 | **Data provenance manifest** | Machine-readable manifest recording source URL/archive ID, version, license, local path, hash, preprocessing command, and fields used for every data artifact | ⬜ |
+| `P3-14` | 3 | **Notebook examples** | Reproducible examples that load JSON sessions, compare tabular astronomy outputs, and render the same scene as web / CLI | ⬜ |
+| `P3-15` | 3 | **Public demo gallery** | Curated shareable scenes such as Tokyo tonight, summer Milky Way, lunar eclipse aid, and galactic-north view, backed by stable session files | ⬜ |
 | `P4-01` | 4 | **Full-sky projections** | Mollweide, Aitoff, and Hammer all-sky maps selectable in CLI, desktop, and web; perspective remains the default | ✅ done (`renderer::SkyProjection`, `shaders/{star,skyglow,overlay}.wgsl`, `apps/{cli,viewer,web}`) |
 | `P4-02` | 4 | **Out-of-Earth viewpoint** | `SkyViewpoint::GalacticNorth` moves the camera above the IAU galactic plane, places HYG stars by parsec distance, and draws an analytic top-down Milky Way disc in CLI, desktop, and web | ✅ done (`renderer::SkyViewpoint`, `shaders/{star,skyglow}.wgsl`, `apps/{cli,viewer,web}`) |
-| `P4-03` | 4 | **Deep-sky overlay** (Messier, NGC) | Light catalogs first; full NGC/IC is large | ⬜ |
-| `P4-04` | 4 | **Variable star light curves** | Pull AAVSO; show on the side panel for a hovered variable | ⬜ |
-| `P4-05` | 4 | **Sound + screen-reader accessibility** | Az/Alt audio cues; ARIA labels on every control | ⬜ |
-| `P4-06` | 4 | **Telescope eyepiece simulation** | Plate scale, magnification, exit pupil, and true field of view from an OTA + eyepiece pair, exposed in CLI / desktop / web session URLs | ✅ done (`renderer::EyepieceSimulation`, `apps/{cli,viewer,web}`) |
+| `P4-03` | 4 | **Deep-sky overlay** (Messier, NGC) | Light Messier catalog first, then NGC / IC with density controls; full NGC/IC is large and should follow the manifest rules | ⬜ |
+| `P4-04` | 4 | **Variable star light curves** | Pull AAVSO or documented snapshots; show side-panel light curves for a hovered variable with source, epoch, and uncertainty caveats | ⬜ |
+| `P4-05` | 4 | **Accessibility pass** | ARIA labels on every web control, keyboard navigation, high-contrast / colour-vision-safe modes, screen-reader summaries, and optional Az/Alt audio cues | ⬜ |
+| `P4-06` | 4 | **Telescope eyepiece simulation** | Plate scale, magnification, exit pupil, and true field of view from an OTA + eyepiece pair, exposed in CLI / desktop / web session URLs; future eyepiece preset catalogs should follow the provenance manifest rules | ✅ done (`renderer::EyepieceSimulation`, `apps/{cli,viewer,web}`) |
 | `P4-07` | 4 | **Custom external viewpoint origin** | `SkyViewpoint::CustomExternal` uses user-selectable `origin_pc`, target, and up vectors in IAU galactic Cartesian parsecs (Sun origin, +X l=0°, +Y l=90°, +Z north galactic pole), exposed in CLI / desktop / web session URLs | ✅ done (`renderer::ExternalViewpoint`, `apps/{cli,viewer,web}`) |
+| `P4-08` | 4 | **Observation-planning polish** | Favorites, tonight's recommended objects, Moon-impact score, visibility score, and optional calendar export, all derived from documented planning helpers | ⬜ |
 
 ---
 
@@ -188,8 +219,17 @@ Columns:
   and moonlit night.
 - **Phase 3.** Someone can `pip install` or `cargo add` the relevant
   pieces, render the same sky from a notebook and the web UI, get the
-  same numbers as JPL Horizons within stated tolerances, and cite the
-  project in a paper.
+  same numbers as JPL Horizons within stated tolerances, cite the
+  project in a paper, and attach a schema-versioned session plus data
+  manifest that lets another person reproduce the render. The repository
+  includes deterministic scene presets, a validation/demo gallery, and a
+  standards-compliance page that separates implemented standards from
+  approximations and non-goals.
+- **Phase 4.** Dessert features remain optional but polished: deep-sky overlays
+  have source provenance and density controls, variable-star panels cite their
+  light-curve source, telescope eyepiece mode states its visual assumptions,
+  observation-planning polish remains derived from documented models, and the
+  web UI is keyboard- and screen-reader-friendly.
 
 ---
 
@@ -227,10 +267,12 @@ unlocks physically driven sky colour: the renderer can know where the primary
 illuminants are, then let Rayleigh/Mie scattering and aerosol/turbidity controls
 explain blue daylight, red sunsets, twilight gradients, and moonlit nights.
 
-Phase 3 buys **reach**. The Rust + wgpu + WASM combo applied to IAU-grade
-astronomy is genuinely under-served: it lets the same engine power a
-notebook plot, a web app, a CLI render, and a citation in a paper. That
-is the part of this roadmap that turns the project from "another star
-app" into "a thing other people build on."
+Phase 3 buys **reach and reproducibility**. The Rust + wgpu + WASM combo
+applied to IAU-grade astronomy is genuinely under-served: it lets the same
+engine power a notebook plot, a web app, a CLI render, a validation screenshot,
+a shareable session, and a citation in a paper. That is the part of this
+roadmap that turns the project from "another star app" into "a thing other
+people build on."
 
-Phase 4 is dessert.
+Phase 4 is dessert, but it should still respect the same provenance,
+accessibility, and validation discipline as the core phases.

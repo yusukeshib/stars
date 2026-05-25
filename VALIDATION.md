@@ -23,6 +23,9 @@ a higher-precision model lands.
 5. **Document model domains.** A daylight model, twilight model, refraction
    approximation, or ephemeris approximation should state where it is expected
    to be valid.
+6. **Make representative scenes reproducible.** Important visual claims should
+   be tied to schema-versioned sessions or scene presets so screenshots can be
+   regenerated instead of manually recreated.
 
 ## What must be tested
 
@@ -40,7 +43,11 @@ Add or update tests when changing any of these areas:
 - twilight band boundaries;
 - magnitude, illuminance, luminance, extinction, skyglow, daylight, twilight,
   and tone reproduction reference models;
-- catalog coordinate conversion and colour conversion.
+- catalog coordinate conversion and colour conversion;
+- session schema migrations, scene preset parsing, and deterministic rendering
+  inputs;
+- visual-regression baselines when renderer changes are meant to preserve the
+  appearance of representative scenes.
 
 ## Current validation coverage by subsystem
 
@@ -168,10 +175,41 @@ Validation expectation:
 
 - Edge cases should be covered: always above horizon, always below horizon,
   high latitude, date boundaries, and twilight bands that do not occur.
+- Future visibility scores, Moon-impact scores, recommended-object lists, and
+  calendar exports should state which helper outputs they summarize.
 
 Current limitation:
 
 - Terrain horizon and weather constraints are not modeled.
+
+### Reproducible scenes and visual regression
+
+Planned implementation includes:
+
+- schema-versioned JSON sessions that capture observer, time scales, view,
+  overlays, projection/viewpoint, active corrections, atmosphere, catalog
+  snapshot, and app version;
+- deterministic scene presets for noon, sunset, civil / nautical / astronomical
+  twilight, moonlit night, dark sky, all-sky maps, and external galactic
+  viewpoints;
+- a validation/demo gallery generated from those presets;
+- visual-regression checks for representative renderer output where the host and
+  CI environment can produce stable images.
+
+Validation expectation:
+
+- Preset names, inputs, expected model domains, and generated image dimensions
+  should be documented.
+- Visual diffs should use tolerances appropriate to GPU and platform variation;
+  they should catch meaningful regressions without implying pixel-perfect
+  portability across all hardware.
+- Any screenshot used as evidence in a PR should identify the scene preset or
+  session file that produced it.
+
+Current limitation:
+
+- The renderer currently has numerical/model tests and manual screenshot review,
+  but no committed gallery or automated visual-regression harness.
 
 ## External comparison targets
 
