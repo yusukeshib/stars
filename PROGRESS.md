@@ -16,12 +16,13 @@ Implemented phase groups:
 - Phase 1' physical dark-sky visual pipeline.
 - Phase 2 time systems, apparent-place corrections, atmosphere, solar-system
   bodies, and planning UI.
+- Phase 4 full-sky projections.
 
 Still open:
 
 - Phase 1 text labels.
 - Phase 3 research / platform features.
-- Phase 4 advanced visual features.
+- Remaining Phase 4 advanced visual features.
 
 ## Phase 1 — Educational planetarium
 
@@ -238,12 +239,45 @@ Implemented web planning helpers and UI for:
 - local-evening rise / transit / set table;
 - Sun, Moon, and planet planning objects;
 - civil / nautical / astronomical twilight indicators;
-- schema-versioned `starsSession=2` session URLs.
+- session URLs using plain query parameters, with no version gate.
 
 Primary implementation areas:
 
 - `crates/astronomy/src/planning.rs`
 - `apps/web/frontend`
+
+## Phase 4 — Advanced visual features
+
+### Full-sky projections
+
+Implemented the first Phase 4 visual feature: selectable screen projections.
+Perspective remains the default camera projection, and three all-sky map modes
+are available for structure-scale views:
+
+- Mollweide;
+- Aitoff;
+- Hammer.
+
+The all-sky modes map the entire celestial sphere into a 2:1 ellipse fitted to
+the framebuffer, keep azimuth / altitude as the map centre, and ignore the
+perspective FoV slider. The skyglow / daylight / twilight pass reconstructs
+rays through the inverse selected map projection, while stars and overlays use
+the corresponding forward projection.
+
+Primary implementation areas:
+
+- `renderer::SkyProjection` and camera projection uniforms;
+- `crates/renderer/src/shaders/star.wgsl`;
+- `crates/renderer/src/shaders/skyglow.wgsl`;
+- `crates/renderer/src/shaders/overlay.wgsl`;
+- projection controls in `apps/cli`, `apps/viewer`, and `apps/web`.
+
+Validation:
+
+- renderer unit tests pin projection string round-trips, all-sky map fitting,
+  and average all-sky pixel solid angle;
+- host-common tests pin native CLI enum mapping;
+- smoke renders cover perspective, Mollweide, Aitoff, and Hammer shader paths.
 
 ## Documentation progress
 

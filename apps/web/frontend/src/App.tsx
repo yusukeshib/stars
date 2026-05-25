@@ -8,13 +8,16 @@ import {
   DEFAULT_ATMOSPHERE_CONFIG,
   DEFAULT_OVERLAY_CONFIG,
   DEFAULT_PLANETS_CONFIG,
+  DEFAULT_PROJECTION_CONFIG,
   isAtmospherePreset,
   isOverlayLayer,
+  isSkyProjection,
   type AtmosphereConfig,
   type Observer,
   type OverlayConfig,
   type PlanetsConfig,
   type PlanningTable,
+  type ProjectionConfig,
   type View,
 } from "./observer";
 import { loadConfig, saveConfig } from "./storage";
@@ -57,6 +60,7 @@ type UrlSession = {
   overlays?: OverlayConfig;
   atmosphere?: AtmosphereConfig;
   planets?: PlanetsConfig;
+  projection?: ProjectionConfig;
   timeMs?: number;
 };
 
@@ -112,7 +116,28 @@ function loadAtmosphereFromUrl(params?: URLSearchParams): AtmosphereConfig | nul
 function loadSessionFromUrl(): UrlSession | null {
   if (typeof window === "undefined") return null;
   const params = new URLSearchParams(window.location.search);
-  if (params.get("starsSession") !== "2") return null;
+  const sessionKeys = [
+    "lat",
+    "lng",
+    "jd",
+    "az",
+    "alt",
+    "fov",
+    "overlays",
+    "grid",
+    "overlayOpacity",
+    "planets",
+    "projection",
+    "atmosphere",
+    "atmospherePreset",
+    "turbidity",
+    "observerAltitudeM",
+    "ozoneDu",
+    "visibilityKm",
+    "pressureHpa",
+    "temperatureC",
+  ];
+  if (!sessionKeys.some((key) => params.has(key))) return null;
   const observer: Observer = {
     latitudeDeg: numberParam(params, "lat", DEFAULT_OBSERVER.latitudeDeg, -90, 90),
     longitudeDeg: numberParam(params, "lng", DEFAULT_OBSERVER.longitudeDeg, -180, 180),
@@ -132,27 +157,33 @@ function loadSessionFromUrl(): UrlSession | null {
     opacity: numberParam(params, "overlayOpacity", DEFAULT_OVERLAY_CONFIG.opacity, 0, 1),
   };
   const jd = Number(params.get("jd"));
+  const projectionParam = params.get("projection");
   return {
     observer,
     view,
     overlays,
     atmosphere: loadAtmosphereFromUrl(params) ?? undefined,
     planets: { enabled: params.get("planets") !== "off" },
+    projection: {
+      projection: isSkyProjection(projectionParam)
+        ? projectionParam
+        : DEFAULT_PROJECTION_CONFIG.projection,
+    },
     timeMs: Number.isFinite(jd) ? (jd - 2440587.5) * 86400000 : undefined,
   };
 }
 
-function sessionUrl({ observer, view, overlays, atmosphere, planets, timeMs }: {
+function sessionUrl({ observer, view, overlays, atmosphere, planets, projection, timeMs }: {
   observer: Observer;
   view: View;
   overlays: OverlayConfig;
   atmosphere: AtmosphereConfig;
   planets: PlanetsConfig;
+  projection: ProjectionConfig;
   timeMs: number;
 }): string {
   const url = new URL(window.location.href);
   url.search = "";
-  url.searchParams.set("starsSession", "2");
   url.searchParams.set("lat", observer.latitudeDeg.toFixed(5));
   url.searchParams.set("lng", observer.longitudeDeg.toFixed(5));
   url.searchParams.set("jd", (timeMs / 86400000 + 2440587.5).toFixed(7));
@@ -163,6 +194,7 @@ function sessionUrl({ observer, view, overlays, atmosphere, planets, timeMs }: {
   url.searchParams.set("grid", overlays.gridStepDeg.toFixed(0));
   url.searchParams.set("overlayOpacity", overlays.opacity.toFixed(2));
   url.searchParams.set("planets", planets.enabled ? "on" : "off");
+  url.searchParams.set("projection", projection.projection);
   url.searchParams.set("atmosphere", atmosphere.enabled ? "on" : "off");
   url.searchParams.set("atmospherePreset", atmosphere.preset);
   url.searchParams.set("turbidity", atmosphere.turbidity.toFixed(1));
@@ -195,20 +227,23 @@ export function App() {
   const [planets, setPlanets] = useState<PlanetsConfig>(
     URL_SESSION?.planets ?? PERSISTED?.planets ?? DEFAULT_PLANETS_CONFIG,
   );
+  const [projection, setProjection] = useState<ProjectionConfig>(
+    URL_SESSION?.projection ?? PERSISTED?.projection ?? DEFAULT_PROJECTION_CONFIG,
+  );
   const [timeMs, setTimeMs] = useState<number>(() => URL_SESSION?.timeMs ?? Date.now());
   const [sunAltitudeDeg, setSunAltitudeDeg] = useState<number | null>(null);
   const [planning, setPlanning] = useState<PlanningTable | null>(null);
   const lastTickRef = useRef<number>(performance.now());
 
-  // Persist observer + view + overlays + atmosphere + planets whenever they change. We debounce
+  // Persist observer + view + overlays + atmosphere + planets + projection whenever they change. We debounce
   // because the view updates on every mouse/touch frame during a drag, and
   // localStorage.setItem is synchronous; without the debounce we'd write ~60
   // times a second. Time is intentionally not persisted: a stale timestamp on
   // next load would silently mislead the user.
   useEffect(() => {
-    const handle = setTimeout(() => saveConfig({ observer, view, overlays, atmosphere, planets }), 250);
+    const handle = setTimeout(() => saveConfig({ observer, view, overlays, atmosphere, planets, projection }), 250);
     return () => clearTimeout(handle);
-  }, [observer, view, overlays, atmosphere, planets]);
+  }, [observer, view, overlays, atmosphere, planets, projection]);
 
   // Clock always ticks. When the user picks a custom moment via the quick time
   // popup we simply rebase `timeMs`; the same loop keeps advancing from there.
@@ -244,6 +279,7 @@ export function App() {
         overlays={overlays}
         atmosphere={atmosphere}
         planets={planets}
+        projection={projection}
         onDrag={(daz, dalt) =>
           setView((v) => ({
             ...v,
@@ -265,14 +301,16 @@ export function App() {
         overlays={overlays}
         atmosphere={atmosphere}
         planets={planets}
+        projection={projection}
         planning={planning}
         onSetObserver={setObserver}
         onSetTime={setTimeMs}
         onSetOverlays={setOverlays}
         onSetAtmosphere={setAtmosphere}
         onSetPlanets={setPlanets}
+        onSetProjection={setProjection}
         onCopySessionUrl={async () => {
-          const url = sessionUrl({ observer, view, overlays, atmosphere, planets, timeMs });
+          const url = sessionUrl({ observer, view, overlays, atmosphere, planets, projection, timeMs });
           try {
             if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(url);
           } catch {

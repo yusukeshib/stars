@@ -146,10 +146,15 @@ enum OverlayFrame {
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 struct OverlayVertex {
     position: [f32; 3],
+    /// Other endpoint of this line-list segment. The all-sky projection shader
+    /// uses it to drop segments that cross the longitude seam instead of
+    /// drawing an artefactual line across the whole map.
+    other_position: [f32; 3],
 }
 
 impl OverlayVertex {
     const OFFSET_POSITION: u64 = std::mem::offset_of!(Self, position) as u64;
+    const OFFSET_OTHER_POSITION: u64 = std::mem::offset_of!(Self, other_position) as u64;
 }
 
 #[repr(C)]
@@ -157,6 +162,7 @@ impl OverlayVertex {
 struct OverlayUniform {
     view_proj: [[f32; 4]; 4],
     color: [f32; 4],
+    projection_params: [f32; 4],
 }
 
 struct OverlayLayer {
@@ -215,11 +221,18 @@ impl OverlayRenderer {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<OverlayVertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[wgpu::VertexAttribute {
-                        offset: OverlayVertex::OFFSET_POSITION,
-                        shader_location: 0,
-                        format: wgpu::VertexFormat::Float32x3,
-                    }],
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            offset: OverlayVertex::OFFSET_POSITION,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: OverlayVertex::OFFSET_OTHER_POSITION,
+                            shader_location: 1,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                    ],
                 }],
             },
             fragment: Some(wgpu::FragmentState {
@@ -304,6 +317,7 @@ impl OverlayRenderer {
                 contents: bytemuck::bytes_of(&OverlayUniform {
                     view_proj: [[0.0; 4]; 4],
                     color,
+                    projection_params: [0.0, 1.0, 1.0, 0.0],
                 }),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
@@ -332,8 +346,9 @@ impl OverlayRenderer {
         if self.layers.is_empty() {
             return;
         }
-        let vp_eq = camera.view_proj().to_cols_array_2d();
-        let vp_local = camera.view_proj_local().to_cols_array_2d();
+        let vp_eq = camera.overlay_matrix_equatorial().to_cols_array_2d();
+        let vp_local = camera.overlay_matrix_local().to_cols_array_2d();
+        let projection_params = camera.overlay_projection_params();
         for layer in &self.layers {
             let view_proj = match layer.frame {
                 OverlayFrame::Equatorial => vp_eq,
@@ -345,6 +360,7 @@ impl OverlayRenderer {
                 bytemuck::bytes_of(&OverlayUniform {
                     view_proj,
                     color: layer.color,
+                    projection_params,
                 }),
             );
         }
@@ -430,6 +446,23 @@ fn build_layer(
 // vertices form one line segment.
 // ---------------------------------------------------------------------------
 
+fn overlay_vertex(position: [f32; 3]) -> OverlayVertex {
+    OverlayVertex {
+        position,
+        other_position: position,
+    }
+}
+
+fn attach_segment_partners(mut verts: Vec<OverlayVertex>) -> Vec<OverlayVertex> {
+    for pair in verts.chunks_exact_mut(2) {
+        let a = pair[0].position;
+        let b = pair[1].position;
+        pair[0].other_position = b;
+        pair[1].other_position = a;
+    }
+    verts
+}
+
 /// Parallel circle at constant declination in equatorial coords. Closed.
 fn closed_circle_eq_at_dec(dec_rad: f64, n: usize) -> Vec<OverlayVertex> {
     let (sd, cd) = dec_rad.sin_cos();
@@ -437,14 +470,18 @@ fn closed_circle_eq_at_dec(dec_rad: f64, n: usize) -> Vec<OverlayVertex> {
     for i in 0..n {
         let a0 = (i as f64) / (n as f64) * TAU;
         let a1 = ((i + 1) as f64) / (n as f64) * TAU;
-        verts.push(OverlayVertex {
-            position: [(cd * a0.cos()) as f32, (cd * a0.sin()) as f32, sd as f32],
-        });
-        verts.push(OverlayVertex {
-            position: [(cd * a1.cos()) as f32, (cd * a1.sin()) as f32, sd as f32],
-        });
+        verts.push(overlay_vertex([
+            (cd * a0.cos()) as f32,
+            (cd * a0.sin()) as f32,
+            sd as f32,
+        ]));
+        verts.push(overlay_vertex([
+            (cd * a1.cos()) as f32,
+            (cd * a1.sin()) as f32,
+            sd as f32,
+        ]));
     }
-    verts
+    attach_segment_partners(verts)
 }
 
 /// Parallel circle at constant altitude in local ENU coords. Closed.
@@ -455,14 +492,18 @@ fn closed_circle_local_at_alt(alt_rad: f64, n: usize) -> Vec<OverlayVertex> {
     for i in 0..n {
         let az0 = (i as f64) / (n as f64) * TAU;
         let az1 = ((i + 1) as f64) / (n as f64) * TAU;
-        verts.push(OverlayVertex {
-            position: [(az0.sin() * ca) as f32, (az0.cos() * ca) as f32, sa as f32],
-        });
-        verts.push(OverlayVertex {
-            position: [(az1.sin() * ca) as f32, (az1.cos() * ca) as f32, sa as f32],
-        });
+        verts.push(overlay_vertex([
+            (az0.sin() * ca) as f32,
+            (az0.cos() * ca) as f32,
+            sa as f32,
+        ]));
+        verts.push(overlay_vertex([
+            (az1.sin() * ca) as f32,
+            (az1.cos() * ca) as f32,
+            sa as f32,
+        ]));
     }
-    verts
+    attach_segment_partners(verts)
 }
 
 /// Half great circle at fixed RA, sweeping declination from near-south to near-north.
@@ -480,10 +521,10 @@ fn meridian_eq_at_ra(ra_rad: f64, n: usize) -> Vec<OverlayVertex> {
     for i in 0..(n - 1) {
         let d0 = lo + (hi - lo) * (i as f64) / ((n - 1) as f64);
         let d1 = lo + (hi - lo) * ((i + 1) as f64) / ((n - 1) as f64);
-        verts.push(OverlayVertex { position: p(d0) });
-        verts.push(OverlayVertex { position: p(d1) });
+        verts.push(overlay_vertex(p(d0)));
+        verts.push(overlay_vertex(p(d1)));
     }
-    verts
+    attach_segment_partners(verts)
 }
 
 /// Half great circle at fixed azimuth, sweeping altitude from near-nadir to near-zenith.
@@ -500,10 +541,10 @@ fn meridian_local_at_az(az_rad: f64, n: usize) -> Vec<OverlayVertex> {
     for i in 0..(n - 1) {
         let a0 = lo + (hi - lo) * (i as f64) / ((n - 1) as f64);
         let a1 = lo + (hi - lo) * ((i + 1) as f64) / ((n - 1) as f64);
-        verts.push(OverlayVertex { position: p(a0) });
-        verts.push(OverlayVertex { position: p(a1) });
+        verts.push(overlay_vertex(p(a0)));
+        verts.push(overlay_vertex(p(a1)));
     }
-    verts
+    attach_segment_partners(verts)
 }
 
 fn equatorial_grid(step_deg: f64) -> Vec<OverlayVertex> {
@@ -557,14 +598,10 @@ fn cardinal_marks() -> Vec<OverlayVertex> {
     let mut verts = Vec::with_capacity(bars.len() * 2);
     for (az, h) in bars {
         let (s, c) = az.sin_cos();
-        verts.push(OverlayVertex {
-            position: [s as f32, c as f32, 0.0],
-        });
-        verts.push(OverlayVertex {
-            position: [s as f32, c as f32, h as f32],
-        });
+        verts.push(overlay_vertex([s as f32, c as f32, 0.0]));
+        verts.push(overlay_vertex([s as f32, c as f32, h as f32]));
     }
-    verts
+    attach_segment_partners(verts)
 }
 
 /// Great circle of the ecliptic in equatorial coords. The plane is tilted about
@@ -580,10 +617,10 @@ fn ecliptic_circle(n: usize) -> Vec<OverlayVertex> {
     for i in 0..n {
         let l0 = (i as f64) / (n as f64) * TAU;
         let l1 = ((i + 1) as f64) / (n as f64) * TAU;
-        verts.push(OverlayVertex { position: p(l0) });
-        verts.push(OverlayVertex { position: p(l1) });
+        verts.push(overlay_vertex(p(l0)));
+        verts.push(overlay_vertex(p(l1)));
     }
-    verts
+    attach_segment_partners(verts)
 }
 
 /// Great circle at galactic latitude b = 0, transformed back into J2000
@@ -604,23 +641,19 @@ fn galactic_equator_circle(n: usize) -> Vec<OverlayVertex> {
     for i in 0..n {
         let l0 = (i as f64) / (n as f64) * TAU;
         let l1 = ((i + 1) as f64) / (n as f64) * TAU;
-        verts.push(OverlayVertex { position: p(l0) });
-        verts.push(OverlayVertex { position: p(l1) });
+        verts.push(overlay_vertex(p(l0)));
+        verts.push(overlay_vertex(p(l1)));
     }
-    verts
+    attach_segment_partners(verts)
 }
 
 fn segments_to_vertices(segments: &[ConstellationSegment]) -> Vec<OverlayVertex> {
     let mut verts = Vec::with_capacity(segments.len() * 2);
     for segment in segments {
-        verts.push(OverlayVertex {
-            position: segment.start,
-        });
-        verts.push(OverlayVertex {
-            position: segment.end,
-        });
+        verts.push(overlay_vertex(segment.start));
+        verts.push(overlay_vertex(segment.end));
     }
-    verts
+    attach_segment_partners(verts)
 }
 
 fn meridian_local(n: usize) -> Vec<OverlayVertex> {
@@ -632,10 +665,10 @@ fn meridian_local(n: usize) -> Vec<OverlayVertex> {
     for i in 0..n {
         let t0 = (i as f64) / (n as f64) * TAU;
         let t1 = ((i + 1) as f64) / (n as f64) * TAU;
-        verts.push(OverlayVertex { position: p(t0) });
-        verts.push(OverlayVertex { position: p(t1) });
+        verts.push(overlay_vertex(p(t0)));
+        verts.push(overlay_vertex(p(t1)));
     }
-    verts
+    attach_segment_partners(verts)
 }
 
 #[cfg(test)]

@@ -56,6 +56,17 @@ export type PlanetsConfig = {
   enabled: boolean;
 };
 
+export const SKY_PROJECTIONS = ["perspective", "mollweide", "aitoff", "hammer"] as const;
+export type SkyProjection = (typeof SKY_PROJECTIONS)[number];
+
+export type ProjectionConfig = {
+  projection: SkyProjection;
+};
+
+export const DEFAULT_PROJECTION_CONFIG: ProjectionConfig = {
+  projection: "perspective",
+};
+
 export const DEFAULT_PLANETS_CONFIG: PlanetsConfig = {
   enabled: true,
 };
@@ -106,6 +117,16 @@ export const ATMOSPHERE_PRESET_LABELS: Record<AtmospherePreset, string> = {
 
 export const isAtmospherePreset = (s: unknown): s is AtmospherePreset =>
   typeof s === "string" && (ATMOSPHERE_PRESETS as readonly string[]).includes(s);
+
+export const isSkyProjection = (s: unknown): s is SkyProjection =>
+  typeof s === "string" && (SKY_PROJECTIONS as readonly string[]).includes(s);
+
+export const SKY_PROJECTION_LABELS: Record<SkyProjection, string> = {
+  perspective: "Perspective",
+  mollweide: "Mollweide (full sky)",
+  aitoff: "Aitoff (full sky)",
+  hammer: "Hammer (full sky)",
+};
 
 /// Human-readable labels for the UI; order also drives display order.
 export const OVERLAY_LABELS: Record<OverlayLayer, string> = {

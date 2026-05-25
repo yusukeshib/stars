@@ -9,6 +9,61 @@ use glam::{Mat4, Vec3};
 
 use crate::vertex::{limiting_magnitude_to_zeropoint, NAKED_EYE_LIMITING_MAGNITUDE};
 
+/// Sky-to-screen projection used by the renderer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SkyProjection {
+    /// Existing rectilinear camera with the configured vertical field of view.
+    #[default]
+    Perspective,
+    /// Equal-area all-sky ellipse; useful for Milky Way / galaxy-scale structure.
+    Mollweide,
+    /// Classical all-sky compromise projection used by many star atlases.
+    Aitoff,
+    /// Equal-area all-sky projection with less edge stretching than Aitoff.
+    Hammer,
+}
+
+impl SkyProjection {
+    pub const ALL: &'static [Self] = &[
+        Self::Perspective,
+        Self::Mollweide,
+        Self::Aitoff,
+        Self::Hammer,
+    ];
+
+    pub const fn as_kebab_str(self) -> &'static str {
+        match self {
+            Self::Perspective => "perspective",
+            Self::Mollweide => "mollweide",
+            Self::Aitoff => "aitoff",
+            Self::Hammer => "hammer",
+        }
+    }
+
+    pub fn from_kebab_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "perspective" => Self::Perspective,
+            "mollweide" => Self::Mollweide,
+            "aitoff" => Self::Aitoff,
+            "hammer" => Self::Hammer,
+            _ => return None,
+        })
+    }
+
+    const fn shader_mode(self) -> f32 {
+        match self {
+            Self::Perspective => 0.0,
+            Self::Mollweide => 1.0,
+            Self::Aitoff => 2.0,
+            Self::Hammer => 3.0,
+        }
+    }
+
+    const fn is_full_sky(self) -> bool {
+        !matches!(self, Self::Perspective)
+    }
+}
+
 /// GPU-side camera + atmosphere state. WGSL layout requires `vec3` fields to
 /// be 16-byte aligned, so the per-channel extinction coefficients and the
 /// equatorial "zenith" direction are stored as `vec4` with an unused `w`
@@ -77,6 +132,11 @@ pub(crate) struct CameraUniform {
     /// Lunar disk inputs: `[angular_radius_rad, illuminated_fraction,
     /// phase_angle_rad, earth_shadow_fraction]`.
     pub moon_disk: [f32; 4],
+    /// Projection controls: `[mode, map_scale_x, map_scale_y, full_sky_flag]`.
+    /// `mode = 0` preserves the perspective matrix path; `1..=3` select
+    /// Mollweide, Aitoff, and Hammer all-sky maps. The scale terms fit the
+    /// natural 2:1 map ellipse into the current framebuffer without stretching.
+    pub projection_params: [f32; 4],
     /// Planet directions in equatorial coordinates. `w` is angular radius.
     pub planet_eq_radius: PlanetEqRadiusUniform,
     /// Planet display colour in linear RGB. `w` is apparent visual magnitude.
@@ -284,6 +344,19 @@ const MIN_FOV_Y_RAD: f32 = 5.0 * std::f32::consts::PI / 180.0;
 /// a full-sky projection (ROADMAP Phase 4) rather than a perspective camera.
 const MAX_FOV_Y_RAD: f32 = 120.0 * std::f32::consts::PI / 180.0;
 
+fn full_sky_map_scale(aspect: f32) -> [f32; 2] {
+    let aspect = if aspect.is_finite() && aspect > 0.0 {
+        aspect
+    } else {
+        1.0
+    };
+    if aspect >= 2.0 {
+        [2.0 / aspect, 1.0]
+    } else {
+        [1.0, aspect / 2.0]
+    }
+}
+
 fn mat3d_to_mat4(m: [[f64; 3]; 3]) -> Mat4 {
     Mat4::from_cols_array(&[
         m[0][0] as f32,
@@ -399,6 +472,10 @@ pub struct Camera {
     pub view: LocalView,
     pub aspect: f32,
     pub atmosphere: Atmosphere,
+    /// Projection model. Perspective uses [`LocalView::fov_y_rad`]; the
+    /// all-sky projections ignore FoV but keep azimuth/altitude as the map
+    /// centre so users can rotate the seam away from the structure of interest.
+    pub projection: SkyProjection,
     /// Whether Mercury through Neptune are rendered as apparent solar-system
     /// disks/points from the VSOP87 ephemeris.
     pub planets_enabled: bool,
@@ -419,6 +496,7 @@ impl Camera {
             view: view.clamped(),
             aspect,
             atmosphere: Atmosphere::default(),
+            projection: SkyProjection::default(),
             planets_enabled: true,
             limiting_magnitude: NAKED_EYE_LIMITING_MAGNITUDE,
         }
@@ -470,6 +548,51 @@ impl Camera {
         Mat4::perspective_rh(self.effective_view().fov_y_rad, self.aspect, 0.01, 10.0)
     }
 
+    /// NDC half-extents that fit a natural 2:1 all-sky map ellipse into the
+    /// current viewport without stretching it.
+    fn full_sky_map_scale(&self) -> [f32; 2] {
+        full_sky_map_scale(self.aspect)
+    }
+
+    fn projection_params(&self) -> [f32; 4] {
+        let [sx, sy] = self.full_sky_map_scale();
+        [
+            self.projection.shader_mode(),
+            sx,
+            sy,
+            if self.projection.is_full_sky() {
+                1.0
+            } else {
+                0.0
+            },
+        ]
+    }
+
+    /// Matrix stored in `CameraUniform::view_proj`.
+    ///
+    /// Perspective mode keeps the historical view-projection matrix. All-sky
+    /// projections are non-linear, so the shader needs the pre-projection view
+    /// matrix and performs the spherical map itself.
+    fn shader_view_proj(&self) -> Mat4 {
+        if self.projection.is_full_sky() {
+            self.view_matrix()
+        } else {
+            self.view_proj()
+        }
+    }
+
+    fn shader_view_proj_local(&self) -> Mat4 {
+        if self.projection.is_full_sky() {
+            self.view_matrix_local()
+        } else {
+            self.view_proj_local()
+        }
+    }
+
+    fn shader_inv_view_proj(&self) -> Mat4 {
+        self.shader_view_proj().inverse()
+    }
+
     /// View-projection for J2000 equatorial-frame geometry. Alias kept for backward compat.
     pub fn view_proj(&self) -> Mat4 {
         self.projection_matrix() * self.view_matrix()
@@ -478,6 +601,18 @@ impl Camera {
     /// View-projection for local ENU-frame geometry.
     pub(crate) fn view_proj_local(&self) -> Mat4 {
         self.projection_matrix() * self.view_matrix_local()
+    }
+
+    pub(crate) fn overlay_matrix_equatorial(&self) -> Mat4 {
+        self.shader_view_proj()
+    }
+
+    pub(crate) fn overlay_matrix_local(&self) -> Mat4 {
+        self.shader_view_proj_local()
+    }
+
+    pub(crate) fn overlay_projection_params(&self) -> [f32; 4] {
+        self.projection_params()
     }
 
     /// Local zenith direction expressed in J2000 equatorial coordinates.
@@ -504,9 +639,19 @@ impl Camera {
     /// in this approximation, which is good enough for naked-eye-scale
     /// FoVs; wide-FoV edge fall-off would need a per-fragment computation,
     /// scoped for a future PR).
-    fn pixel_solid_angle_sr(&self, height_pixels: u32) -> f32 {
-        let pixel_size_rad = self.effective_view().fov_y_rad / height_pixels.max(1) as f32;
-        pixel_size_rad * pixel_size_rad
+    fn pixel_solid_angle_sr(&self, width_pixels: u32, height_pixels: u32) -> f32 {
+        if self.projection.is_full_sky() {
+            let [sx, sy] = self.full_sky_map_scale();
+            let width = width_pixels.max(1) as f32;
+            let height = height_pixels.max(1) as f32;
+            // The all-sky maps cover 4π sr inside an ellipse with half-axes
+            // sx·W/2 and sy·H/2 pixels, so the average pixel solid angle is
+            // 4π / (π·sx·W/2·sy·H/2).
+            16.0 / (sx.max(1e-6) * sy.max(1e-6) * width * height)
+        } else {
+            let pixel_size_rad = self.effective_view().fov_y_rad / height_pixels.max(1) as f32;
+            pixel_size_rad * pixel_size_rad
+        }
     }
 
     pub(crate) fn planet_uniforms(&self) -> PlanetUniforms {
@@ -635,10 +780,10 @@ impl Camera {
         } else {
             0.0
         };
-        let view_proj = self.view_proj();
-        let inv_view_proj = view_proj.inverse();
+        let view_proj = self.shader_view_proj();
+        let inv_view_proj = self.shader_inv_view_proj();
         let eq_to_local = self.equatorial_to_horizontal();
-        let view_proj_local = self.view_proj_local();
+        let view_proj_local = self.shader_view_proj_local();
         let earth_velocity = earth_velocity_over_c_j2000(self.observer.time.jd_tdb);
         CameraUniform {
             view_proj: view_proj.to_cols_array_2d(),
@@ -656,7 +801,7 @@ impl Camera {
             viewport_pixel_sr_zeropoint: [
                 width as f32,
                 height as f32,
-                self.pixel_solid_angle_sr(height),
+                self.pixel_solid_angle_sr(width, height),
                 limiting_magnitude_to_zeropoint(self.limiting_magnitude),
             ],
             zenith_eq: [zenith.x, zenith.y, zenith.z, 0.0],
@@ -687,6 +832,7 @@ impl Camera {
                 moon.phase_angle_rad as f32,
                 moon.earth_shadow_fraction as f32,
             ],
+            projection_params: self.projection_params(),
             planet_eq_radius: planet_uniforms.eq_radius,
             planet_rgb_magnitude: planet_uniforms.rgb_magnitude,
             planet_params: planet_uniforms.params,
@@ -865,5 +1011,32 @@ mod tests {
         let mut cam = Camera::new(observer_at(0.0), LocalView::default(), 1.0);
         cam.rotate_view(-0.5, 0.0);
         assert!((0.0..std::f32::consts::TAU).contains(&cam.view.azimuth_rad));
+    }
+
+    #[test]
+    fn sky_projection_kebab_round_trips() {
+        for projection in SkyProjection::ALL {
+            let s = projection.as_kebab_str();
+            assert_eq!(SkyProjection::from_kebab_str(s), Some(*projection));
+        }
+        assert_eq!(SkyProjection::from_kebab_str("unknown"), None);
+    }
+
+    #[test]
+    fn full_sky_scale_preserves_two_to_one_map_aspect() {
+        assert_eq!(full_sky_map_scale(2.0), [1.0, 1.0]);
+        assert_eq!(full_sky_map_scale(1.0), [1.0, 0.5]);
+        assert_eq!(full_sky_map_scale(4.0), [0.5, 1.0]);
+        assert_eq!(full_sky_map_scale(f32::NAN), [1.0, 0.5]);
+    }
+
+    #[test]
+    fn all_sky_pixel_solid_angle_averages_to_four_pi() {
+        let mut cam = Camera::new(observer_at(0.0), LocalView::default(), 2.0);
+        cam.projection = SkyProjection::Mollweide;
+        let sr = cam.pixel_solid_angle_sr(1000, 500);
+        let ellipse_pixels = std::f32::consts::PI * 500.0 * 250.0;
+        let total_sr = sr * ellipse_pixels;
+        assert!((total_sr - std::f32::consts::TAU * 2.0).abs() < 1e-4);
     }
 }

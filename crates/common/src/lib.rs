@@ -14,7 +14,8 @@ use astronomy::TimeScales;
 use catalog::load_from_file;
 use clap::ValueEnum;
 use renderer::{
-    build_star_instance, Atmosphere, AtmospherePreset, OverlayConfig, OverlayKind, StarInstance,
+    build_star_instance, Atmosphere, AtmospherePreset, OverlayConfig, OverlayKind, SkyProjection,
+    StarInstance,
 };
 
 /// CLI-facing mirror of [`OverlayKind`] that derives [`ValueEnum`] so `clap`
@@ -59,6 +60,32 @@ impl From<OverlayArg> for OverlayKind {
             OverlayArg::GalacticEquator => OverlayKind::GalacticEquator,
             OverlayArg::ConstellationLines => OverlayKind::ConstellationLines,
             OverlayArg::ConstellationBoundaries => OverlayKind::ConstellationBoundaries,
+        }
+    }
+}
+
+/// CLI-facing mirror of [`SkyProjection`] for `clap` parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
+pub enum ProjectionArg {
+    Perspective,
+    Mollweide,
+    Aitoff,
+    Hammer,
+}
+
+impl std::fmt::Display for ProjectionArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(SkyProjection::from(*self).as_kebab_str())
+    }
+}
+
+impl From<ProjectionArg> for SkyProjection {
+    fn from(p: ProjectionArg) -> Self {
+        match p {
+            ProjectionArg::Perspective => SkyProjection::Perspective,
+            ProjectionArg::Mollweide => SkyProjection::Mollweide,
+            ProjectionArg::Aitoff => SkyProjection::Aitoff,
+            ProjectionArg::Hammer => SkyProjection::Hammer,
         }
     }
 }
@@ -251,6 +278,21 @@ mod tests {
             let preset: AtmospherePreset = arg.into();
             let s = preset.as_kebab_str();
             assert_eq!(AtmospherePreset::from_kebab_str(s), Some(preset));
+            assert_eq!(format!("{arg}"), s);
+        }
+    }
+
+    #[test]
+    fn projection_arg_round_trips() {
+        for arg in [
+            ProjectionArg::Perspective,
+            ProjectionArg::Mollweide,
+            ProjectionArg::Aitoff,
+            ProjectionArg::Hammer,
+        ] {
+            let projection: SkyProjection = arg.into();
+            let s = projection.as_kebab_str();
+            assert_eq!(SkyProjection::from_kebab_str(s), Some(projection));
             assert_eq!(format!("{arg}"), s);
         }
     }
