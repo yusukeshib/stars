@@ -150,6 +150,42 @@ const S10_TO_MAG_ARCSEC2_OFFSET: f64 = 27.78;
 /// and `sun_relative_lon_rad` drive the zodiacal-light component. Smaller `μ` =
 /// brighter sky. This is calibrated for naked-eye visualisation and remains an
 /// analytic approximation, not a replacement for the published 2-D tables.
+/// Empirical V-band zenith twilight surface brightness in mag/arcsec².
+///
+/// Returns `None` when the Sun is above the geometric horizon (use a daylight
+/// scattering model such as Preetham/Hosek/Bruneton instead) or below
+/// astronomical twilight (`h < -18°`, where the dark-sky model dominates).
+/// Within `0° ≥ h ≥ -18°`, this linearly interpolates observed zenith
+/// brightness anchor points representative of clear sites:
+///
+/// * sunset: μ_V ≈ 3.5 mag/arcsec²
+/// * civil twilight (-6°): μ_V ≈ 12
+/// * nautical twilight (-12°): μ_V ≈ 18
+/// * astronomical twilight (-18°): μ_V ≈ 21.6
+///
+/// This is deliberately a measured sky-brightness curve, not a star-visibility
+/// gate. Stars remain rendered continuously; their visibility changes only via
+/// contrast against this continuously varying background and the tone mapper.
+///
+/// References: Rozenberg 1966 twilight brightness curves; Patat et al. 2006,
+/// A&A 455, 385, for V-band twilight sky-brightness behaviour at Cerro Paranal.
+pub fn twilight_zenith_mag_per_arcsec2(solar_altitude_rad: f64) -> Option<f64> {
+    if solar_altitude_rad >= 0.0 || solar_altitude_rad <= -18.0_f64.to_radians() {
+        return None;
+    }
+    let depression_deg = (-solar_altitude_rad).to_degrees().clamp(0.0, 18.0);
+    let anchors = [(0.0, 3.5), (6.0, 12.0), (12.0, 18.0), (18.0, 21.6)];
+    for pair in anchors.windows(2) {
+        let (x0, y0) = pair[0];
+        let (x1, y1) = pair[1];
+        if depression_deg <= x1 {
+            let t = (depression_deg - x0) / (x1 - x0);
+            return Some(y0 + t * (y1 - y0));
+        }
+    }
+    Some(anchors[anchors.len() - 1].1)
+}
+
 pub fn diffuse_sky_mag_per_arcsec2(
     l_rad: f64,
     b_rad: f64,
@@ -374,5 +410,22 @@ mod tests {
         let raw = isl_mag_per_arcsec2(0.0, 0.0);
         let dimmed = s10_to_mag(mag_to_s10(raw) * dust_transmission(0.0, 0.0));
         assert!(dimmed > raw, "dust should make ISL numerically fainter");
+    }
+
+    #[test]
+    fn twilight_curve_is_continuous_and_monotone() {
+        assert_eq!(twilight_zenith_mag_per_arcsec2(1.0_f64.to_radians()), None);
+        assert_eq!(
+            twilight_zenith_mag_per_arcsec2((-19.0_f64).to_radians()),
+            None
+        );
+
+        let civil = twilight_zenith_mag_per_arcsec2((-6.0_f64).to_radians()).unwrap();
+        let nautical = twilight_zenith_mag_per_arcsec2((-12.0_f64).to_radians()).unwrap();
+        let astronomical = twilight_zenith_mag_per_arcsec2((-17.999_f64).to_radians()).unwrap();
+        assert!((civil - 12.0).abs() < 1e-12);
+        assert!((nautical - 18.0).abs() < 1e-12);
+        assert!((astronomical - 21.6).abs() < 0.01);
+        assert!(civil < nautical && nautical < astronomical);
     }
 }
