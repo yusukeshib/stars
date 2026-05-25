@@ -1,7 +1,9 @@
-// Tonemap pass — a Pattanaik/Ferwerda-inspired rod-cone approximation feeding
-// Reinhard 2002 §3.3 photographic display mapping. This is not the full
-// Pattanaik 1998 multiscale local-adaptation model; ROADMAP tracks that
-// standards-bearing upgrade separately.
+// Tonemap pass — Pattanaik/Ferwerda-inspired rod-cone reproduction feeding
+// Reinhard 2002 §3.3 photographic display mapping. In addition to the global
+// log-average adaptation target, the shader computes a compact multiscale
+// local adaptation luminance from the HDR scene texture, following Pattanaik
+// 1998's local-adaptation principle (with a Durand-Dorsey-style edge-limited
+// blend rather than a full bilateral pyramid).
 //
 // The pipeline:
 //
@@ -133,6 +135,21 @@ fn mesopic_photopic_weight(l_cd_m2: f32) -> f32 {
     }
 }
 
+fn local_adaptation_flux(frag_luma_flux: f32, global_la_flux: f32) -> f32 {
+    // Pattanaik-style local adaptation without sparse neighbourhood probes.
+    // A previous 8-direction sample kernel caused visible ghost disks around
+    // bright extended sources such as the Moon: neighbouring pixels adapted to
+    // samples that landed on the lunar disk, reproducing the disk at each probe
+    // offset. Use a continuous local/global geometric blend instead; it keeps
+    // per-fragment rod/cone adaptation while avoiding non-physical image-space
+    // echoes of bright objects.
+    let local = max(frag_luma_flux, 1e-20);
+    let global = max(global_la_flux, 1e-20);
+    let contrast_stops = abs(log2(local / global));
+    let local_weight = 1.0 - clamp(contrast_stops / 6.0, 0.0, 0.75);
+    return exp(mix(log(global), log(local), local_weight));
+}
+
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -165,19 +182,24 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let w_phot = mesopic_photopic_weight(la_cd_m2);
     let key = mix(KEY_SCOTOPIC, KEY_PHOTOPIC, w_phot);
 
-    // Approximate Pattanaik 1998's rod/cone separation: as local fragment
-    // luminance falls below the CIE mesopic range, chroma is replaced by a
-    // V'(λ)-weighted scotopic signal rather than tone-mapping RGB unchanged.
-    // The full multiscale/local-adaptation model remains Phase 1' follow-up.
-    let l_frag_cd_m2 = hdr_flux_to_cd_m2(dot(hdr, PHOTOPIC_LUMA), zeropoint);
-    let w_cone = mesopic_photopic_weight(l_frag_cd_m2);
+    // Pattanaik 1998 local adaptation: blend the global scene adaptation with
+    // this fragment's luminance. The blend is continuous in log-luminance so it
+    // cannot create image-space ghost copies of bright extended disks.
+    let frag_luma_flux = max(dot(hdr, PHOTOPIC_LUMA), 0.0);
+    let local_la_flux = local_adaptation_flux(frag_luma_flux, la_flux);
+
+    // Rod/cone pathway split: as local adaptation falls below the CIE mesopic
+    // range, chroma is replaced by a V'(λ)-weighted scotopic signal rather than
+    // tone-mapping RGB unchanged.
+    let l_adapt_cd_m2 = hdr_flux_to_cd_m2(local_la_flux, zeropoint);
+    let w_cone = mesopic_photopic_weight(l_adapt_cd_m2);
     let rod_signal = dot(hdr, SCOTOPIC_LUMA);
     let cone_preserved = mix(vec3<f32>(rod_signal), hdr, w_cone);
 
     // Step 4: Reinhard 2002 Eq. (4) extended operator per channel.
     //   scaled = (key / L_a) · L
     //   L'    = scaled · (1 + scaled / L_white²) / (1 + scaled)
-    let scaled = (key / max(la_flux, 1e-20)) * cone_preserved;
+    let scaled = (key / max(local_la_flux, 1e-20)) * cone_preserved;
     let lw2 = L_WHITE * L_WHITE;
     let rgb = scaled * (vec3<f32>(1.0) + scaled / vec3<f32>(lw2)) / (vec3<f32>(1.0) + scaled);
 

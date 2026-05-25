@@ -232,12 +232,15 @@ pub fn apparent_moon(julian_date: f64) -> MoonApparent {
     // Days since 2000 Jan 0.0, matching the epoch used by the compact element
     // set. Angles are degrees until explicitly converted.
     let d = julian_date - 2_451_543.5;
-    let n = (125.1228 - 0.052_953_808_3 * d).rem_euclid(360.0) * DEG_TO_RAD;
+    let n_deg = (125.1228 - 0.052_953_808_3 * d).rem_euclid(360.0);
+    let w_deg = (318.0634 + 0.164_357_322_3 * d).rem_euclid(360.0);
+    let m_deg = (115.3654 + 13.064_992_950_9 * d).rem_euclid(360.0);
+    let n = n_deg * DEG_TO_RAD;
     let i = 5.1454 * DEG_TO_RAD;
-    let w = (318.0634 + 0.164_357_322_3 * d).rem_euclid(360.0) * DEG_TO_RAD;
+    let w = w_deg * DEG_TO_RAD;
     let a_earth_radii = 60.2666;
     let e = 0.054_900;
-    let m = (115.3654 + 13.064_992_950_9 * d).rem_euclid(360.0) * DEG_TO_RAD;
+    let m = m_deg * DEG_TO_RAD;
 
     // One Newton step is enough for this visual orbit because lunar e is small.
     let mut eccentric_anomaly = m + e * m.sin() * (1.0 + e * m.cos());
@@ -256,6 +259,38 @@ pub fn apparent_moon(julian_date: f64) -> MoonApparent {
     let x_ecl = distance_earth_radii * (cos_n * cos_vw - sin_n * sin_vw * cos_i);
     let y_ecl = distance_earth_radii * (sin_n * cos_vw + cos_n * sin_vw * cos_i);
     let z_ecl = distance_earth_radii * (sin_vw * sin_i);
+
+    // Add the largest ELP/Meeus periodic terms in ecliptic longitude, latitude,
+    // and distance. This keeps the visual Moon within tens of arcminutes of the
+    // full theory while preserving the dependency-free renderer path until the
+    // roadmap's complete ELP2000 series lands.
+    let lon = y_ecl.atan2(x_ecl);
+    let lat = z_ecl.atan2((x_ecl * x_ecl + y_ecl * y_ecl).sqrt());
+    let r = (x_ecl * x_ecl + y_ecl * y_ecl + z_ecl * z_ecl).sqrt();
+    let l_moon = (n_deg + w_deg + m_deg).rem_euclid(360.0) * DEG_TO_RAD;
+    let l_sun = (280.460 + 0.985_647_4 * d).rem_euclid(360.0) * DEG_TO_RAD;
+    let m_sun = (357.528 + 0.985_600_3 * d).rem_euclid(360.0) * DEG_TO_RAD;
+    let d_moon = l_moon - l_sun;
+    let f = l_moon - n;
+    let lon_corr_deg = -1.274 * (m - 2.0 * d_moon).sin() + 0.658 * (2.0 * d_moon).sin()
+        - 0.186 * m_sun.sin()
+        - 0.059 * (2.0 * m - 2.0 * d_moon).sin()
+        - 0.057 * (m - 2.0 * d_moon + m_sun).sin()
+        + 0.053 * (m + 2.0 * d_moon).sin()
+        + 0.046 * (2.0 * d_moon - m_sun).sin()
+        + 0.041 * (m - m_sun).sin();
+    let lat_corr_deg = -0.173 * (f - 2.0 * d_moon).sin()
+        - 0.055 * (m - f - 2.0 * d_moon).sin()
+        - 0.046 * (m + f - 2.0 * d_moon).sin()
+        + 0.033 * (f + 2.0 * d_moon).sin()
+        + 0.017 * (2.0 * m + f).sin();
+    let r_corr_er = -0.58 * (m - 2.0 * d_moon).cos() - 0.46 * (2.0 * d_moon).cos();
+    let lon = lon + lon_corr_deg * DEG_TO_RAD;
+    let lat = lat + lat_corr_deg * DEG_TO_RAD;
+    let distance_earth_radii = r + r_corr_er;
+    let x_ecl = distance_earth_radii * lat.cos() * lon.cos();
+    let y_ecl = distance_earth_radii * lat.cos() * lon.sin();
+    let z_ecl = distance_earth_radii * lat.sin();
 
     // Mean obliquity is sufficient for this low-precision Moon path.
     let t = (julian_date - J2000_JD) / 36_525.0;

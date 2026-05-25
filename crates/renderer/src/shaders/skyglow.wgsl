@@ -67,16 +67,6 @@ const SIGMA_B_THIN_DEG: f32 = 4.0;
 const SIGMA_B_THICK_DEG: f32 = 30.0;
 const SIGMA_L_BULGE_DEG: f32 = 60.0;
 const S10_TO_MAG_ARCSEC2_OFFSET: f32 = 27.78;
-// Patat et al. 2006 / Rozenberg 1966 style empirical zenith twilight sky
-// brightness anchor points in V mag arcsec^-2 as a function of solar
-// depression. This is a measured surface-brightness curve, not a visibility
-// gate on stars; stars are still rendered continuously and lose/gain contrast
-// only through the scene luminance and tonemap.
-const TWILIGHT_MU_0_DEG: f32 = 3.5;
-const TWILIGHT_MU_6_DEG: f32 = 12.0;
-const TWILIGHT_MU_12_DEG: f32 = 18.0;
-const TWILIGHT_MU_18_DEG: f32 = 21.6;
-
 const RAD_TO_DEG: f32 = 57.295779513;
 const NEG_OH_FOUR_LN10: f32 = -0.9210340371976184; // -0.4 · ln(10)
 // 1 sr = (180·3600/π)² arcsec² ≈ 4.2545e10.
@@ -102,13 +92,17 @@ fn mag_to_s10(mu: f32) -> f32 {
 }
 
 fn zodiacal_light_s10(beta_rad: f32, sun_rel_lon_rad: f32) -> f32 {
-    _ = sun_rel_lon_rad;
-    // Leinert §5-inspired compact table fit. Until Phase 2 provides the real
-    // solar longitude, keep only the broad ecliptic dust band; a fake fixed
-    // gegenschein renders as an obvious white disk and is visually misleading.
+    // Leinert §5-inspired compact zodiacal-light table fit: ecliptic dust band
+    // plus the broad antisolar gegenschein once the Sun longitude is known.
     let beta = abs(beta_rad * RAD_TO_DEG);
-    let plane = 55.0 * exp(-pow(beta / 14.0, 2.0));
-    return 18.0 + plane;
+    let lon = atan2(sin(sun_rel_lon_rad), cos(sun_rel_lon_rad));
+    let elongation = acos(clamp(cos(beta_rad) * cos(lon), -1.0, 1.0)) * RAD_TO_DEG;
+    let antisolar = abs(atan2(sin(lon - PI), cos(lon - PI))) * RAD_TO_DEG;
+    let latitude_band = exp(-pow(beta / 14.0, 2.0));
+    let forward_scatter = 1.0 + 1.15 * exp(-pow(elongation / 42.0, 2.0));
+    let ecliptic_band = 48.0 * latitude_band * forward_scatter;
+    let gegenschein = 32.0 * exp(-pow(antisolar / 18.0, 2.0) - pow(beta / 10.0, 2.0));
+    return 18.0 + ecliptic_band + gegenschein;
 }
 
 fn dust_transmission(l_rad: f32, b_rad: f32) -> f32 {
@@ -328,18 +322,7 @@ fn moonlit_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> vec
     return hdr_flux_from_cd_m2(rgb, zeropoint);
 }
 
-fn twilight_zenith_mu_mag_arcsec2(sun_alt_rad: f32) -> f32 {
-    let depression = clamp(-sun_alt_rad * RAD_TO_DEG, 0.0, 18.0);
-    if depression < 6.0 {
-        return mix(TWILIGHT_MU_0_DEG, TWILIGHT_MU_6_DEG, depression / 6.0);
-    }
-    if depression < 12.0 {
-        return mix(TWILIGHT_MU_6_DEG, TWILIGHT_MU_12_DEG, (depression - 6.0) / 6.0);
-    }
-    return mix(TWILIGHT_MU_12_DEG, TWILIGHT_MU_18_DEG, (depression - 12.0) / 6.0);
-}
-
-fn twilight_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_arcsec2: f32) -> vec3<f32> {
+fn twilight_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> vec3<f32> {
     if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
         return vec3<f32>(0.0);
     }
@@ -347,17 +330,42 @@ fn twilight_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel
     if sun_alt >= 0.0 || sun_alt <= -18.0 * DEG_TO_RAD {
         return vec3<f32>(0.0);
     }
+
+    // Single-scattering twilight approximation: direct solar irradiance is
+    // exponentially attenuated along the tangent path through Earth's shadow;
+    // the remaining light is Rayleigh + forward Mie scattered into the view.
+    // The extinction scale is tied to the same turbidity/visibility controls as
+    // daylight, so civil/nautical/astronomical twilight are continuous radiance
+    // states rather than UI fade bands.
     let sun_dir = normalize(camera.sun_eq_radius.xyz);
-    let gamma = acos(clamp(dot(ray_dir, sun_dir), -1.0, 1.0));
-    let horizon_airmass = 1.0 + 0.45 * smoothstep01(0.45, 0.0, sin_alt);
-    let forward_scatter = 1.0 + 0.55 * exp(-gamma / 0.75);
-    let mu = twilight_zenith_mu_mag_arcsec2(sun_alt) - 2.5 * log(horizon_airmass * forward_scatter) / LN10;
-    let flux_per_arcsec2 = exp(NEG_OH_FOUR_LN10 * (mu - zeropoint));
-    let flux_per_pixel = flux_per_arcsec2 * pixel_arcsec2;
-    let depression = clamp(-sun_alt * RAD_TO_DEG, 0.0, 18.0);
-    let reddening = clamp((12.0 - depression) / 12.0, 0.0, 1.0);
-    let tint = mix(vec3<f32>(0.45, 0.55, 1.0), vec3<f32>(1.0, 0.56, 0.24), reddening);
-    return tint * flux_per_pixel;
+    let cos_gamma = clamp(dot(ray_dir, sun_dir), -1.0, 1.0);
+    let gamma = acos(cos_gamma);
+    let depression = -sun_alt;
+    let T = clamp(camera.atmosphere_params.x, 1.7, 10.0);
+    let visibility_km = clamp(camera.atmosphere_optics.y, 1.0, 200.0);
+    let aerosol = clamp(50.0 / visibility_km, 0.25, 5.0) * (T / 2.5);
+    let shadow_tau = (0.72 + 0.18 * aerosol) * pow(depression / DEG_TO_RAD, 1.18);
+    let shadow_transmission = exp(-shadow_tau);
+    let view_airmass = 1.0 / max(sin_alt + 0.06, 0.06);
+
+    let rayleigh_phase = 0.75 * (1.0 + cos_gamma * cos_gamma);
+    let mie_phase = henyey_greenstein(cos_gamma, 0.78) / max(henyey_greenstein(0.0, 0.78), 1e-4);
+    let scatter_phase = 0.62 * rayleigh_phase + 0.38 * clamp(mie_phase, 0.0, 10.0);
+    let optical_depth = exp(-0.09 * view_airmass * (1.0 + 0.6 * aerosol));
+    let luminance = max(camera.atmosphere_params.z, 0.0)
+        * 2.2e-5
+        * shadow_transmission
+        * scatter_phase
+        * optical_depth;
+
+    // Long slant paths extinguish blue first; ozone Chappuis absorption
+    // suppresses green/orange near the horizon, yielding red sunset/civil
+    // twilight that cools smoothly toward astronomical twilight.
+    let blue_loss = exp(-vec3<f32>(0.45, 0.22, 0.04) * view_airmass * (0.5 + aerosol));
+    let ozone = clamp(camera.atmosphere_optics.x, 0.0, 600.0) / 300.0;
+    let ozone_transmission = exp(-0.025 * ozone * view_airmass * vec3<f32>(0.25, 0.58, 0.16));
+    let rgb_luminance = camera.solar_rgb.xyz * luminance * blue_loss * ozone_transmission;
+    return hdr_flux_from_cd_m2(rgb_luminance, zeropoint);
 }
 
 fn diffuse_sky_mag_per_arcsec2(l_rad: f32, b_rad: f32, beta_rad: f32, sun_rel_lon_rad: f32) -> f32 {
@@ -433,10 +441,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let zeropoint = camera.viewport_pixel_sr_zeropoint.w;
     let pixel_sr = camera.viewport_pixel_sr_zeropoint.z;
     let pixel_arcsec2 = pixel_sr * ARCSEC2_PER_SR;
-    // Approximate ecliptic latitude directly from J2000 equatorial y/z using
-    // ε=23.4392911°. The longitude value is reserved for Phase 2's real solar
-    // ephemeris; the current zodiacal component intentionally avoids drawing a
-    // fake fixed gegenschein blob.
+    // Approximate ecliptic coordinates directly from J2000 equatorial y/z using
+    // ε=23.4392911°. The Sun direction supplied by the ephemeris lets the
+    // zodiacal component evaluate a real sun-relative longitude and antisolar
+    // gegenschein rather than a fixed sky-space blob.
     let x_ecl = ray_dir.x;
     let y_ecl = 0.917482062 * ray_dir.y + 0.397777156 * ray_dir.z;
     let z_ecl = -0.397777156 * ray_dir.y + 0.917482062 * ray_dir.z;
@@ -477,7 +485,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     let night_radiance = tint * flux_per_pixel * attenuation;
     let moon_radiance = moonlit_sky_radiance(ray_dir, sin_alt, zeropoint);
-    let twilight_radiance = twilight_sky_radiance(ray_dir, sin_alt, zeropoint, pixel_arcsec2);
+    let twilight_radiance = twilight_sky_radiance(ray_dir, sin_alt, zeropoint);
     let day_radiance = sunlit_scattering_radiance(ray_dir, sin_alt, zeropoint);
     let disk_radiance = sun_moon_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
     return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance, 1.0);
