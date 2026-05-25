@@ -21,15 +21,26 @@ lines of Rust + ~400 lines of TS), so read every source file with fresh eyes —
 do not skim. The goal is to ship a tight, internally consistent commit, not a
 report.
 
+Be strict about two project-specific standards on every pass:
+
+- **Crate boundaries are an architectural contract.** Drift across
+  `astronomy`, `catalog`, `renderer`, `common`, and `apps/*` is a correctness
+  issue, not a style nit.
+- **Academic / scientific correctness is first-class.** Claims about time
+  scales, coordinate frames, physical models, precision, constants, and
+  citations must match the implementation and its validation limits.
+
 The user may run this skill multiple times in a session. Each invocation should
 find and fix something; if you genuinely find nothing, say so and stop.
 
 ## Workflow
 
 1. **Scan**. Read every file under `crates/`, `apps/`, plus the workspace
-   `Cargo.toml`, each crate/app `Cargo.toml`, the `Makefile`, and the frontend
-   under `apps/web/frontend/src/`. Use `grep` to find dead deps, unused
-   re-exports, stale paths.
+   `Cargo.toml`, each crate/app `Cargo.toml`, `AGENTS.md`, `ARCHITECTURE.md`,
+   `CONTRIBUTING.md`, `ROADMAP.md`, `PROGRESS.md`, `VALIDATION.md`,
+   `DATA_SOURCES.md`, the `Makefile`, and the frontend under
+   `apps/web/frontend/src/`. Use `grep` to find dead deps, unused re-exports,
+   stale paths, stale docs, and unsupported scientific claims.
 2. **List issues** in the response, grouped by category (see checklist below).
    Mark items you intend to skip with a one-line reason — premature
    optimization, scope creep, etc.
@@ -53,6 +64,9 @@ find and fix something; if you genuinely find nothing, say so and stop.
 
 ### Crate boundaries
 
+Treat this section as strict. A misplaced type, dependency, parser, or host
+concern is a real architecture bug.
+
 - Every `[dependencies]` entry must be actually `use`d somewhere in that crate's
   source. Run `grep -rn "use <dep>::\|<dep>::" crates/<x>/src` to verify.
   Common rot: `log`, `bytemuck`, `glam`, `js-sys` listed but unused.
@@ -60,6 +74,9 @@ find and fix something; if you genuinely find nothing, say so and stop.
   `astronomy`, not `renderer`. `magnitude_to_render_params` belongs in
   `renderer`, not `catalog`. If you find a misplaced type, move it.
 - `renderer` must NOT depend on `catalog` (only on `astronomy`).
+- Engine crates must not gain host dependencies such as `clap`, `chrono`,
+  `winit`, `wasm-bindgen`, or frontend-only concepts.
+- Any boundary/API drift against `ARCHITECTURE.md` is a must-fix finding.
 
 ### Public-API hygiene
 
@@ -104,6 +121,25 @@ find and fix something; if you genuinely find nothing, say so and stop.
 - Doc comments on functions with mixed units (e.g. `radec_to_cartesian(ra_hours,
   dec_degrees)`) must call out the units explicitly.
 
+### Academic / scientific correctness
+
+Be unusually strict here. This project should be defensible to astronomers,
+educators, and reviewers.
+
+- Every astronomical constant, formula, time-scale conversion, coordinate frame,
+  and physical rendering model must have a clear source or documented
+  approximation level.
+- Docs and comments must distinguish J2000 vs of-date, UTC vs UT1 vs TT/TDB,
+  geodetic vs geocentric latitude, geometric vs refracted altitude, and visual
+  approximations vs numerical astronomy results.
+- Precision claims must be backed by tests or softened to match the actual
+  model. Unsupported arcsecond-level or publication-grade claims are must-fix.
+- Any change to astronomy, photometry, atmosphere, ephemeris, planning, or
+  catalog conversion must update or add pinned validation tests unless there is
+  an explicit reason not to.
+- If a scientific model, limitation, or data provenance changes, update
+  `VALIDATION.md` or `DATA_SOURCES.md` in the same commit.
+
 ### Tests
 
 - A test that just re-applies the function under test and asserts the trivial
@@ -133,7 +169,8 @@ find and fix something; if you genuinely find nothing, say so and stop.
   crossing the WASM/JS boundary three times per frame is fine until proven
   otherwise.
 - Don't add features. This skill cleans up what's there; it doesn't extend it.
-- Don't create new `.md` documentation. The skill itself and code comments are
-  sufficient.
+- Don't leave documentation stale. Update the existing docs according to
+  `AGENTS.md` / `CONTRIBUTING.md` when behaviour, APIs, status, validation, or
+  data sources change.
 - Don't split the cleanup across multiple commits unless they're genuinely
   independent. One coherent "second-pass cleanup" commit is fine.

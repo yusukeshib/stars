@@ -211,8 +211,8 @@ fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
 /// This is the conventional Meeus/IAU-1976 polynomial for mean obliquity
 /// (ε₀ = 23°26′21.448″ at J2000.0, with century terms in Julian centuries
 /// from J2000). It is adequate for the current visual VSOP87/FK5 + lunar
-/// series inputs, but it is **not** the final IAU 2006 precession-nutation
-/// stack tracked in README Phase 2.
+/// series inputs, but it is **not** the full standards-grade ephemeris stack
+/// tracked in ROADMAP Phase 3.
 fn mean_obliquity_rad(julian_date: f64) -> f64 {
     let t = (julian_date - J2000_JD) / 36_525.0;
     let mean_obliquity_arcsec = 21.448 - t * (46.8150 + t * (0.00059 - t * 0.001813));
