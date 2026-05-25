@@ -221,21 +221,73 @@ fn preetham_sky_luminance_rgb(ray_dir: vec3<f32>, sin_alt: f32) -> vec3<f32> {
         * haze_whitening;
 }
 
-// Artistic exposure compression for the daytime/twilight atmosphere layer.
-// The Preetham model returns physical cd/m² values; if those are converted
-// one-to-one into the same HDR buffer as point-source stars, the sky radiance
-// is so dominant that the catalogue appears to vanish. This renderer is an
-// interactive star atlas rather than a daylight visibility simulator, so keep
-// the sunlit sky colour/directionality while compressing its radiance relative
-// to stars enough that the star layer remains present for orientation.
-const SUNLIT_SKY_STAR_ATLAS_EXPOSURE: f32 = 3.0e-5;
+// Keep sunlit sky radiance on the same physical cd/m² scale as the dark-sky
+// and star passes. Daytime should therefore adapt to a bright blue sky rather
+// than a dim star-atlas background; stars naturally lose contrast in daylight.
+const SUNLIT_SKY_EXPOSURE: f32 = 1.0;
 
 fn sunlit_scattering_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> vec3<f32> {
     if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
         return vec3<f32>(0.0);
     }
     return hdr_flux_from_cd_m2(preetham_sky_luminance_rgb(ray_dir, sin_alt), zeropoint)
-        * SUNLIT_SKY_STAR_ATLAS_EXPOSURE;
+        * SUNLIT_SKY_EXPOSURE;
+}
+
+fn disk_mask(ray_dir: vec3<f32>, center_dir: vec3<f32>, radius_rad: f32, pixel_sr: f32) -> f32 {
+    let delta = acos(clamp(dot(ray_dir, center_dir), -1.0, 1.0));
+    let aa = max(sqrt(max(pixel_sr, 1e-12)), radius_rad * 0.08);
+    return 1.0 - smoothstep01(radius_rad - aa, radius_rad + aa, delta);
+}
+
+fn lunar_phase_lambert(ray_dir: vec3<f32>, moon_dir: vec3<f32>, sun_dir: vec3<f32>, radius_rad: f32) -> f32 {
+    let cos_delta = clamp(dot(ray_dir, moon_dir), -1.0, 1.0);
+    let delta = acos(cos_delta);
+    if delta >= radius_rad {
+        return 0.0;
+    }
+
+    let r = clamp(delta / max(radius_rad, 1e-6), 0.0, 1.0);
+    var tangent = ray_dir - moon_dir * cos_delta;
+    if dot(tangent, tangent) < 1e-10 {
+        tangent = normalize(cross(moon_dir, vec3<f32>(0.0, 0.0, 1.0)));
+        if dot(tangent, tangent) < 1e-10 {
+            tangent = vec3<f32>(1.0, 0.0, 0.0);
+        }
+    } else {
+        tangent = normalize(tangent);
+    }
+
+    let normal = normalize(moon_dir * sqrt(max(1.0 - r * r, 0.0)) + tangent * r);
+    return clamp(dot(normal, sun_dir), 0.0, 1.0);
+}
+
+fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_sr: f32) -> vec3<f32> {
+    if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+
+    let sun_dir = normalize(camera.sun_eq_radius.xyz);
+    var rgb = vec3<f32>(0.0);
+    if dot(sun_dir, camera.zenith_eq.xyz) > 0.0 {
+        let sun_radius = max(camera.sun_eq_radius.w, 1e-6);
+        let sun_solid_angle = PI * sun_radius * sun_radius;
+        let sun_luminance = max(camera.atmosphere_params.z, 0.0) / max(sun_solid_angle, 1e-8);
+        rgb += hdr_flux_from_cd_m2(camera.solar_rgb.xyz * sun_luminance, zeropoint)
+            * disk_mask(ray_dir, sun_dir, sun_radius, pixel_sr);
+    }
+
+    let moon_dir = normalize(camera.moon_eq_illuminance.xyz);
+    if dot(moon_dir, camera.zenith_eq.xyz) > 0.0 {
+        let moon_radius = max(camera.moon_disk.x, 1e-6);
+        let moon_solid_angle = PI * moon_radius * moon_radius;
+        let moon_luminance = max(camera.moon_eq_illuminance.w, 0.0) / max(moon_solid_angle, 1e-8);
+        let phase = lunar_phase_lambert(ray_dir, moon_dir, sun_dir, moon_radius);
+        rgb += hdr_flux_from_cd_m2(vec3<f32>(1.01, 1.0, 0.82) * moon_luminance * phase, zeropoint)
+            * disk_mask(ray_dir, moon_dir, moon_radius, pixel_sr);
+    }
+
+    return rgb;
 }
 
 fn henyey_greenstein(cos_angle: f32, g: f32) -> f32 {
@@ -398,5 +450,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let night_radiance = tint * flux_per_pixel * attenuation * dark_sky_visibility();
     let moon_radiance = moonlit_sky_radiance(ray_dir, sin_alt, zeropoint) * dark_sky_visibility();
     let day_radiance = sunlit_scattering_radiance(ray_dir, sin_alt, zeropoint);
-    return vec4<f32>(night_radiance + moon_radiance + day_radiance, 1.0);
+    let disk_radiance = sun_moon_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
+    return vec4<f32>(night_radiance + moon_radiance + day_radiance + disk_radiance, 1.0);
 }
