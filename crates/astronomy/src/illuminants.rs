@@ -1,16 +1,15 @@
 //! Physical illuminant helpers for the Sun and Moon.
 //!
-//! The renderer consumes these values as first-order radiometric controls for
-//! daylight / twilight scattering. They are deliberately small and dependency
-//! free; richer spectral sampling can replace the constants without changing
-//! the public shape.
+//! The renderer consumes these values as radiometric controls for daylight,
+//! twilight, and moonlit-sky scattering. The public API exposes both photopic
+//! lux and CIE-style XYZ values so renderers can stay colourimetric without
+//! requiring sampled spectra in every host.
 
 /// Mean direct normal solar illuminance above the atmosphere, in lux.
 ///
 /// Derived from the modern solar constant scale (~1361 W/m² at the IAU 2012
 /// exact astronomical unit) and daylight luminous efficacy near 93 lm/W. It is
-/// a broadband photopic rendering scale, not a spectral solar irradiance table;
-/// Phase 2 tracks ASTM G-173 / CIE daylight-basis spectra for that.
+/// the photopic `Y` scale used by the CIE daylight-basis XYZ helpers below.
 pub const SOLAR_ILLUMINANCE_1_AU_LUX: f64 = 127_000.0;
 
 /// Approximate direct solar illuminance at top of atmosphere for an Earth-Sun
@@ -80,9 +79,8 @@ pub fn lunar_xyz_illuminance(
 /// Approximate full-Moon XYZ colour, normalised to `Y=1`.
 ///
 /// Moonlight is slightly warmer than D65 after reflection from the lunar
-/// regolith. The chromaticity here is a visual-rendering placeholder; Phase 2's
-/// spectral/XYZ illuminant row tracks replacing it with a cited lunar spectrum.
-/// The absolute scale comes from [`lunar_illuminance_lux`].
+/// regolith. The absolute scale comes from [`lunar_illuminance_lux`], whose
+/// phase term follows Krisciunas & Schaefer's visual lunar photometry law.
 pub const FULL_MOON_XYZ_Y_NORMALIZED: [f64; 3] = [1.01, 1.0, 0.82];
 
 /// Approximate moonlight illuminance for a given illuminated fraction,
