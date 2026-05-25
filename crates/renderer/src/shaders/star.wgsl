@@ -22,9 +22,13 @@ struct CameraUniform {
     atmosphere_params: vec4<f32>,
     // D65-like top-of-atmosphere solar RGB; `w` currently unused.
     solar_rgb: vec4<f32>,
+    // [ozone_du, visibility_km, unused, unused].
+    atmosphere_optics: vec4<f32>,
     // Apparent Moon direction in equatorial coordinates. `w` is approximate
     // moonlight illuminance in lux before local horizon/airmass attenuation.
     moon_eq_illuminance: vec4<f32>,
+    // [angular_radius_rad, illuminated_fraction, phase_angle_rad, unused].
+    moon_disk: vec4<f32>,
 };
 
 fn viewport_size() -> vec2<f32> {

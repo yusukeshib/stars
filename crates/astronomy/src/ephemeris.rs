@@ -59,6 +59,26 @@ pub struct MoonApparent {
     pub angular_radius_rad: f64,
     /// Illuminated fraction, 0 = new Moon, 1 = full Moon.
     pub illuminated_fraction: f64,
+    /// Sun-Moon phase angle in radians, measured at the Moon: 0 = full Moon,
+    /// π = new Moon. This is the angle used by lunar brightness laws and disk
+    /// shading, distinct from the geocentric elongation seen by the observer.
+    pub phase_angle_rad: f64,
+}
+
+/// Renderer-facing apparent disk inputs for the two atmosphere illuminants.
+#[derive(Debug, Clone, Copy)]
+pub struct SunMoonApparent {
+    pub sun: SunApparent,
+    pub moon: MoonApparent,
+}
+
+impl SunMoonApparent {
+    pub fn for_observer(observer: Observer) -> Self {
+        Self {
+            sun: apparent_sun_topocentric(observer),
+            moon: apparent_moon_topocentric(observer),
+        }
+    }
 }
 
 impl MoonApparent {
@@ -244,7 +264,8 @@ pub fn apparent_moon(julian_date: f64) -> MoonApparent {
     let moon_dir = equatorial_unit_vector(right_ascension_rad, declination_rad);
     let sun_dir = apparent_sun(julian_date).direction_equatorial();
     let elongation = (moon_dir.dot(sun_dir) as f64).clamp(-1.0, 1.0).acos();
-    let illuminated_fraction = 0.5 * (1.0 - elongation.cos());
+    let phase_angle_rad = (std::f64::consts::PI - elongation).clamp(0.0, std::f64::consts::PI);
+    let illuminated_fraction = 0.5 * (1.0 + phase_angle_rad.cos());
 
     MoonApparent {
         right_ascension_rad,
@@ -252,6 +273,7 @@ pub fn apparent_moon(julian_date: f64) -> MoonApparent {
         distance_km,
         angular_radius_rad,
         illuminated_fraction,
+        phase_angle_rad,
     }
 }
 
@@ -278,6 +300,7 @@ pub fn apparent_moon_topocentric(observer: Observer) -> MoonApparent {
         distance_km,
         angular_radius_rad: (LUNAR_RADIUS_KM / distance_km).asin(),
         illuminated_fraction: geo.illuminated_fraction,
+        phase_angle_rad: geo.phase_angle_rad,
     }
 }
 

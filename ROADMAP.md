@@ -55,9 +55,35 @@ That missing piece is tracked in Phase 2, after the Sun and Moon have apparent
 topocentric positions. The goal is for sky colour to be driven by physical
 illuminants and atmosphere parameters rather than by hard-coded gradients.
 
-**Current highest priority:** implement the Sun/Moon inputs and sunlit
-atmospheric-scattering path before the remaining Phase 2 precision work. In the
-status column, these rows are marked `⏳ next`.
+**Current highest priority:** finish the atmosphere stack to a defensible,
+non-heuristic standard before the remaining Phase 2 precision work. The current
+code has useful scaffolding — low-precision Sun/Moon directions, first-pass
+illuminants, Preetham daylight, empirical twilight brightness, atmosphere
+controls, and disk rendering — but those are **not** sufficient to mark the
+standards-bearing atmosphere rows complete. A row is `✅ done` only when the
+model named in its references is implemented, documented, tested, and wired into
+all hosts.
+
+### Atmosphere implementation ladder
+
+To avoid conflating prototypes with roadmap completion, Phase 2 atmosphere work
+is split into independently shippable rungs:
+
+1. **Input plumbing** — Sun/Moon apparent directions, radii, phase, and host
+   controls are available to the renderer. This is mostly present today.
+2. **Renderable bodies** — Sun/Moon disks render from those inputs without
+   polluting the star catalogue. This is present at a visual level, but still
+   uses low-precision ephemerides.
+3. **Daylight model** — daylight sky colour uses a cited sky model over its
+   valid domain, without exposure cheats or star-visibility gates.
+4. **Twilight model** — sun-below-horizon sky brightness is a real radiance
+   model (or a clearly cited observational fit with pinned tests), continuous in
+   time and direction, not a hand-tuned `smoothstep` fade.
+5. **Validation** — noon, sunset, civil/nautical/astronomical twilight, and
+   moonlit-night reference scenes are pinned by tests/screenshots and documented
+   with the model limits.
+
+The `⏳ next` atmosphere rows below are the active work queue.
 
 ---
 
@@ -99,11 +125,11 @@ Columns:
 | 2 | **Annual aberration** — up to 20″ | Standard formulas; folds into the equatorial→ENU matrix | ⬜ |
 | 2 | **Stellar proper motion** — apply HYG's `pmra` / `pmdec` when epoch ≠ catalog epoch | HYG carries the columns already | ⬜ |
 | 2 | **Atmospheric refraction** — up to 34′ at the horizon | Bennett 1982 / Saemundsson 1986; flag in UI when on | ⬜ |
-| 2 | **Sun, Moon** — apparent topocentric direction, angular radius, phase, and disk rendering inputs | VSOP87 (Sun) + ELP2000 (Moon); feeds scattering, twilight, moon phase, and rise/set | ⏳ next |
-| 2 | **Solar / lunar illuminants** — spectral or XYZ irradiance for direct sunlight and moonlight at the top of the atmosphere | ASTM G-173 / CIE daylight basis for Sun; Krisciunas & Schaefer 1991 for moonlight brightness | ⏳ next |
-| 2 | **Sunlit atmospheric scattering / sky colour** — Rayleigh + Mie aerosol + ozone absorption sky model driven by Sun altitude, view direction, observer altitude, and turbidity; produces blue daylight, golden-hour warmth, sunset reddening, and horizon haze | Preetham, Shirley & Smits 1999; Hosek & Wilkie 2012; Bruneton & Neyret 2008 | ⏳ next |
-| 2 | **Twilight and day/night blend** — combine sunlit scattering, moonlit sky, Phase 1' dark-sky glow, and star visibility using solar depression angle instead of hard-coded background colours | Civil / nautical / astronomical bands remain UI annotations; renderer cross-fades radiance physically across 0°, −6°, −12°, −18° Sun altitude | ⏳ next |
-| 2 | **Atmosphere controls** — expose turbidity/aerosol, observer altitude, and optional ozone/visibility presets in CLI, viewer, and web settings | Defaults should match a clear rural sky; presets must be serializable in sessions | ⏳ next |
+| 2 | **Sun, Moon** — apparent topocentric direction, angular radius, phase, and disk rendering inputs | VSOP87 (Sun) + ELP2000 (Moon); feeds scattering, twilight, moon phase, and rise/set. Current code has Meeus/Schlyter-style visual plumbing and disk rendering, but the referenced ephemerides and validation are still pending. | ⏳ next |
+| 2 | **Solar / lunar illuminants** — spectral or XYZ irradiance for direct sunlight and moonlight at the top of the atmosphere | ASTM G-173 / CIE daylight basis for Sun; Krisciunas & Schaefer 1991 for moonlight brightness. Current code has lux/XYZ approximations and a lunar phase law; sampled spectra / full cited photometry remain pending. | ⏳ next |
+| 2 | **Sunlit atmospheric scattering / sky colour** — Rayleigh + Mie aerosol + ozone absorption sky model driven by Sun altitude, view direction, observer altitude, and turbidity; produces blue daylight, golden-hour warmth, sunset reddening, and horizon haze | Preetham, Shirley & Smits 1999; Hosek & Wilkie 2012; Bruneton & Neyret 2008. Current code has a first-pass Preetham-style daylight shader and simple ozone/visibility controls; Hosek/Bruneton-grade validation remains pending. | ⏳ next |
+| 2 | **Twilight and day/night blend** — combine sunlit scattering, moonlit sky, Phase 1' dark-sky glow, and star visibility using solar depression angle instead of hard-coded background colours | Civil / nautical / astronomical bands remain UI annotations; renderer cross-fades radiance physically across 0°, −6°, −12°, −18° Sun altitude. The earlier heuristic solar-depression fade was removed; this remains open until a defensible twilight / multiple-scattering model lands. | ⏳ next |
+| 2 | **Atmosphere controls** — expose turbidity/aerosol, observer altitude, and optional ozone/visibility presets in CLI, viewer, and web settings | Defaults should match a clear rural sky; presets must be serializable in sessions | ✅ done (`apps/{cli,viewer,web}`, `crates/common`) |
 | 2 | **Planets (Mercury → Neptune)** — ~1″ on a century | VSOP87 truncated | ⬜ |
 | 2 | **Moon phase + Earth-shadow** | Visual aid; trivial once Moon ephemeris lands | ⬜ |
 | 2 | **Rise / transit / set tables** — per object, per evening | UI table in the settings panel | ⬜ |

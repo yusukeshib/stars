@@ -32,9 +32,13 @@ struct CameraUniform {
     atmosphere_params: vec4<f32>,
     // D65-like top-of-atmosphere solar RGB; `w` currently unused.
     solar_rgb: vec4<f32>,
+    // [ozone_du, visibility_km, unused, unused].
+    atmosphere_optics: vec4<f32>,
     // Apparent Moon direction in equatorial coordinates. `w` is approximate
     // moonlight illuminance in lux before local horizon/airmass attenuation.
     moon_eq_illuminance: vec4<f32>,
+    // [angular_radius_rad, illuminated_fraction, phase_angle_rad, unused].
+    moon_disk: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -63,6 +67,15 @@ const SIGMA_B_THIN_DEG: f32 = 4.0;
 const SIGMA_B_THICK_DEG: f32 = 30.0;
 const SIGMA_L_BULGE_DEG: f32 = 60.0;
 const S10_TO_MAG_ARCSEC2_OFFSET: f32 = 27.78;
+// Patat et al. 2006 / Rozenberg 1966 style empirical zenith twilight sky
+// brightness anchor points in V mag arcsec^-2 as a function of solar
+// depression. This is a measured surface-brightness curve, not a visibility
+// gate on stars; stars are still rendered continuously and lose/gain contrast
+// only through the scene luminance and tonemap.
+const TWILIGHT_MU_0_DEG: f32 = 3.5;
+const TWILIGHT_MU_6_DEG: f32 = 12.0;
+const TWILIGHT_MU_12_DEG: f32 = 18.0;
+const TWILIGHT_MU_18_DEG: f32 = 21.6;
 
 const RAD_TO_DEG: f32 = 57.295779513;
 const NEG_OH_FOUR_LN10: f32 = -0.9210340371976184; // -0.4 · ln(10)
@@ -73,14 +86,11 @@ const DEG_TO_RAD: f32 = 0.017453292519943295;
 const LN10: f32 = 2.30258509299;
 const EYE_PSF_SOLID_ANGLE_SR: f32 = 8.461594994075e-8;
 
-// Dark-sky surface brightness is written directly on the renderer's
-// physical brightness scale (no perceptual fudge). The Ferwerda 1996
-// adaptive tone-reproduction operator in `shaders/tonemap.wgsl` takes
-// care of mapping the dark-sky adaptation regime onto the display, so
-// the diffuse glow ends up visible against a genuinely-dark sky without
-// any constant boost being needed in this shader. The separate sunlit
-// scattering path below intentionally uses a star-atlas exposure
-// compression so the atmosphere layer does not erase the catalogue.
+// Dark-sky surface brightness is written directly on the renderer's physical
+// brightness scale (no perceptual fudge). The Ferwerda 1996 / Reinhard 2002
+// tone-reproduction operator maps that radiance to display space; sunlit and
+// twilight sky terms below also stay in the same HDR scale rather than using
+// visibility gates or star-atlas exposure cheats.
 const PERCEPTUAL_BOOST_MAGS: f32 = 0.0;
 
 fn s10_to_mag(s10: f32) -> f32 {
@@ -120,16 +130,6 @@ fn sun_altitude_rad() -> f32 {
     return asin(clamp(dot(sun_dir, camera.zenith_eq.xyz), -1.0, 1.0));
 }
 
-fn dark_sky_visibility() -> f32 {
-    if camera.atmosphere_params.w <= 0.0 {
-        return 1.0;
-    }
-    // Astronomical twilight (-18°) is where the sky is conventionally dark;
-    // civil twilight (-6°) is bright enough that the diffuse dark-sky terms
-    // should no longer be visible. Blend smoothly through nautical twilight.
-    return 1.0 - smoothstep01(-18.0 * DEG_TO_RAD, -6.0 * DEG_TO_RAD, sun_altitude_rad());
-}
-
 fn hdr_flux_from_cd_m2(luminance_cd_m2: vec3<f32>, zeropoint: f32) -> vec3<f32> {
     let zp_illum = exp(-0.4 * (zeropoint + 13.99) * LN10);
     let zp_luminance = zp_illum / EYE_PSF_SOLID_ANGLE_SR;
@@ -160,17 +160,17 @@ fn xyy_to_linear_rgb(xyy: vec3<f32>) -> vec3<f32> {
 fn preetham_sky_luminance_rgb(ray_dir: vec3<f32>, sin_alt: f32) -> vec3<f32> {
     let sun_dir = normalize(camera.sun_eq_radius.xyz);
     let sun_alt = sun_altitude_rad();
-    let twilight = smoothstep01(-18.0 * DEG_TO_RAD, 0.0, sun_alt);
-    if twilight <= 0.0 {
+    if sun_alt <= 0.0 {
+        // Preetham/Perez is a daylight model for a directly illuminated
+        // atmosphere. Do not invent twilight with an arbitrary solar-depression
+        // fade; twilight needs a separate multiple-scattering / Earth-shadow
+        // model before it can be academically defensible.
         return vec3<f32>(0.0);
     }
 
     let T = clamp(camera.atmosphere_params.x, 1.7, 10.0);
     let theta = acos(clamp(sin_alt, 0.0, 1.0));
-    // Preetham's closed-form fit is defined for the Sun above the horizon.
-    // For civil/nautical twilight, clamp the solar zenith to just above the
-    // horizon and let the explicit twilight weight carry it to zero at -18°.
-    let theta_s = clamp(PI * 0.5 - max(sun_alt, 0.5 * DEG_TO_RAD), 0.0, PI * 0.5 - 0.01);
+    let theta_s = clamp(PI * 0.5 - sun_alt, 0.0, PI * 0.5 - 0.01);
     let gamma = acos(clamp(dot(ray_dir, sun_dir), -1.0, 1.0));
 
     // Preetham, Shirley & Smits 1999 analytic daylight model: zenith
@@ -203,24 +203,87 @@ fn preetham_sky_luminance_rgb(ray_dir: vec3<f32>, sin_alt: f32) -> vec3<f32> {
     // Preetham assumes mean solar irradiance at sea level; retain the small
     // Earth-Sun distance modulation from the ephemeris/illuminant pipeline.
     let solar_scale = max(camera.atmosphere_params.z, 0.0) / 127000.0;
-    return xyy_to_linear_rgb(vec3<f32>(x, y, Y * twilight * solar_scale));
+    let altitude_scale = exp(-max(camera.atmosphere_params.y, 0.0) / 8000.0);
+    let visibility_km = clamp(camera.atmosphere_optics.y, 1.0, 200.0);
+    let haze = clamp(50.0 / visibility_km, 0.25, 4.0);
+    let ozone = clamp(camera.atmosphere_optics.x, 0.0, 600.0) / 300.0;
+    // Compact Chappuis-band approximation: ozone absorbs broad green/orange
+    // light on long slant paths, deepening blue zeniths and red sunsets.
+    let slant = 1.0 / max(sin_alt + 0.08, 0.08);
+    let ozone_transmission = exp(-0.035 * ozone * slant * vec3<f32>(0.30, 0.62, 0.18));
+    let haze_whitening = mix(vec3<f32>(1.0), vec3<f32>(1.04, 1.02, 0.96), clamp((haze - 1.0) / 3.0, 0.0, 1.0));
+    return xyy_to_linear_rgb(vec3<f32>(x, y, Y * solar_scale * altitude_scale))
+        * ozone_transmission
+        * haze_whitening;
 }
 
-// Artistic exposure compression for the daytime/twilight atmosphere layer.
-// The Preetham model returns physical cd/m² values; if those are converted
-// one-to-one into the same HDR buffer as point-source stars, the sky radiance
-// is so dominant that the catalogue appears to vanish. This renderer is an
-// interactive star atlas rather than a daylight visibility simulator, so keep
-// the sunlit sky colour/directionality while compressing its radiance relative
-// to stars enough that the star layer remains present for orientation.
-const SUNLIT_SKY_STAR_ATLAS_EXPOSURE: f32 = 3.0e-5;
+// Keep sunlit sky radiance on the same physical cd/m² scale as the dark-sky
+// and star passes. Daytime should therefore adapt to a bright blue sky rather
+// than a dim star-atlas background; stars naturally lose contrast in daylight.
+const SUNLIT_SKY_EXPOSURE: f32 = 1.0;
 
 fn sunlit_scattering_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> vec3<f32> {
     if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
         return vec3<f32>(0.0);
     }
     return hdr_flux_from_cd_m2(preetham_sky_luminance_rgb(ray_dir, sin_alt), zeropoint)
-        * SUNLIT_SKY_STAR_ATLAS_EXPOSURE;
+        * SUNLIT_SKY_EXPOSURE;
+}
+
+fn disk_mask(ray_dir: vec3<f32>, center_dir: vec3<f32>, radius_rad: f32, pixel_sr: f32) -> f32 {
+    let delta = acos(clamp(dot(ray_dir, center_dir), -1.0, 1.0));
+    let aa = max(sqrt(max(pixel_sr, 1e-12)), radius_rad * 0.08);
+    return 1.0 - smoothstep01(radius_rad - aa, radius_rad + aa, delta);
+}
+
+fn lunar_phase_lambert(ray_dir: vec3<f32>, moon_dir: vec3<f32>, sun_dir: vec3<f32>, radius_rad: f32) -> f32 {
+    let cos_delta = clamp(dot(ray_dir, moon_dir), -1.0, 1.0);
+    let delta = acos(cos_delta);
+    if delta >= radius_rad {
+        return 0.0;
+    }
+
+    let r = clamp(delta / max(radius_rad, 1e-6), 0.0, 1.0);
+    var tangent = ray_dir - moon_dir * cos_delta;
+    if dot(tangent, tangent) < 1e-10 {
+        tangent = normalize(cross(moon_dir, vec3<f32>(0.0, 0.0, 1.0)));
+        if dot(tangent, tangent) < 1e-10 {
+            tangent = vec3<f32>(1.0, 0.0, 0.0);
+        }
+    } else {
+        tangent = normalize(tangent);
+    }
+
+    let normal = normalize(moon_dir * sqrt(max(1.0 - r * r, 0.0)) + tangent * r);
+    return clamp(dot(normal, sun_dir), 0.0, 1.0);
+}
+
+fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_sr: f32) -> vec3<f32> {
+    if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+
+    let sun_dir = normalize(camera.sun_eq_radius.xyz);
+    var rgb = vec3<f32>(0.0);
+    if dot(sun_dir, camera.zenith_eq.xyz) > 0.0 {
+        let sun_radius = max(camera.sun_eq_radius.w, 1e-6);
+        let sun_solid_angle = PI * sun_radius * sun_radius;
+        let sun_luminance = max(camera.atmosphere_params.z, 0.0) / max(sun_solid_angle, 1e-8);
+        rgb += hdr_flux_from_cd_m2(camera.solar_rgb.xyz * sun_luminance, zeropoint)
+            * disk_mask(ray_dir, sun_dir, sun_radius, pixel_sr);
+    }
+
+    let moon_dir = normalize(camera.moon_eq_illuminance.xyz);
+    if dot(moon_dir, camera.zenith_eq.xyz) > 0.0 {
+        let moon_radius = max(camera.moon_disk.x, 1e-6);
+        let moon_solid_angle = PI * moon_radius * moon_radius;
+        let moon_luminance = max(camera.moon_eq_illuminance.w, 0.0) / max(moon_solid_angle, 1e-8);
+        let phase = lunar_phase_lambert(ray_dir, moon_dir, sun_dir, moon_radius);
+        rgb += hdr_flux_from_cd_m2(vec3<f32>(1.01, 1.0, 0.82) * moon_luminance * phase, zeropoint)
+            * disk_mask(ray_dir, moon_dir, moon_radius, pixel_sr);
+    }
+
+    return rgb;
 }
 
 fn henyey_greenstein(cos_angle: f32, g: f32) -> f32 {
@@ -263,6 +326,38 @@ fn moonlit_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> vec
     let luminance = moon_lux * 0.012 * moon_transmission * moon_alt_weight * angular * horizon_haze;
     let rgb = vec3<f32>(0.78, 0.84, 1.00) * luminance;
     return hdr_flux_from_cd_m2(rgb, zeropoint);
+}
+
+fn twilight_zenith_mu_mag_arcsec2(sun_alt_rad: f32) -> f32 {
+    let depression = clamp(-sun_alt_rad * RAD_TO_DEG, 0.0, 18.0);
+    if depression < 6.0 {
+        return mix(TWILIGHT_MU_0_DEG, TWILIGHT_MU_6_DEG, depression / 6.0);
+    }
+    if depression < 12.0 {
+        return mix(TWILIGHT_MU_6_DEG, TWILIGHT_MU_12_DEG, (depression - 6.0) / 6.0);
+    }
+    return mix(TWILIGHT_MU_12_DEG, TWILIGHT_MU_18_DEG, (depression - 12.0) / 6.0);
+}
+
+fn twilight_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_arcsec2: f32) -> vec3<f32> {
+    if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let sun_alt = sun_altitude_rad();
+    if sun_alt >= 0.0 || sun_alt <= -18.0 * DEG_TO_RAD {
+        return vec3<f32>(0.0);
+    }
+    let sun_dir = normalize(camera.sun_eq_radius.xyz);
+    let gamma = acos(clamp(dot(ray_dir, sun_dir), -1.0, 1.0));
+    let horizon_airmass = 1.0 + 0.45 * smoothstep01(0.45, 0.0, sin_alt);
+    let forward_scatter = 1.0 + 0.55 * exp(-gamma / 0.75);
+    let mu = twilight_zenith_mu_mag_arcsec2(sun_alt) - 2.5 * log(horizon_airmass * forward_scatter) / LN10;
+    let flux_per_arcsec2 = exp(NEG_OH_FOUR_LN10 * (mu - zeropoint));
+    let flux_per_pixel = flux_per_arcsec2 * pixel_arcsec2;
+    let depression = clamp(-sun_alt * RAD_TO_DEG, 0.0, 18.0);
+    let reddening = clamp((12.0 - depression) / 12.0, 0.0, 1.0);
+    let tint = mix(vec3<f32>(0.45, 0.55, 1.0), vec3<f32>(1.0, 0.56, 0.24), reddening);
+    return tint * flux_per_pixel;
 }
 
 fn diffuse_sky_mag_per_arcsec2(l_rad: f32, b_rad: f32, beta_rad: f32, sun_rel_lon_rad: f32) -> f32 {
@@ -380,8 +475,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Ballesteros blackbody pipeline.
     let tint = vec3<f32>(0.92, 0.94, 1.00);
 
-    let night_radiance = tint * flux_per_pixel * attenuation * dark_sky_visibility();
-    let moon_radiance = moonlit_sky_radiance(ray_dir, sin_alt, zeropoint) * dark_sky_visibility();
+    let night_radiance = tint * flux_per_pixel * attenuation;
+    let moon_radiance = moonlit_sky_radiance(ray_dir, sin_alt, zeropoint);
+    let twilight_radiance = twilight_sky_radiance(ray_dir, sin_alt, zeropoint, pixel_arcsec2);
     let day_radiance = sunlit_scattering_radiance(ray_dir, sin_alt, zeropoint);
-    return vec4<f32>(night_radiance + moon_radiance + day_radiance, 1.0);
+    let disk_radiance = sun_moon_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
+    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance, 1.0);
 }

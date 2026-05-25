@@ -221,6 +221,8 @@ impl StarView {
         preset: String,
         turbidity: f32,
         observer_altitude_m: f32,
+        ozone_du: f32,
+        visibility_km: f32,
     ) {
         self.state.borrow_mut().camera.atmosphere = if enabled {
             let mut atmosphere = AtmospherePreset::from_kebab_str(&preset)
@@ -228,6 +230,8 @@ impl StarView {
                 .unwrap_or_default();
             atmosphere.turbidity = turbidity;
             atmosphere.observer_altitude_m = observer_altitude_m;
+            atmosphere.ozone_du = ozone_du;
+            atmosphere.visibility_km = visibility_km;
             atmosphere
         } else {
             Atmosphere::OFF
