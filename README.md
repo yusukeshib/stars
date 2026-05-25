@@ -108,8 +108,8 @@ Columns:
 | `P1-06` | 1 | **localStorage persistence** — observer + view survive reloads | `apps/web/frontend` | ✅ done |
 | `P1-07` | 1 | **Web overlay toggles** — mirror CLI flags inside the settings panel | `apps/web/frontend` | ✅ done |
 | `P1-08` | 1 | **Galactic equator overlay** | Same line pipeline as ecliptic; uses the transform from Phase 1' | ✅ done (`renderer::overlay`) |
-| `P1-09` | 1 | **Constellation lines** — modern western stick figures | BSD-licensed d3-celestial line data, converted to J2000 unit-vector line segments | ✅ done (`renderer::overlay`) |
-| `P1-10` | 1 | **Constellation boundaries** — IAU/Delporte regions | CDS VI/49 / Delporte 1930 B1875 boundary vertices precessed to J2000 | ✅ done (`renderer::overlay`) |
+| `P1-09` | 1 | **Constellation lines** — modern western stick figures | `crates/renderer/data/constellation_lines.csv`, derived from BSD-licensed d3-celestial line data and converted to J2000 unit-vector line segments | ✅ done (`renderer::overlay`) |
+| `P1-10` | 1 | **Constellation boundaries** — IAU/Delporte regions | `crates/renderer/data/constellation_boundaries.csv`, derived from CDS VI/49 / Delporte 1930 B1875 boundary vertices precessed to J2000 | ✅ done (`renderer::overlay`) |
 | `P1-11` | 1 | **Star / planet / constellation labels** — star proper names + Bayer / Flamsteed for top ~50 stars, planet names, and constellation names | Needs a font atlas and label-placement pass | ⬜ |
 | `P1-12` | 1 | **N / E / S / W and degree labels** | Text rendering from the same font atlas as sky labels | ⬜ |
 | `P1P-01` | 1' | **Photometric zeropoint** — `magnitude → illuminance (lux)` so the whole pipeline runs in physical units | Schaefer, B. E. 1990, PASP 102, 212 | ✅ done (`astronomy::photometry`) |

@@ -20,8 +20,8 @@ use wgpu::util::DeviceExt;
 use crate::camera::Camera;
 
 mod data {
-    include!("data/constellation_boundaries.rs");
-    include!("data/constellation_lines.rs");
+    include!(concat!(env!("OUT_DIR"), "/constellation_boundaries.rs"));
+    include!(concat!(env!("OUT_DIR"), "/constellation_lines.rs"));
 }
 
 /// Mean obliquity of the ecliptic **at J2000.0**, IAU 2006 value
