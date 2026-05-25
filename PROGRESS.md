@@ -256,6 +256,8 @@ Implemented web planning helpers and UI for:
 - local-evening rise / transit / set table;
 - Sun, Moon, and planet planning objects;
 - civil / nautical / astronomical twilight indicators;
+- draggable web status-bar date / time controls, stepping by one local day or
+  ten minutes respectively;
 - session URLs using plain query parameters, with no version gate.
 
 Primary implementation areas:

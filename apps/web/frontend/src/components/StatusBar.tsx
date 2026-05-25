@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   ATMOSPHERE_PRESET_DEFAULTS,
   ATMOSPHERE_PRESET_LABELS,
@@ -39,6 +39,7 @@ type Props = {
 
 type Popover = "location" | "time" | "settings";
 type AddressLookupStatus = "idle" | "loading" | "success" | "error";
+type TimeDragTarget = "date" | "clock";
 
 type AddressLookupState = {
   status: AddressLookupStatus;
@@ -52,6 +53,19 @@ type NominatimPlace = {
   name?: string;
 };
 
+type TimeDragState = {
+  pointerId: number;
+  target: TimeDragTarget;
+  startX: number;
+  baseTimeMs: number;
+  lastStep: number;
+  moved: boolean;
+  element: HTMLElement;
+};
+
+const CLOCK_DRAG_STEP_MS = 10 * 60 * 1000;
+const TIME_DRAG_PX_PER_STEP = 24;
+const TIME_DRAG_CLICK_SLOP_PX = 4;
 const fmtDeg = (n: number) => `${n.toFixed(1)}°`;
 const COMPASS_DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 const compass = (az: number) => COMPASS_DIRS[Math.round(az / 45) % 8];
@@ -65,9 +79,14 @@ function twilightLabel(sunAltDeg: number | null): string {
   return `Night (Sun ${sunAltDeg.toFixed(1)}°)`;
 }
 
-function fmtTime(ms: number): string {
+function fmtDate(ms: number): string {
   const d = new Date(ms);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function fmtClock(ms: number): string {
+  const d = new Date(ms);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function toLocalDateInput(ms: number): string {
@@ -88,10 +107,14 @@ function setLocalDatePart(ms: number, dateValue: string): number | null {
   return d.getTime();
 }
 
-function setLocalTimePart(ms: number, hour: number, minute: number): number {
+function addLocalDays(ms: number, days: number): number {
   const d = new Date(ms);
-  d.setHours(hour, minute, 0, 0);
+  d.setDate(d.getDate() + days);
   return d.getTime();
+}
+
+function applyTimeDragStep(ms: number, target: TimeDragTarget, steps: number): number {
+  return target === "date" ? addLocalDays(ms, steps) : ms + steps * CLOCK_DRAG_STEP_MS;
 }
 
 const clamp = (value: number, min: number, max: number) =>
@@ -132,6 +155,8 @@ export function StatusBar({
     message: null,
   });
   const rootRef = useRef<HTMLDivElement>(null);
+  const timeDragRef = useRef<TimeDragState | null>(null);
+  const suppressNextTimeClick = useRef(false);
 
   useEffect(() => {
     if (!openPopover) return;
@@ -197,9 +222,57 @@ export function StatusBar({
       });
     }
   };
-  const time = new Date(timeMs);
-  const hour = time.getHours();
-  const minute = time.getMinutes();
+
+  const beginTimeDrag = (
+    event: ReactPointerEvent<HTMLSpanElement>,
+    target: TimeDragTarget,
+  ) => {
+    if (event.button !== 0) return;
+    const element = event.currentTarget;
+    element.setPointerCapture(event.pointerId);
+    timeDragRef.current = {
+      pointerId: event.pointerId,
+      target,
+      startX: event.clientX,
+      baseTimeMs: timeMs,
+      lastStep: 0,
+      moved: false,
+      element,
+    };
+  };
+
+  const updateTimeDrag = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    const drag = timeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    const deltaX = event.clientX - drag.startX;
+    if (Math.abs(deltaX) >= TIME_DRAG_CLICK_SLOP_PX) drag.moved = true;
+
+    const steps = Math.trunc(deltaX / TIME_DRAG_PX_PER_STEP);
+    if (steps === drag.lastStep) return;
+    drag.lastStep = steps;
+    onSetTime(applyTimeDragStep(drag.baseTimeMs, drag.target, steps));
+  };
+
+  const endTimeDrag = (event: ReactPointerEvent<HTMLSpanElement>) => {
+    const drag = timeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    if (drag.moved) suppressNextTimeClick.current = true;
+    if (drag.element.hasPointerCapture(event.pointerId)) {
+      drag.element.releasePointerCapture(event.pointerId);
+    }
+    timeDragRef.current = null;
+  };
+
+  const toggleTimePopover = () => {
+    if (suppressNextTimeClick.current) {
+      suppressNextTimeClick.current = false;
+      return;
+    }
+    setOpenPopover(openPopover === "time" ? null : "time");
+  };
+
   const twilight = twilightLabel(sunAltitudeDeg);
 
   return (
@@ -303,27 +376,6 @@ export function StatusBar({
             style={{ ...inputStyle, width: "100%" }}
           />
 
-          <SliderNumberRow
-            id="quick-hour"
-            label="Hour"
-            value={hour}
-            min={0}
-            max={23}
-            step={1}
-            decimals={0}
-            onChange={(nextHour) => onSetTime(setLocalTimePart(timeMs, nextHour, minute))}
-          />
-          <SliderNumberRow
-            id="quick-minute"
-            label="Minute"
-            value={minute}
-            min={0}
-            max={59}
-            step={1}
-            decimals={0}
-            onChange={(nextMinute) => onSetTime(setLocalTimePart(timeMs, hour, nextMinute))}
-          />
-
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             <button type="button" onClick={() => onSetTime(Date.now())} style={buttonStyle}>
               Now
@@ -344,7 +396,8 @@ export function StatusBar({
             </button>
           </div>
           <p style={{ margin: "10px 0 0", fontSize: 11, opacity: 0.55 }}>
-            The clock keeps ticking after each quick change.
+            The clock keeps ticking after each quick change. Drag the date in the status bar
+            left/right by one day, or the time by 10 minutes.
           </p>
         </PopoverPanel>
       )}
@@ -384,11 +437,31 @@ export function StatusBar({
             type="button"
             aria-expanded={openPopover === "time"}
             aria-haspopup="dialog"
-            onClick={() => setOpenPopover(openPopover === "time" ? null : "time")}
+            onClick={toggleTimePopover}
             style={chipButtonStyle(openPopover === "time")}
           >
             <span style={mutedStyle}>Time </span>
-            <span style={underlinedValueStyle(openPopover === "time")}>{fmtTime(timeMs)}</span>
+            <span
+              title="Drag left/right to change the date by one day per step"
+              onPointerDown={(e) => beginTimeDrag(e, "date")}
+              onPointerMove={updateTimeDrag}
+              onPointerUp={endTimeDrag}
+              onPointerCancel={endTimeDrag}
+              style={draggableTimeValueStyle(openPopover === "time")}
+            >
+              {fmtDate(timeMs)}
+            </span>
+            <span style={mutedStyle}> </span>
+            <span
+              title="Drag left/right to change the time by 10 minutes per step"
+              onPointerDown={(e) => beginTimeDrag(e, "clock")}
+              onPointerMove={updateTimeDrag}
+              onPointerUp={endTimeDrag}
+              onPointerCancel={endTimeDrag}
+              style={draggableTimeValueStyle(openPopover === "time")}
+            >
+              {fmtClock(timeMs)}
+            </span>
           </button>
         </div>
         <div style={{ marginTop: 4, textAlign: "left" }}>
@@ -822,6 +895,13 @@ const underlinedValueStyle = (active: boolean): React.CSSProperties => ({
   textDecoration: "underline",
   textDecorationColor: active ? "rgba(145, 190, 255, 0.9)" : "rgba(207, 216, 227, 0.55)",
   textUnderlineOffset: 3,
+});
+
+const draggableTimeValueStyle = (active: boolean): React.CSSProperties => ({
+  ...underlinedValueStyle(active),
+  cursor: "ew-resize",
+  touchAction: "none",
+  userSelect: "none",
 });
 
 const popoverStyle: React.CSSProperties = {
