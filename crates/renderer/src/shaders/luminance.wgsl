@@ -65,23 +65,16 @@ const GRID: i32 = 32;
 //   HDR flux units. Threshold a couple of decades below that so a real
 //   dim-sky pixel is never falsely rejected.
 //
-// `MAX_SCENE_LUMA` rejects point-source peaks:
-//   bright stars and their PSF cores spike orders of magnitude above
-//   the surrounding sky and would otherwise drag the geometric mean
-//   up dramatically when a Sirius-class star happens to land in the
-//   sample grid — making the apparent brightness of every star vary
-//   with which other stars happen to be in frame. A real eye does not
-//   adapt to individual point sources (the temporal-integration
-//   window is too short and the angular extent too small); clipping
-//   above the brightest plausible *sky* value isolates the adaptation
-//   estimate to the diffuse component.
-//
-//   Pick 10^-2: the Milky Way's brightest pixels are ≈10^-3 after
-//   skyglow + atmospheric extinction, so this leaves headroom for the
-//   diffuse light while still excluding star cores and their inner
-//   halos.
+// `MAX_SCENE_LUMA` only rejects pathological values / point-source cores.
+//   The original night-sky-only pipeline capped this at 10^-2 to isolate the
+//   Milky Way background from star peaks. That made daylight impossible: the
+//   Preetham sky model legitimately produces diffuse-sky luminance many orders
+//   above the dark-sky range, so every sample was rejected and the tonemap fell
+//   back to a dark adaptation value, washing the sky to white. Keep a high cap
+//   so daylight and twilight contribute to adaptation while still ignoring
+//   infinities, NaNs, and extreme stellar PSF centres.
 const MIN_SCENE_LUMA: f32 = 1e-6;
-const MAX_SCENE_LUMA: f32 = 1e-2;
+const MAX_SCENE_LUMA: f32 = 1e6;
 
 // Fallback log-luminance written when every sample falls outside the
 // [MIN, MAX] window (e.g. camera pointing entirely at the occluded
