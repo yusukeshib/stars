@@ -134,15 +134,17 @@ More detail lives in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 ## Current focus
 
 Phase 1, Phase 1', Phase 2, citation/standards documentation, notebook
-reproducibility examples, catalog-backend scaling scaffolding, Phase 4 full-sky
-projection work, Phase 4 out-of-Earth galactic / custom external viewpoints,
-and Phase 4 telescope eyepiece simulation are implemented. The next best work
-is to extend visually while finishing the remaining platform hooks:
+reproducibility examples, catalog-backend scaling scaffolding, the data
+provenance manifest, Phase 4 full-sky projection work, Phase 4 out-of-Earth
+galactic / custom external viewpoints, and Phase 4 telescope eyepiece
+simulation are implemented. The next best work is to extend visually while
+finishing the remaining platform hooks:
 
 1. deep-sky overlays for Messier / NGC-style objects;
 2. accessibility, observation-planning polish, and variable-star light curves;
 3. Python bindings and headless server mode for the Phase 3 platform;
-4. data provenance manifest before large Gaia / Tycho / Hipparcos ingest.
+4. large Gaia / Tycho / Hipparcos ingest now that the data provenance
+   manifest (`data/manifest.toml`) is in place.
 
 ## Contributing
 

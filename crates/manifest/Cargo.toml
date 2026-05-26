@@ -1,0 +1,27 @@
+[package]
+name = "stars-manifest"
+version = "0.1.0"
+edition = "2021"
+
+# Machine-readable data provenance manifest for `stars` (roadmap P3-13).
+#
+# This crate is the single source of truth for the schema of `data/manifest.toml`
+# at the repository root and provides:
+#
+# - `Manifest`: parsed schema (serde + toml);
+# - `verify_artifact_path`: compute SHA-256 of a local file and compare it to
+#   the manifest entry;
+# - a small `check-manifest` binary used by `make manifest-check`.
+#
+# Future work (P3-01 large catalogs, P3-07 sessions with manifest references):
+# other crates can depend on this library to load the manifest and resolve
+# artifact identifiers to a guaranteed-pinned (path, hash, source) tuple. That
+# is the lever the catalog backend and JSON sessions will use to name the exact
+# data snapshot they consumed.
+
+[dependencies]
+serde = { workspace = true }
+toml = "0.8"
+sha2 = "0.10"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }

@@ -25,6 +25,7 @@ make web       # build WASM and start the web dev server
 make scene-presets            # export deterministic preset JSON sessions
 make validation-gallery       # render/update validation/demo PNGs
 make validation-gallery-check # opt-in screenshot regression on stable adapters
+make manifest-check           # verify data/manifest.toml against on-disk bytes
 make ci        # run the full local check suite
 make clean     # remove build artifacts
 ```
@@ -48,6 +49,7 @@ This currently covers:
 - `cargo fmt --all -- --check`;
 - `cargo clippy --all-targets -- -D warnings`;
 - `cargo test --workspace`;
+- `make manifest-check` (verifies `data/manifest.toml` SHA-256s);
 - `cargo check -p stars-web --target wasm32-unknown-unknown --manifest-path apps/web/Cargo.toml`;
 - frontend typecheck.
 
@@ -135,6 +137,13 @@ When adding catalog or reference data:
 5. If the data affects numerical output, add a validation test.
 6. For generated documentation images or gallery scenes, record the command or
    session used to regenerate them.
+7. Append an entry to [`data/manifest.toml`](data/manifest.toml) with the
+   correct `kind` (`embedded`, `generated`, or `runtime-service`), the
+   SHA-256, and the regeneration `preprocessing` command. `make manifest-check`
+   re-hashes every artifact and is part of `make ci`; CI fails if a data
+   file's bytes drift from the recorded hash without updating the manifest in
+   the same PR. See [`crates/manifest/src/lib.rs`](crates/manifest/src/lib.rs)
+   for the full schema.
 
 ## Documentation policy
 
@@ -169,7 +178,9 @@ Before asking for review:
 - [ ] Numerical output changes have pinned tests.
 - [ ] Visual output changes include screenshots, scene presets, or a clear
       before / after note.
-- [ ] New data sources and generated artifacts are documented.
+- [ ] New data sources and generated artifacts are documented in
+      `DATA_SOURCES.md` **and** `data/manifest.toml`.
+- [ ] `make manifest-check` passes (re-hashing detects unrecorded data drift).
 - [ ] README / roadmap / progress docs are updated if user-facing status changed.
 
 ## Good first areas

@@ -224,7 +224,9 @@ planned backend should define:
 - a small deterministic embedded subset for WASM and examples;
 - optional streaming / paging for native or server hosts;
 - manifest references so sessions and validation renders can name the exact
-  data snapshot they used.
+  data snapshot they used. The manifest lives at `data/manifest.toml` and is
+  parsed by `stars-manifest`; backends cite artifacts by their stable `id`
+  (e.g. `hyg-v4.2`) so a session JSON can pin which snapshot a render used.
 
 Do not make `crates/renderer` depend on a large-catalog storage format. It
 should continue to receive compact render instances and metadata prepared by the
