@@ -66,7 +66,7 @@ argument parsing.
 Owns star catalog ingestion and catalog-space conversions:
 
 - `CatalogBackend`, `CatalogQuery`, `CatalogPage`, and `CatalogSource` as the
-  Phase 3 backend seam for larger catalogs;
+  Library-track backend seam (`L-17`) for larger catalogs;
 - `HygCsvBackend` for filesystem-backed HYG loading;
 - `load_from_csv(&str)` and `load_from_file(path)` compatibility helpers;
 - `load_embedded()` behind the `embedded` feature;

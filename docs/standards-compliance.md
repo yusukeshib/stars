@@ -39,7 +39,7 @@ approximations, and deliberate non-goals.
 | Apparent sidereal time | Equation of equinoxes from compact nutation | Coupled to the compact nutation model | `crates/astronomy/src/corrections.rs` |
 | Annual aberration | First-order aberration from approximate Earth orbital velocity | Captures the ~20 arcsec scale; omits full relativistic terms | `crates/astronomy/src/corrections.rs` |
 | Refraction | Saemundsson/Meeus apparent-altitude correction with pressure / temperature scaling | Visual correction near the horizon; not a ray-traced atmosphere | `crates/astronomy/src/corrections.rs` |
-| Sun | VSOP87/FK5 geocentric Sun plus WGS84 topocentric parallax | Visual / planning quality; Phase 3 tracks DE440-class ephemerides | `crates/astronomy/src/ephemeris.rs` |
+| Sun | VSOP87/FK5 geocentric Sun plus WGS84 topocentric parallax | Visual / planning quality; `L-06` tracks DE440-class ephemerides | `crates/astronomy/src/ephemeris.rs` |
 | Moon | Principal ELP2000-style lunar series plus WGS84 topocentric parallax | Visual Moon placement, phase, and moonlit sky; not final eclipse prediction | `crates/astronomy/src/ephemeris.rs` |
 | Planets | VSOP87D apparent ecliptic coordinates with one light-time iteration and approximate magnitudes | Useful for naked-eye rendering; not publication-grade astrometry | `crates/astronomy/src/ephemeris.rs` |
 | Earth shadow on Moon | Smooth geometric umbra aid | Visual eclipse aid only; not a contact-timing model | `crates/astronomy/src/ephemeris.rs` |
@@ -59,7 +59,7 @@ approximations, and deliberate non-goals.
 | `iauNut00a`, `iauNut00b`, `iauPn06a` full nutation / precession-nutation pipelines | Replaced by compact nutation plus IAU 2006 precession | Keeps the WASM renderer small while meeting current visual tolerance; full tables are a future precision upgrade. |
 | `iauEra00`, `iauGst06a`, `iauSp00`, `iauPom00`, `iauC2t06a` Earth rotation / CIO / polar-motion path | Not implemented | Current sessions expose UT1/DUT1 but do not fetch polar motion or use a CIO-based terrestrial-to-celestial matrix. |
 | `iauTttdb`, `iauTdbtt`, TCB/TCG helpers | Replaced by a two-term TT→TDB approximation | Current ephemerides are visual approximations; relativistic time ephemerides belong with publication-grade ephemeris work. |
-| `iauEpv00`, `iauPlan94`, SOFA solar-system helpers | Not used as the ephemeris source | Current code uses `astro` VSOP87/ELP-style series; Phase 3 tracks DE440-class replacement. |
+| `iauEpv00`, `iauPlan94`, SOFA solar-system helpers | Not used as the ephemeris source | Current code uses `astro` VSOP87/ELP-style series; `L-06` tracks DE440-class replacement. |
 | `iauRefco` / SOFA observed-place refraction constants | Not used directly | Refraction uses Saemundsson/Meeus apparent-altitude correction with explicit pressure/temperature controls. |
 
 ## Deliberate non-goals today

@@ -10,25 +10,43 @@ relevant host applications.
 
 ## Summary
 
-Implemented phase groups:
+Work is organised along two orthogonal tracks (see [`ROADMAP.md`](ROADMAP.md)):
+**V — Visual** and **L — Library / platform**.
 
-- Phase 1 core educational overlays and text labels.
-- Phase 1' physical dark-sky visual pipeline.
-- Phase 2 time systems, apparent-place corrections, atmosphere, solar-system
-  bodies, and planning UI.
-- Phase 3 schema-versioned JSON sessions, deterministic scene presets,
-  notebook reproducibility examples, catalog-backend scaling scaffold/design, a
-  validation/demo gallery workflow, citation metadata, standards-compliance,
-  and the data provenance manifest
-  notes.
-- Phase 4 full-sky projections and external galactic viewpoint.
+Shipped:
+
+- **Visual track** — identification overlays and text labels (`V-01`–`V-12`),
+  physical dark-sky visual pipeline (`V-13`–`V-23`), atmospheric refraction
+  and Sun / Moon / planet rendering (`V-29`–`V-36`), full-sky projections
+  (`V-40`), out-of-Earth galactic and custom external viewpoints (`V-41`,
+  `V-44`), telescope eyepiece simulation (`V-43`), and the Messier slice of
+  the deep-sky overlay (`V-42`).
+- **Library track** — IAU-grade time / precession / nutation / aberration /
+  proper motion (`L-01`–`L-05`), planning helpers (`L-07`, `L-08`),
+  schema-versioned JSON sessions (`L-10`, `L-11`), deterministic scene
+  presets (`L-12`), notebook reproducibility examples (`L-13`), catalog
+  backend scaling scaffold (`L-16`), validation / demo gallery (`L-27`),
+  citation metadata (`L-25`), standards-compliance document (`L-26`), and
+  the data provenance manifest (`L-15`).
 
 Still open:
 
-- Remaining Phase 3 research / platform features.
-- Remaining Phase 4 advanced visual features.
+- **Visual track** — dark-sky realism gaps (`V-24`–`V-28`), atmospheric
+  self-consistency (`V-37`–`V-39`), NGC / IC follow-up (`V-42`), niche
+  visual features (`V-45`–`V-50`), rare phenomena (`V-47`–`V-49`).
+- **Library track** — DE440 ephemerides (`L-06`), large catalog ingest
+  (`L-17`), identifier preservation (`L-18`), SIMBAD / VizieR links
+  (`L-19`), variable-star light curves (`L-20`), Python bindings (`L-21`),
+  headless server (`L-22`), guided education (`L-23`), accessibility
+  (`L-24`), public demo gallery (`L-14`), observation-planning polish
+  (`L-09`).
 
-## Phase 1 — Educational planetarium
+Earlier entries below refer to the legacy Phase 1 / 1' / 2 / 3 / 4 grouping
+that shipped before the V / L split landed; the IDs in those entries
+(`P1-NN`, `P1P-NN`, `P2-NN`, `P3-NN`, `P4-NN`) have new names in `ROADMAP.md`
+and are noted where useful.
+
+## Identification overlays and labels (legacy `Phase 1`)
 
 ### Overlay system
 
@@ -99,11 +117,11 @@ Primary implementation areas:
 - `crates/renderer/build.rs`
 - host overlay controls in `apps/cli`, `apps/viewer`, and `apps/web`
 
-## Phase 1' — Physical dark-sky visual pipeline
+## Physical dark-sky visual pipeline (legacy `Phase 1'`)
 
-Phase 1' is implemented as the dark-sky visual realism layer. It is orthogonal
-to positional precision: the goal is that the sky looks physically plausible to
-a dark-adapted observer.
+The dark-sky visual realism layer (Visual track, `V-13`–`V-23`) is
+implemented. It is orthogonal to positional precision: the goal is that the
+sky looks physically plausible to a dark-adapted observer.
 
 ### Photometry and colour
 
@@ -159,10 +177,12 @@ Primary implementation areas:
 - `crates/astronomy/src/photometry.rs`
 - `crates/renderer/src/skyglow.rs`
 
-## Phase 2 — Observation planning and positional trust
+## Observation planning and positional trust (legacy `Phase 2`)
 
-Phase 2 is implemented in the roadmap table. It provides the default precision
-and physical atmosphere layer expected of the current viewer.
+The Library-track positional-precision items (`L-01`–`L-05`, `L-07`, `L-08`)
+and the Visual-track refraction / Sun / Moon / planet / atmosphere items
+(`V-29`–`V-36`) are implemented. Together they provide the default
+precision and physical atmosphere layer expected of the current viewer.
 
 ### Time systems
 
@@ -270,7 +290,7 @@ Primary implementation areas:
 - `crates/astronomy/src/planning.rs`
 - `apps/web/frontend`
 
-## Phase 3 — Reproducibility and platform baseline
+## Reproducibility and platform baseline (legacy `Phase 3`)
 
 ### Schema-versioned JSON sessions
 
@@ -301,7 +321,7 @@ Primary implementation areas:
 
 ### Data provenance manifest
 
-Implemented P3-13: a machine-readable manifest that records every committed
+Implemented `L-15` (legacy `P3-13`): a machine-readable manifest that records every committed
 data artifact, every regenerable artifact, and every runtime web service the
 application calls.
 
@@ -346,7 +366,7 @@ Primary implementation areas:
 
 ### Citation and standards baseline
 
-Implemented the first citable-platform baseline for Phase 3:
+Implemented the first citable-platform baseline for the Library track:
 
 - `CITATION.cff` provides repository-level software citation metadata and
   preferred citation guidance for teaching, publications, validation reports,
@@ -368,7 +388,7 @@ Validation:
 
 ### Catalog backend scaling scaffold
 
-Implemented the P3-00 catalog scaling seam before large catalog ingest. The
+Implemented the `L-16` (legacy `P3-00`) catalog scaling seam before large catalog ingest. The
 current product remains HYG-backed, but future Hipparcos / Tycho-2 / Gaia DR3
 work now has explicit API and documentation boundaries.
 
@@ -402,7 +422,7 @@ Validation:
 
 ### Scene presets, notebook examples, and validation gallery
 
-Implemented deterministic Phase 3 scene presets for reproducible demos,
+Implemented deterministic Library-track scene presets for reproducible demos,
 validation screenshots, notebooks, and bug reports. Native hosts can list or
 load presets with `--list-presets` / `--preset`; the CLI can export any
 effective preset or scene as JSON with `--write-session --write-session-only`.
@@ -444,11 +464,11 @@ Validation:
 - the gallery script provides repeatable human screenshots and opt-in exact
   screenshot regression for pinned GPU/driver environments.
 
-## Phase 4 — Advanced visual features
+## Advanced visual features (legacy `Phase 4`)
 
 ### Messier deep-sky overlay
 
-Implemented the first slice of P4-03: a Messier deep-sky overlay with
+Implemented the first slice of `V-42` (legacy `P4-03`): a Messier deep-sky overlay with
 diamond markers, text labels, and a V-magnitude density slider exposed in
 every host.
 
@@ -509,7 +529,7 @@ same manifest pattern is tracked separately.
 
 ### Full-sky projections
 
-Implemented the first Phase 4 visual feature: selectable screen projections.
+Implemented the first niche-visual feature (`V-40`, legacy `P4-01`): selectable screen projections.
 Perspective remains the default camera projection, and three all-sky map modes
 are available for structure-scale views:
 
@@ -540,7 +560,7 @@ Validation:
 
 ### Out-of-Earth galactic viewpoint
 
-Implemented a Phase 4 external camera mode for viewing the local Milky Way from
+Implemented the external camera mode (`V-41`, legacy `P4-02`) for viewing the local Milky Way from
 above the north galactic pole. The default Earth-centred view remains unchanged,
 but hosts can now select `galactic-north` / `SkyViewpoint::GalacticNorth` to:
 
@@ -567,7 +587,7 @@ Validation:
 
 ### Custom external viewpoint origin
 
-Generalized the fixed Phase 4 galactic viewpoint into a host-selectable external
+Generalized the fixed galactic viewpoint (`V-44`, legacy `P4-07`) into a host-selectable external
 camera. `SkyViewpoint::GalacticNorth` remains the preset top-down view, while
 `SkyViewpoint::CustomExternal` uses `renderer::ExternalViewpoint` to carry an
 origin, target, and up vector in IAU galactic Cartesian parsecs. The coordinate
@@ -592,7 +612,7 @@ Validation:
 
 ### Telescope eyepiece simulation
 
-Implemented the Phase 4 telescope eyepiece model. Hosts can enable an optical
+Implemented the telescope eyepiece model (`V-43`, legacy `P4-06`). Hosts can enable an optical
 train consisting of OTA aperture / focal length and eyepiece focal length /
 apparent field / optional field stop. The renderer derives:
 
