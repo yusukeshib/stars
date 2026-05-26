@@ -63,13 +63,14 @@ topocentric positions. The goal is for sky colour to be driven by physical
 illuminants and atmosphere parameters rather than by hard-coded gradients.
 
 **Current highest priority:** continue the remaining visual Phase 4 work and
-Phase 3 platform hooks in small, shippable slices before ingesting large new
-catalog data. Phase 1, Phase 1', Phase 2, the core stellar apparent-place
-corrections, catalog backend scaling scaffold/design, full-sky projections, the
-fixed external galactic viewpoint, telescope eyepiece simulation, custom
-external viewpoint origins, scene presets, notebook reproducibility examples,
-the validation/demo gallery workflow, citation metadata, and the
-standards-compliance page are now complete. A row is `✅ done` only when the
+Phase 3 platform hooks in small, shippable slices. Large new catalog ingest
+(P3-01) can now begin since the machine-readable data manifest is in place.
+Phase 1, Phase 1', Phase 2, the core stellar apparent-place corrections, catalog
+backend scaling scaffold/design, full-sky projections, the fixed external
+galactic viewpoint, telescope eyepiece simulation, custom external viewpoint
+origins, scene presets, notebook reproducibility examples, the validation/demo
+gallery workflow, citation metadata, the standards-compliance page, and the
+data provenance manifest are now complete. A row is `✅ done` only when the
 model named in its references is implemented, documented, tested, and wired into
 all relevant hosts.
 
@@ -104,8 +105,9 @@ future features have stable scenes, source manifests, and review hooks:
    planning polish, variable-star light curves, and eyepiece preset provenance.
 2. **Remaining Phase 3 platform hooks:** Python bindings and headless server
    mode now that the catalog/backend shape is documented.
-3. **Large catalog ingest:** Hipparcos / Tycho-2 / Gaia DR3 can begin after the
-   machine-readable data manifest rules are in place.
+3. **Large catalog ingest:** Hipparcos / Tycho-2 / Gaia DR3. The machine-
+   readable data manifest rules required by this step are now in place
+   (`data/manifest.toml`, `crates/manifest`, P3-13).
 
 ---
 
@@ -175,7 +177,7 @@ Columns:
 | `P3-10` | 3 | **Scene presets** | Deterministic named scenes for Tokyo tonight, dark sky, noon, sunset, civil/nautical/astronomical twilight, moonlit night, eclipse aid, all-sky maps, and external galactic viewpoints | ✅ done (`stars_host_common::presets`, `apps/{cli,viewer}`) |
 | `P3-11` | 3 | **Validation / demo gallery + visual regression** | Render preset PNGs with fixed inputs; publish a human gallery and run perceptual or tolerance-based screenshot comparisons where CI can do so reliably | ✅ done (`docs/validation-gallery.md`, `scripts/render-validation-gallery.sh`) |
 | `P3-12` | 3 | **Guided education mode** | Cross-host tour content explaining horizon, equator, ecliptic, galactic plane, time motion, twilight, and projection choices | ⬜ |
-| `P3-13` | 3 | **Data provenance manifest** | Machine-readable manifest recording source URL/archive ID, version, license, local path, hash, preprocessing command, and fields used for every data artifact | ⬜ |
+| `P3-13` | 3 | **Data provenance manifest** | `data/manifest.toml` records every committed data artifact, generated artifact, and runtime web service with SHA-256, source, license, version, preprocessing command, and fields used; `stars-manifest` parses and verifies the schema, and `make manifest-check` (wired into `make ci`) re-hashes every artifact so unrecorded drift fails CI | ✅ done (`crates/manifest`, `data/manifest.toml`) |
 | `P3-14` | 3 | **Notebook examples** | Reproducible examples that load JSON sessions, compare tabular astronomy outputs, and render the same scene as web / CLI | ✅ done (`examples/notebooks`, `apps/cli/examples/session_table.rs`) |
 | `P3-15` | 3 | **Public demo gallery** | Curated shareable scenes such as Tokyo tonight, summer Milky Way, lunar eclipse aid, and galactic-north view, backed by stable session files | ⬜ |
 | `P4-01` | 4 | **Full-sky projections** | Mollweide, Aitoff, and Hammer all-sky maps selectable in CLI, desktop, and web; perspective remains the default | ✅ done (`renderer::SkyProjection`, `shaders/{star,skyglow,overlay}.wgsl`, `apps/{cli,viewer,web}`) |

@@ -1,0 +1,517 @@
+# Machine-readable data provenance manifest for `stars`.
+#
+# Companion to DATA_SOURCES.md: the manifest is the source-of-truth shape that
+# CI verifies, while DATA_SOURCES.md is the human-readable narrative. Every
+# committed data artifact, every generated/regenerable artifact, and every
+# runtime web service the application calls must have an entry here.
+#
+# Rules:
+#
+# 1. Adding or changing any data file in the repository requires updating its
+#    entry in this file in the same PR. `make manifest-check` (wired into
+#    `make ci`) recomputes SHA-256s and fails on drift.
+# 2. `kind` controls which fields are required (see crates/manifest/src/lib.rs):
+#    - `embedded`        — third-party data checked into the repo. Requires
+#                          `path`, `sha256`. SHA-256 pins the upstream snapshot
+#                          a release was built against.
+#    - `generated`       — produced from project sources by a documented
+#                          command and checked in for reproducibility. Requires
+#                          `path`, `sha256`, and `preprocessing` so the
+#                          regenerator is discoverable.
+#    - `runtime-service` — endpoint called at runtime. No local bytes; requires
+#                          `endpoint`.
+# 3. `id` must be stable across PRs — JSON sessions and the catalog backend
+#    cite artifacts by id (see ARCHITECTURE.md "catalog backend identity").
+# 4. `license` is the SPDX identifier where one applies. Use `"public-domain"`
+#    or `"see-upstream"` when no SPDX value fits.
+
+schema_version = 1
+
+# ---------------------------------------------------------------------------
+# Embedded third-party data
+# ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "hyg-v4.2"
+description = "HYG star catalog v4.2: merged Hipparcos / Tycho-2 / Gliese / HD."
+kind = "embedded"
+path = "crates/catalog/data/hyg_v42.csv"
+sha256 = "b2983a8d934e4f031cdb67bdd6c3437f8c5143cd6606a9573a9a9ac4b6375fd2"
+bytes = 33932800
+source = "https://codeberg.org/astronexus/hyg"
+archive_id = "astronexus/hyg / data/hyg/CURRENT/hyg_v42.csv.gz"
+version = "4.2"
+retrieved = "2024-12"
+license = "CC-BY-SA-4.0"
+license_url = "https://codeberg.org/astronexus/hyg/src/branch/main/LICENSE.md"
+preprocessing = "scripts/download-catalog.sh"
+fields_used = [
+    "id",
+    "hip",
+    "hd",
+    "proper",
+    "ra",
+    "dec",
+    "dist",
+    "pmra",
+    "pmdec",
+    "pmrarad",
+    "pmdecrad",
+    "mag",
+    "ci",
+    "bayer",
+    "flam",
+    "con",
+]
+used_by = [
+    "crates/catalog",
+    "crates/renderer/build.rs",
+    "scripts/generate-readme-images.sh",
+]
+limitations = """
+The catalog backend drops rows fainter than magnitude 8 and rows whose
+parallax is the HYG `100000` parsec sentinel (unknown distance). The HYG
+upstream merges several primary catalogues with different epochs; see
+DATA_SOURCES.md for the per-field caveats.
+"""
+
+[[artifact]]
+id = "d3-celestial-constellation-lines"
+description = "Modern western constellation stick figures derived from d3-celestial."
+kind = "embedded"
+path = "crates/renderer/data/constellation_lines.csv"
+sha256 = "9a825b71815b193934503c4c409c56534ea255c24b07bd6c7096fa41aa305b8b"
+bytes = 69371
+source = "https://github.com/ofrohn/d3-celestial"
+archive_id = "ofrohn/d3-celestial data/constellations.lines.json"
+version = "see upstream commit"
+license = "BSD-3-Clause"
+license_url = "https://github.com/ofrohn/d3-celestial/blob/master/LICENSE"
+preprocessing = """
+Hand-compacted from `data/constellations.lines.json` into J2000 unit-vector
+line segments; further compacted at build time by `crates/renderer/build.rs`
+into the i16 binary `constellation_lines.bin` consumed by
+`renderer::constellations`.
+"""
+fields_used = ["x0", "y0", "z0", "x1", "y1", "z1"]
+used_by = [
+    "crates/renderer/build.rs",
+    "crates/renderer/src/constellations.rs",
+    "crates/renderer/src/overlay.rs",
+]
+limitations = """
+Coordinates are J2000 unit vectors; B1875 / of-date variants must not be
+mixed in. The CSV header preserves the BSD-3-Clause attribution required by
+the upstream license.
+"""
+
+[[artifact]]
+id = "iau-delporte-constellation-boundaries"
+description = "IAU / Delporte constellation boundary vertices precessed to J2000."
+kind = "embedded"
+path = "crates/renderer/data/constellation_boundaries.csv"
+sha256 = "87b0847bd703b5575d6cc0a118bafc1c749f2dee33b183d90eb158067c9ba0ba"
+bytes = 145563
+source = "https://cdsarc.cds.unistra.fr/viz-bin/cat/VI/49"
+archive_id = "CDS VI/49 bound_18.dat"
+citation = "Delporte 1930, Délimitation Scientifique des Constellations (IAU)."
+license = "public-domain"
+license_url = "https://cds.u-strasbg.fr/vizier/Documents/license.htx"
+preprocessing = """
+B1875 boundary vertices precessed to J2000 with the IAU 1976 precession
+formula, then compacted at build time by `crates/renderer/build.rs` into
+`constellation_boundaries.bin`.
+"""
+fields_used = ["x0", "y0", "z0", "x1", "y1", "z1"]
+used_by = [
+    "crates/renderer/build.rs",
+    "crates/renderer/src/constellations.rs",
+    "crates/renderer/src/overlay.rs",
+]
+limitations = """
+Coordinate epoch is J2000; B1875 vertices must not be re-introduced. The
+boundary set is the official IAU sky region division, suitable for "which
+constellation does this RA/Dec belong to" lookups when paired with a
+point-in-region test.
+"""
+
+# ---------------------------------------------------------------------------
+# Generated artifacts checked in for reproducibility
+# ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "scene-preset-session-tokyo-tonight"
+description = "Scene preset JSON: Tokyo tonight."
+kind = "generated"
+path = "docs/presets/sessions/tokyo-tonight.json"
+sha256 = "3ce55a83dcf77fcd56a1430ecc474aef8aeebf06410c2d18a06268db147ff852"
+bytes = 1900
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md", "apps/web", "examples/notebooks"]
+
+[[artifact]]
+id = "scene-preset-session-dark-sky"
+description = "Scene preset JSON: dark-sky reference scene."
+kind = "generated"
+path = "docs/presets/sessions/dark-sky.json"
+sha256 = "9368ca1b9f0c3d7356bf80883e9070b6255922a34524d2d2669609bd9b0a958e"
+bytes = 1855
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md"]
+
+[[artifact]]
+id = "scene-preset-session-noon"
+description = "Scene preset JSON: daytime noon."
+kind = "generated"
+path = "docs/presets/sessions/noon.json"
+sha256 = "b03be8d574866e4a37e608105c77ddc6be40ada02ae181e4e5f4a7843c802a3d"
+bytes = 1812
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md"]
+
+[[artifact]]
+id = "scene-preset-session-sunset"
+description = "Scene preset JSON: sunset."
+kind = "generated"
+path = "docs/presets/sessions/sunset.json"
+sha256 = "38adfb44940b9eefc6e668260e4642218185125a27686a50caccb24a332de8e8"
+bytes = 1824
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md"]
+
+[[artifact]]
+id = "scene-preset-session-civil-twilight"
+description = "Scene preset JSON: civil twilight."
+kind = "generated"
+path = "docs/presets/sessions/civil-twilight.json"
+sha256 = "95a2165f1210e286dc34e5911400bb9cbb6c6482d4b698a0b8fdaa623328e90a"
+bytes = 1844
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md"]
+
+[[artifact]]
+id = "scene-preset-session-nautical-twilight"
+description = "Scene preset JSON: nautical twilight."
+kind = "generated"
+path = "docs/presets/sessions/nautical-twilight.json"
+sha256 = "6111369aba16775e0d996c7c6498d4cee80ab4f50d2aac99d0fa9945e2a14cf7"
+bytes = 1847
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md"]
+
+[[artifact]]
+id = "scene-preset-session-astronomical-twilight"
+description = "Scene preset JSON: astronomical twilight."
+kind = "generated"
+path = "docs/presets/sessions/astronomical-twilight.json"
+sha256 = "1d6f3b4f72231d2ba078ae59d012e1420810eee0ab74cbad4df98483286c7909"
+bytes = 1858
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md"]
+
+[[artifact]]
+id = "scene-preset-session-moonlit-night"
+description = "Scene preset JSON: moonlit-night reference scene."
+kind = "generated"
+path = "docs/presets/sessions/moonlit-night.json"
+sha256 = "8351e27b212a4e7ac72abe13bbf192a92c5d1f022627e028f5e285511f0c63a9"
+bytes = 1869
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md", "examples/notebooks"]
+
+[[artifact]]
+id = "scene-preset-session-eclipse-aid"
+description = "Scene preset JSON: lunar eclipse aid."
+kind = "generated"
+path = "docs/presets/sessions/eclipse-aid.json"
+sha256 = "153bb06548934c97ca65493f3df8e74f62a4122deb23322855874d251a547786"
+bytes = 1849
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md"]
+
+[[artifact]]
+id = "scene-preset-session-all-sky-mollweide"
+description = "Scene preset JSON: all-sky Mollweide projection."
+kind = "generated"
+path = "docs/presets/sessions/all-sky-mollweide.json"
+sha256 = "ce46307bb0b7eac5d326589ccbedf32cde6df8058b710bc25cec4a70a950a36d"
+bytes = 1873
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md"]
+
+[[artifact]]
+id = "scene-preset-session-all-sky-hammer"
+description = "Scene preset JSON: all-sky Hammer projection."
+kind = "generated"
+path = "docs/presets/sessions/all-sky-hammer.json"
+sha256 = "4888b312b36215e98647abb296d17c19445002bc9eb8b96065255d4230f9ea7f"
+bytes = 1870
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md"]
+
+[[artifact]]
+id = "scene-preset-session-galactic-north"
+description = "Scene preset JSON: external galactic-north viewpoint."
+kind = "generated"
+path = "docs/presets/sessions/galactic-north.json"
+sha256 = "e3d6862b14e8786910010a3f430ede1dd3f57375d335bf484784acf39c1ea875"
+bytes = 1756
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md"]
+
+[[artifact]]
+id = "scene-preset-session-custom-external"
+description = "Scene preset JSON: custom external viewpoint."
+kind = "generated"
+path = "docs/presets/sessions/custom-external.json"
+sha256 = "e8650151d316d4a0866c2c679690c68c553cb5ff3d8476c7b04c1226d27cb5cb"
+bytes = 1751
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md"]
+
+[[artifact]]
+id = "notebook-expected-tokyo-tonight"
+description = "Notebook reproducibility fixture: Tokyo tonight session table."
+kind = "generated"
+path = "examples/notebooks/expected/tokyo-tonight-session-table.csv"
+sha256 = "2b6174fc42585800295aceda90a506813927834f0315ebb951e4746b63abffe3"
+bytes = 1265
+license = "see-upstream"
+preprocessing = "cargo run -q -p stars-cli --example session-table -- docs/presets/sessions/tokyo-tonight.json"
+used_by = ["examples/notebooks", "make notebook-check"]
+limitations = """
+Pins the Sun/Moon/planet apparent-position output of the current
+`crates/astronomy` model; any change to that model must regenerate this
+fixture (and DATA_SOURCES.md flags this so the drift is reviewable).
+"""
+
+[[artifact]]
+id = "notebook-expected-moonlit-night"
+description = "Notebook reproducibility fixture: moonlit-night session table."
+kind = "generated"
+path = "examples/notebooks/expected/moonlit-night-session-table.csv"
+sha256 = "ed719cae4a3ce80e3d13265ba7fced3e37e45573881e0e02c6a7f24336b8998b"
+bytes = 1270
+license = "see-upstream"
+preprocessing = "cargo run -q -p stars-cli --example session-table -- docs/presets/sessions/moonlit-night.json"
+used_by = ["examples/notebooks", "make notebook-check"]
+
+[[artifact]]
+id = "readme-image-tokyo-summer-sky"
+description = "README gallery image: Tokyo summer sky."
+kind = "generated"
+path = "docs/assets/readme/tokyo-summer-sky.png"
+sha256 = "aba108e1e01d038f270b8d1c42ea3bf60cb5fcf3f674fdab5cb4714e677d17be"
+bytes = 495135
+license = "see-upstream"
+preprocessing = "scripts/generate-readme-images.sh"
+used_by = ["README.md", "README.ja.md"]
+limitations = """
+PNG bytes are GPU/driver deterministic only on a pinned adapter. The
+manifest hash pins the committed image so reviewers can see whether a PR
+regenerated it. To regenerate, run the preprocessing command and update
+`sha256`.
+"""
+
+[[artifact]]
+id = "readme-image-hammer-all-sky"
+description = "README gallery image: all-sky Hammer projection."
+kind = "generated"
+path = "docs/assets/readme/hammer-all-sky.png"
+sha256 = "19edc288ecff6fe09682ac356d9b00585f575ace7e63e5521c42ae3d1a685420"
+bytes = 802936
+license = "see-upstream"
+preprocessing = "scripts/generate-readme-images.sh"
+used_by = ["README.md", "README.ja.md"]
+
+[[artifact]]
+id = "readme-image-galactic-north"
+description = "README gallery image: external galactic-north viewpoint."
+kind = "generated"
+path = "docs/assets/readme/galactic-north.png"
+sha256 = "ba951a6a306c1c500c37c991eb7e30d45b1e0302bca68163f96f251e9408ece1"
+bytes = 254325
+license = "see-upstream"
+preprocessing = "scripts/generate-readme-images.sh"
+used_by = ["README.md", "README.ja.md"]
+
+[[artifact]]
+id = "validation-gallery-tokyo-tonight"
+description = "Validation gallery PNG: Tokyo tonight."
+kind = "generated"
+path = "docs/assets/validation/tokyo-tonight.png"
+sha256 = "81144b6ec97991f1d40fb901267388261e07139446bdb0554c5e3193070fb3b8"
+bytes = 105679
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+limitations = """
+See `docs/validation-gallery.md`: `render-validation-gallery.sh --check`
+performs an opt-in byte-exact regression because wgpu readback can vary by
+adapter/driver. The committed PNG bytes are still pinned by the manifest so
+PR reviewers can see "this PR re-rendered the gallery".
+"""
+
+[[artifact]]
+id = "validation-gallery-dark-sky"
+description = "Validation gallery PNG: dark-sky reference."
+kind = "generated"
+path = "docs/assets/validation/dark-sky.png"
+sha256 = "fb98e59a5e7d6926031d882d36d25693dac28a1eb1ecb235e388e1d8dad118ca"
+bytes = 71394
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+
+[[artifact]]
+id = "validation-gallery-noon"
+description = "Validation gallery PNG: noon daylight."
+kind = "generated"
+path = "docs/assets/validation/noon.png"
+sha256 = "d559ec9f66b37e38e1b759362b2133628e38d40b552146d7e8cb1e3a27850167"
+bytes = 16334
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+
+[[artifact]]
+id = "validation-gallery-sunset"
+description = "Validation gallery PNG: sunset."
+kind = "generated"
+path = "docs/assets/validation/sunset.png"
+sha256 = "fc0221fa988f1596542938a47244b377d724ca41e8411f36ccbe6ac644c753a2"
+bytes = 31111
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+
+[[artifact]]
+id = "validation-gallery-civil-twilight"
+description = "Validation gallery PNG: civil twilight."
+kind = "generated"
+path = "docs/assets/validation/civil-twilight.png"
+sha256 = "457c6bfedac09efeb126d88f6dd0795982f712bff35cc283edf3b6c586b7f5f6"
+bytes = 57700
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+
+[[artifact]]
+id = "validation-gallery-nautical-twilight"
+description = "Validation gallery PNG: nautical twilight."
+kind = "generated"
+path = "docs/assets/validation/nautical-twilight.png"
+sha256 = "0cccc5b3ca2d70f8973c7920497d163551a09acb8e48bd2679c3df93155436ea"
+bytes = 80651
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+
+[[artifact]]
+id = "validation-gallery-astronomical-twilight"
+description = "Validation gallery PNG: astronomical twilight."
+kind = "generated"
+path = "docs/assets/validation/astronomical-twilight.png"
+sha256 = "936aa442c2c5a6792047dff56672ff2e5630c8bd8ec84e81f26bef5ff913478e"
+bytes = 77783
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+
+[[artifact]]
+id = "validation-gallery-moonlit-night"
+description = "Validation gallery PNG: moonlit night."
+kind = "generated"
+path = "docs/assets/validation/moonlit-night.png"
+sha256 = "0245970ad1e49a4298713a5471ee04a0ca2736c01beea34693a3b2f47d34ee1d"
+bytes = 56938
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+
+[[artifact]]
+id = "validation-gallery-eclipse-aid"
+description = "Validation gallery PNG: lunar eclipse aid."
+kind = "generated"
+path = "docs/assets/validation/eclipse-aid.png"
+sha256 = "8e2aede5ea1e337105eee8d1668614fddf4b2833be723c3bab271468a1ca6990"
+bytes = 12220
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+
+[[artifact]]
+id = "validation-gallery-all-sky-mollweide"
+description = "Validation gallery PNG: all-sky Mollweide projection."
+kind = "generated"
+path = "docs/assets/validation/all-sky-mollweide.png"
+sha256 = "e2c8aa2ef849519f1519ae30cefdd747bc531b71eb696c2a6cb6fe70b7426fde"
+bytes = 178527
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+
+[[artifact]]
+id = "validation-gallery-all-sky-hammer"
+description = "Validation gallery PNG: all-sky Hammer projection."
+kind = "generated"
+path = "docs/assets/validation/all-sky-hammer.png"
+sha256 = "515b5a396a212fad147730d7b623526c220175a2c268cb6ad0f85e74d9e7fec7"
+bytes = 170084
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+
+[[artifact]]
+id = "validation-gallery-galactic-north"
+description = "Validation gallery PNG: external galactic-north viewpoint."
+kind = "generated"
+path = "docs/assets/validation/galactic-north.png"
+sha256 = "75d777ba4a9811bd752a106450b78cd16db3ddb5a27701e40978505a813a9a3c"
+bytes = 38537
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+
+[[artifact]]
+id = "validation-gallery-custom-external"
+description = "Validation gallery PNG: custom external viewpoint."
+kind = "generated"
+path = "docs/assets/validation/custom-external.png"
+sha256 = "99a2581ce40978269acef87f196b6e400f6577b326b3428bc972b6a97db6d151"
+bytes = 31925
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+
+# ---------------------------------------------------------------------------
+# Runtime web services
+# ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "openstreetmap-nominatim"
+description = "OpenStreetMap Nominatim address/place-name search API."
+kind = "runtime-service"
+endpoint = "https://nominatim.openstreetmap.org/search"
+source = "https://nominatim.org/release-docs/latest/api/Overview/"
+license = "ODbL-1.0"
+license_url = "https://www.openstreetmap.org/copyright"
+used_by = ["apps/web/frontend/src/components/StatusBar.tsx"]
+limitations = """
+Subject to the OpenStreetMap Foundation Nominatim usage policy. Only the
+selected coordinates enter the current browser session — no observer query
+is sent to first-party `stars` services.
+"""

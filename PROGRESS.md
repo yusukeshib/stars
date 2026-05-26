@@ -18,7 +18,8 @@ Implemented phase groups:
   bodies, and planning UI.
 - Phase 3 schema-versioned JSON sessions, deterministic scene presets,
   notebook reproducibility examples, catalog-backend scaling scaffold/design, a
-  validation/demo gallery workflow, citation metadata, and standards-compliance
+  validation/demo gallery workflow, citation metadata, standards-compliance,
+  and the data provenance manifest
   notes.
 - Phase 4 full-sky projections and external galactic viewpoint.
 
@@ -297,6 +298,51 @@ Primary implementation areas:
 - `apps/viewer/src/main.rs`
 - `apps/web/frontend/src/session.ts`
 - `apps/web/frontend/src/components/StatusBar.tsx`
+
+### Data provenance manifest
+
+Implemented P3-13: a machine-readable manifest that records every committed
+data artifact, every regenerable artifact, and every runtime web service the
+application calls.
+
+Shipped capabilities:
+
+- `data/manifest.toml` enumerates 34 local artifacts (HYG v4.2, d3-celestial
+  constellation lines, IAU/Delporte boundaries, 13 scene preset JSONs, 2
+  notebook expected CSVs, 3 README gallery PNGs, 13 validation gallery PNGs)
+  and the OpenStreetMap Nominatim runtime endpoint, each with SHA-256, source,
+  license, version, preprocessing command, and field list.
+- `crates/manifest` (`stars-manifest`) parses and validates the TOML schema,
+  enforces per-`kind` required fields (`embedded` / `generated` /
+  `runtime-service`), and exposes a `verify_artifact` API that re-hashes the
+  bytes at the recorded `path`. Other crates can resolve manifest ids to a
+  pinned `(path, sha256, source)` tuple.
+- A `check-manifest` binary (`make manifest-check`, wired into `make ci`)
+  walks every artifact and fails on missing files, hash drift, or byte-size
+  drift. Editing a data file without updating its `sha256` in the same PR is
+  now a CI failure.
+- `DATA_SOURCES.md`, `CONTRIBUTING.md`, `AGENTS.md`, and `ARCHITECTURE.md`
+  are updated to point at the live manifest. The catalog backend design
+  already calls for manifest references; the manifest now provides the
+  stable artifact ids those references will use.
+
+Validation:
+
+- `crates/manifest` unit tests pin the schema (duplicate ids, missing `path`
+  on `embedded`, missing `preprocessing` on `generated`, runtime-service with
+  a forbidden `path`, future schema version);
+- `repository_manifest` integration test loads the real `data/manifest.toml`,
+  walks every entry, and asserts SHA-256s match the committed bytes. This
+  runs under `cargo test --workspace` so unaccounted-for data drift surfaces
+  even without invoking `make manifest-check` directly.
+
+Primary implementation areas:
+
+- `crates/manifest/src/lib.rs`
+- `crates/manifest/src/bin/check-manifest.rs`
+- `crates/manifest/tests/repository_manifest.rs`
+- `data/manifest.toml`
+- `Makefile` (`manifest-check` target wired into `ci`)
 
 ### Citation and standards baseline
 

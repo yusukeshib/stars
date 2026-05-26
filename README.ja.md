@@ -102,12 +102,12 @@ scripts            カタログ取得・README 画像生成・WASM build helper
 
 ## 現在の開発フォーカス
 
-Phase 1、Phase 1'、Phase 2、citation / standards documentation、notebook 再現性 example、catalog backend scaling scaffold、Phase 4 の全天投影、Phase 4 の地球外・銀河視点、そして Phase 4 の望遠鏡接眼レンズシミュレーションは実装済みです。次は、見た目と UX を小さく拡張しつつ、残りの platform hook を固めるのが自然です。
+Phase 1、Phase 1'、Phase 2、citation / standards documentation、notebook 再現性 example、catalog backend scaling scaffold、data provenance manifest、Phase 4 の全天投影、Phase 4 の地球外・銀河視点、そして Phase 4 の望遠鏡接眼レンズシミュレーションは実装済みです。次は、見た目と UX を小さく拡張しつつ、残りの platform hook を固めるのが自然です。
 
 1. Messier / NGC などの deep-sky overlay。
 2. accessibility、観測計画機能の polish、変光星 light curve。
 3. Phase 3 platform 向けの Python bindings と headless server mode。
-4. 大規模 Gaia / Tycho / Hipparcos ingest 前の data provenance manifest。
+4. data provenance manifest (`data/manifest.toml`) が入ったので、大規模 Gaia / Tycho / Hipparcos ingest も着手可能です。
 
 ## 開発に参加する場合
 

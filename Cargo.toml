@@ -4,6 +4,7 @@ members = [
     "crates/astronomy",
     "crates/catalog",
     "crates/common",
+    "crates/manifest",
     "crates/renderer",
     "apps/cli",
     "apps/viewer",
