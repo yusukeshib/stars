@@ -547,17 +547,24 @@ const NGC_RING_SEGMENTS: usize = 8;
 /// galaxy itself, and so a tiny planetary nebula remains clickably big.
 fn deep_sky_markers(magnitude_limit: f32) -> Vec<OverlayVertex> {
     // Pull Messier + NGC together so the marker pass is a single source of
-    // truth for the line-overlay output, and so the on-screen z-order has
-    // the Messier diamonds drawn last (rendered on top) when they overlap a
-    // background NGC ring.
+    // truth for the line-overlay output. Order does not change the visible
+    // result (the overlay pipeline blends additively, see `pipeline.rs`),
+    // but Messier is appended last to keep the vertex layout stable across
+    // catalogue regenerations.
     let mut objects = NgcBrightCatalog.objects(magnitude_limit);
     objects.extend(MessierCatalog.objects(magnitude_limit));
 
+    // Worst case: every retained object is a 16-vertex NGC ring; in the
+    // common case Messier diamonds (8 verts) dilute this, so the buffer
+    // may over-allocate by up to ~50% on a Messier-only slider position.
+    // The cost is negligible (a few KB) and only paid on config change.
     let mut verts = Vec::with_capacity(objects.len() * 16);
     for obj in objects {
-        // Use `partial_cmp` so NaN magnitudes are skipped without panicking.
-        // The build script forbids them today but this is the renderer's own
-        // contract.
+        // Re-check magnitude here even though `objects()` already filters:
+        // the catalog filter uses a direct `<=` (drops NaN-valued rows),
+        // and the renderer asserts the same contract via `partial_cmp` so
+        // a future catalog impl that forwards NaN magnitudes cannot leak
+        // an unrenderable marker into the overlay buffer.
         if !matches!(
             obj.magnitude.partial_cmp(&magnitude_limit),
             Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal),

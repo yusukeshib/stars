@@ -30,7 +30,7 @@ const OPENNGC_CATALOG: &str = "data/openngc_bright.csv";
 const OPENNGC_BINARY: &str = "openngc_bright.bin";
 const OPENNGC_BINARY_MAGIC: &[u8; 8] = b"NGCBR1\0\0";
 
-/// Per-object record (16 bytes) shared by Messier and OpenNGC bright tables:
+/// Per-object record (14 bytes) shared by Messier and OpenNGC bright tables:
 ///
 /// ```text
 ///   i16 x 3   J2000 unit-vector position (quantised by i16::MAX)
