@@ -23,6 +23,7 @@
 - 地球外の `galactic-north` / `custom-external` 視点による、IAU 銀河座標系パーセクスケールカメラからの局所的な天の川円盤表示。
 - OTA と接眼レンズの組み合わせから倍率、プレートスケール、射出瞳、実視野を求める望遠鏡接眼レンズシミュレーション。
 - CLI / desktop / web で共有できる schema-versioned JSON session と、短い共有向けの Web session URL。
+- Web UI の英語 / 日本語バイリンガル対応。ブラウザ言語の自動判定、共有用 `?lang=en|ja` URL パラメータ、設定パネル内の言語スイッチャーを備えます。
 - 決定的な validation / demo 用 scene preset、notebook 再現性 example、catalog backend scaling scaffold、任意実行の screenshot review 用 gallery。
 - 引用用 metadata、Zenodo release archive 用 metadata、モデル選択を確認する standards-compliance page。
 
