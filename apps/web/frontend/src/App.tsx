@@ -142,6 +142,7 @@ function loadSessionFromUrl(): UrlSession | null {
     "overlays",
     "grid",
     "overlayOpacity",
+    "deepSkyMag",
     "planets",
     "projection",
     "viewpoint",
@@ -181,6 +182,13 @@ function loadSessionFromUrl(): UrlSession | null {
     layers: overlayLayers.length > 0 ? overlayLayers : DEFAULT_OVERLAY_CONFIG.layers,
     gridStepDeg: numberParam(params, "grid", DEFAULT_OVERLAY_CONFIG.gridStepDeg, 1, 90),
     opacity: numberParam(params, "overlayOpacity", DEFAULT_OVERLAY_CONFIG.opacity, 0, 1),
+    deepSkyMagnitudeLimit: numberParam(
+      params,
+      "deepSkyMag",
+      DEFAULT_OVERLAY_CONFIG.deepSkyMagnitudeLimit,
+      -5,
+      99,
+    ),
   };
   const jd = Number(params.get("jd"));
   const eyepieceParam = params.get("eyepiece");
@@ -251,6 +259,7 @@ function sessionUrl({ observer, view, overlays, atmosphere, planets, projection,
   url.searchParams.set("overlays", overlays.layers.join(","));
   url.searchParams.set("grid", overlays.gridStepDeg.toFixed(0));
   url.searchParams.set("overlayOpacity", overlays.opacity.toFixed(2));
+  url.searchParams.set("deepSkyMag", overlays.deepSkyMagnitudeLimit.toFixed(1));
   url.searchParams.set("planets", planets.enabled ? "on" : "off");
   url.searchParams.set("projection", projection.projection);
   url.searchParams.set("viewpoint", projection.viewpoint);

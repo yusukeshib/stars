@@ -446,6 +446,67 @@ Validation:
 
 ## Phase 4 — Advanced visual features
 
+### Messier deep-sky overlay
+
+Implemented the first slice of P4-03: a Messier deep-sky overlay with
+diamond markers, text labels, and a V-magnitude density slider exposed in
+every host.
+
+Shipped capabilities:
+
+- `crates/renderer/data/messier.csv` carries 110 Messier objects (J2000 RA /
+  Dec, V magnitude, major-axis size, type, NGC id where available) sourced
+  from the OpenNGC Messier subset with M40 / M45 / M102 / M73 backfilled
+  from NGC 2000.0 and SEDS standard values. The build script compacts the
+  CSV into the i16 binary `messier.bin` consumed by `renderer::deepsky`.
+- `OverlayKind::DeepSkyObjects` renders a diamond outline per object,
+  scaled by the catalogued major axis and clamped so M31 (≈178′) does not
+  paint a sky-spanning marker while M1 (≈8′) remains visible.
+- `OverlayKind::DeepSkyLabels` feeds `M1`, `M31`, … through the existing
+  screen-space text-placement pass, paired with the marker palette so the
+  number visually links to its diamond.
+- `OverlayConfig::deep_sky_magnitude_limit` is the density control. The
+  default is 7.0 (dark-sky naked-eye showpieces survive: M31, M42, M44,
+  M45, M13); the renderer clamps the value to `[-5.0, 99.0]` and replaces
+  NaN with the default before the marker / label builders see it.
+- Wiring: CLI / desktop `--deep-sky-magnitude-limit` flag, web overlay
+  panel adds a "Deep-sky (Messier)" group plus a magnitude slider, and the
+  session JSON schema gains an optional `deepSkyMagnitudeLimit` field that
+  falls back to the renderer default for pre-existing sessions.
+- `data/manifest.toml` records the new `messier-catalog` artifact; all 13
+  scene preset JSONs were re-exported to include the new field.
+
+Validation:
+
+- `renderer::deepsky` unit tests pin the 110-object count, exact M-number
+  coverage 1..=110, unit-length positions, M31 / M42 / M45 spot checks
+  against published J2000 positions and classifications, and the i16
+  magnitude / size quantisation round-trip.
+- `renderer::overlay` unit tests pin the diamond segment count, the
+  monotonicity of the magnitude-limit gate (-10 → 0 markers; 2.0 → only
+  M45; 99.0 → every object), NaN-safe gating, the `sanitised_deep_sky_limit`
+  clamp / NaN replacement, and the orthonormality of the tangent basis used
+  to lay out markers (including the celestial-pole fallback path).
+- `stars-host-common::overlay_arg_round_trips` and the renderer's
+  `kebab_str_round_trips_every_variant` test grow to cover
+  `deep-sky-objects` / `deep-sky-labels`.
+
+Primary implementation areas:
+
+- `crates/renderer/data/messier.csv`
+- `crates/renderer/build.rs`
+- `crates/renderer/src/deepsky.rs`
+- `crates/renderer/src/overlay.rs`
+- `crates/renderer/src/text.rs`
+- `crates/common/src/{lib,presets,session}.rs`
+- `apps/{cli,viewer}/src/main.rs`
+- `apps/web/src/lib.rs`
+- `apps/web/frontend/src/observer.ts`, `App.tsx`, `session.ts`, `storage.ts`,
+  `stars-web.d.ts`, `components/{OverlayToggles,StarCanvas}.tsx`
+
+Follow-up: the row in `ROADMAP.md` notes that NGC / IC ingest under the
+same manifest pattern is tracked separately.
+
 ### Full-sky projections
 
 Implemented the first Phase 4 visual feature: selectable screen projections.

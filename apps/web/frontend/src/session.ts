@@ -223,6 +223,9 @@ function parseOverlays(value: unknown): OverlayConfig {
     layers: v.layers.filter((layer) => layer !== "cardinals"),
     gridStepDeg: inRange(v.gridStepDeg, 1, 90) ? v.gridStepDeg : DEFAULT_OVERLAY_CONFIG.gridStepDeg,
     opacity: inRange(v.opacity, 0, 1) ? v.opacity : DEFAULT_OVERLAY_CONFIG.opacity,
+    deepSkyMagnitudeLimit: inRange(v.deepSkyMagnitudeLimit, -5, 99)
+      ? v.deepSkyMagnitudeLimit
+      : DEFAULT_OVERLAY_CONFIG.deepSkyMagnitudeLimit,
   };
 }
 

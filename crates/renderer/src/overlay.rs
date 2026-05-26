@@ -19,6 +19,7 @@ use wgpu::util::DeviceExt;
 
 use crate::camera::Camera;
 use crate::constellations::{constellation_boundaries, constellation_lines, ConstellationSegment};
+use crate::deepsky::messier_objects;
 
 /// Mean obliquity of the ecliptic **at J2000.0**, IAU 2006 value
 /// (ε₀ = 84381.406″ = 23.4392911°), in radians.
@@ -49,6 +50,27 @@ const EQUATORIAL_TO_GALACTIC_ROWS: [[f64; 3]; 3] = [
 const GRID_STEP_MIN_DEG: f64 = 1.0;
 const GRID_STEP_MAX_DEG: f64 = 90.0;
 
+/// Inclusive bounds clamped onto `OverlayConfig::deep_sky_magnitude_limit`.
+/// The lower bound is generous so even a pathological caller cannot turn off
+/// the layer through the magnitude knob (use the layer toggle for that); the
+/// upper bound is high enough to show every Messier object.
+const DEEP_SKY_MAG_MIN: f32 = -5.0;
+const DEEP_SKY_MAG_MAX: f32 = 99.0;
+
+/// Default Messier magnitude cutoff: visible to the eye in a moderately dark
+/// sky. Brighter showpieces (M31, M42, M45, M44, M13) survive; the dimmest
+/// half of the catalogue is hidden until the user opts in by raising the
+/// limit. Chosen to stay close to the naked-eye limiting magnitude in
+/// suburban skies.
+pub const DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT: f32 = 7.0;
+
+/// Marker half-size bounds in arcminutes. The lower bound keeps small
+/// objects (M1 ≈ 8') visible at moderate zoom without becoming invisible
+/// dots; the upper bound stops large objects (M31 ≈ 178', M45 ≈ 110') from
+/// drawing a sky-spanning diamond that hides everything inside.
+const DEEP_SKY_MARKER_MIN_ARCMIN: f32 = 12.0;
+const DEEP_SKY_MARKER_MAX_ARCMIN: f32 = 60.0;
+
 /// Which overlay layers to draw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OverlayKind {
@@ -74,6 +96,12 @@ pub enum OverlayKind {
     ConstellationLines,
     /// IAU/Delporte constellation boundaries embedded by the renderer crate.
     ConstellationBoundaries,
+    /// Diamond markers for Messier deep-sky objects whose V magnitude is
+    /// brighter than [`OverlayConfig::deep_sky_magnitude_limit`].
+    DeepSkyObjects,
+    /// Text labels (`M1`, `M31`, …) for Messier deep-sky objects whose V
+    /// magnitude is brighter than [`OverlayConfig::deep_sky_magnitude_limit`].
+    DeepSkyLabels,
     /// Names/designations for the brightest catalogue stars.
     StarLabels,
     /// Names for Mercury through Neptune at their apparent positions.
@@ -104,6 +132,8 @@ impl OverlayKind {
             OverlayKind::GalacticEquator => "galactic-equator",
             OverlayKind::ConstellationLines => "constellation-lines",
             OverlayKind::ConstellationBoundaries => "constellation-boundaries",
+            OverlayKind::DeepSkyObjects => "deep-sky-objects",
+            OverlayKind::DeepSkyLabels => "deep-sky-labels",
             OverlayKind::StarLabels => "star-labels",
             OverlayKind::PlanetLabels => "planet-labels",
             OverlayKind::ConstellationLabels => "constellation-labels",
@@ -126,6 +156,8 @@ impl OverlayKind {
             "galactic-equator" => OverlayKind::GalacticEquator,
             "constellation-lines" => OverlayKind::ConstellationLines,
             "constellation-boundaries" => OverlayKind::ConstellationBoundaries,
+            "deep-sky-objects" => OverlayKind::DeepSkyObjects,
+            "deep-sky-labels" => OverlayKind::DeepSkyLabels,
             "star-labels" => OverlayKind::StarLabels,
             "planet-labels" => OverlayKind::PlanetLabels,
             "constellation-labels" => OverlayKind::ConstellationLabels,
@@ -144,6 +176,12 @@ pub struct OverlayConfig {
     pub grid_step_deg: f64,
     /// Global multiplier on line-overlay alpha. Text labels remain fully opaque for legibility.
     pub opacity: f32,
+    /// V magnitude cutoff for [`OverlayKind::DeepSkyObjects`] and
+    /// [`OverlayKind::DeepSkyLabels`]: only Messier objects with `mag <= limit`
+    /// are drawn. Defaults to [`DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT`]; clamped
+    /// to `[-5.0, 99.0]` at apply time so a tampered WASM caller cannot
+    /// disable the layer with NaN or crash the builder.
+    pub deep_sky_magnitude_limit: f32,
 }
 
 impl Default for OverlayConfig {
@@ -156,6 +194,7 @@ impl Default for OverlayConfig {
             ],
             grid_step_deg: 15.0,
             opacity: 0.6,
+            deep_sky_magnitude_limit: DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT,
         }
     }
 }
@@ -315,6 +354,7 @@ impl OverlayRenderer {
         let step_deg = config
             .grid_step_deg
             .clamp(GRID_STEP_MIN_DEG, GRID_STEP_MAX_DEG);
+        let deep_sky_limit = sanitised_deep_sky_limit(config.deep_sky_magnitude_limit);
         // Linear scan because the variant set is tiny (≤7 entries today); avoids
         // taking a hash dependency for a deduplication that runs at most once
         // per overlay-config change.
@@ -324,7 +364,7 @@ impl OverlayRenderer {
                 continue;
             }
             seen.push(*kind);
-            let (frame, verts, rgb) = build_layer(*kind, step_deg);
+            let (frame, verts, rgb) = build_layer(*kind, step_deg, deep_sky_limit);
             if verts.is_empty() {
                 continue;
             }
@@ -407,9 +447,21 @@ impl OverlayRenderer {
 // Layer builders. Each returns (frame, vertices, rgb).
 // ---------------------------------------------------------------------------
 
+/// Apply the [`DEEP_SKY_MAG_MIN`] / [`DEEP_SKY_MAG_MAX`] clamp and replace
+/// NaN with the default. The marker builder needs a finite finite-comparison
+/// threshold or it would silently render nothing.
+pub(crate) fn sanitised_deep_sky_limit(limit: f32) -> f32 {
+    if limit.is_nan() {
+        DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT
+    } else {
+        limit.clamp(DEEP_SKY_MAG_MIN, DEEP_SKY_MAG_MAX)
+    }
+}
+
 fn build_layer(
     kind: OverlayKind,
     grid_step_deg: f64,
+    deep_sky_magnitude_limit: f32,
 ) -> (OverlayFrame, Vec<OverlayVertex>, [f32; 3]) {
     match kind {
         OverlayKind::Horizon => (
@@ -462,12 +514,94 @@ fn build_layer(
             segments_to_vertices(&constellation_boundaries()),
             [0.45, 0.45, 0.55],
         ),
-        OverlayKind::StarLabels
+        OverlayKind::DeepSkyObjects => (
+            OverlayFrame::Equatorial,
+            deep_sky_markers(deep_sky_magnitude_limit),
+            [0.45, 0.85, 0.55],
+        ),
+        OverlayKind::DeepSkyLabels
+        | OverlayKind::StarLabels
         | OverlayKind::PlanetLabels
         | OverlayKind::ConstellationLabels
         | OverlayKind::CardinalLabels
         | OverlayKind::DegreeLabels => (OverlayFrame::Horizontal, Vec::new(), [1.0, 1.0, 1.0]),
     }
+}
+
+/// Build a diamond outline marker (4 line segments per object) for every
+/// Messier object whose V magnitude is at most `magnitude_limit`.
+///
+/// The marker lives in J2000 equatorial coordinates and is sized from the
+/// object's catalogued major axis, clamped to
+/// `[DEEP_SKY_MARKER_MIN_ARCMIN, DEEP_SKY_MARKER_MAX_ARCMIN]` so a fully
+/// resolved M31 does not paint a sky-spanning diamond that obscures the
+/// galaxy itself, and so a tiny PN remains clickably big.
+fn deep_sky_markers(magnitude_limit: f32) -> Vec<OverlayVertex> {
+    let objects = messier_objects();
+    let mut verts = Vec::with_capacity(objects.len() * 8);
+    for obj in objects {
+        // Use `partial_cmp` so NaN magnitudes are skipped without panicking.
+        // The build script forbids them today but this is the renderer's own
+        // contract.
+        if !matches!(
+            obj.magnitude.partial_cmp(&magnitude_limit),
+            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal),
+        ) {
+            continue;
+        }
+        let half_arcmin =
+            (obj.size_arcmin * 0.5).clamp(DEEP_SKY_MARKER_MIN_ARCMIN, DEEP_SKY_MARKER_MAX_ARCMIN);
+        let half_rad = half_arcmin * std::f32::consts::PI / (180.0 * 60.0);
+        let p = obj.position;
+        let (u, v) = tangent_basis(p);
+        let offset = |scale_u: f32, scale_v: f32| -> [f32; 3] {
+            let q = [
+                p[0] + half_rad * (scale_u * u[0] + scale_v * v[0]),
+                p[1] + half_rad * (scale_u * u[1] + scale_v * v[1]),
+                p[2] + half_rad * (scale_u * u[2] + scale_v * v[2]),
+            ];
+            // Re-normalise so the result stays on the unit sphere; at the
+            // marker sizes used here the correction is ~10⁻⁴ but the overlay
+            // shader and downstream tests assume unit length.
+            let r = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2]).sqrt();
+            [q[0] / r, q[1] / r, q[2] / r]
+        };
+        let top = offset(0.0, 1.0);
+        let right = offset(1.0, 0.0);
+        let bottom = offset(0.0, -1.0);
+        let left = offset(-1.0, 0.0);
+        for (a, b) in [(top, right), (right, bottom), (bottom, left), (left, top)] {
+            verts.push(overlay_vertex(a));
+            verts.push(overlay_vertex(b));
+        }
+    }
+    attach_segment_partners(verts)
+}
+
+/// Build a right-handed orthonormal tangent frame `(u, v)` at the unit
+/// vector `p` on the celestial sphere.
+///
+/// `u` points roughly east (toward increasing RA in the tangent plane);
+/// `v` points roughly north. Near a celestial pole the cross product with
+/// the z axis vanishes, so we fall back to the x axis.
+fn tangent_basis(p: [f32; 3]) -> ([f32; 3], [f32; 3]) {
+    // u' = ẑ × p, scaled later. If p is along ẑ, fall back to x̂.
+    let mut u_raw = [-p[1], p[0], 0.0];
+    let r2 = u_raw[0] * u_raw[0] + u_raw[1] * u_raw[1];
+    if r2 < 1.0e-8 {
+        u_raw = [1.0, 0.0, 0.0];
+    }
+    let r = (u_raw[0] * u_raw[0] + u_raw[1] * u_raw[1] + u_raw[2] * u_raw[2]).sqrt();
+    let u = [u_raw[0] / r, u_raw[1] / r, u_raw[2] / r];
+    // v = p × u (right-handed).
+    let v_raw = [
+        p[1] * u[2] - p[2] * u[1],
+        p[2] * u[0] - p[0] * u[2],
+        p[0] * u[1] - p[1] * u[0],
+    ];
+    let rv = (v_raw[0] * v_raw[0] + v_raw[1] * v_raw[1] + v_raw[2] * v_raw[2]).sqrt();
+    let v = [v_raw[0] / rv, v_raw[1] / rv, v_raw[2] / rv];
+    (u, v)
 }
 
 // ---------------------------------------------------------------------------
@@ -778,6 +912,8 @@ mod tests {
             OverlayKind::GalacticEquator,
             OverlayKind::ConstellationLines,
             OverlayKind::ConstellationBoundaries,
+            OverlayKind::DeepSkyObjects,
+            OverlayKind::DeepSkyLabels,
             OverlayKind::StarLabels,
             OverlayKind::PlanetLabels,
             OverlayKind::ConstellationLabels,
@@ -847,6 +983,85 @@ mod tests {
                 (r - 1.0).abs() < 1e-4,
                 "constellation vertex is not unit length"
             );
+        }
+    }
+
+    // ---- deep-sky marker tests ----
+
+    fn assert_unit_length(vertices: &[OverlayVertex], context: &str) {
+        for v in vertices {
+            let r = (v.position[0].powi(2) + v.position[1].powi(2) + v.position[2].powi(2)).sqrt();
+            assert!(
+                (r - 1.0).abs() < 1.0e-3,
+                "{context}: vertex {:?} not unit length (r={r})",
+                v.position
+            );
+        }
+    }
+
+    #[test]
+    fn deep_sky_markers_at_show_all_limit_have_expected_segment_count() {
+        // Every Messier object → 4 diamond segments → 8 vertices = 880 verts.
+        let v = deep_sky_markers(99.0);
+        assert_eq!(v.len(), 110 * 8);
+        assert_eq!(v.len() % 2, 0);
+        assert_unit_length(&v, "deep_sky_markers(99.0)");
+    }
+
+    #[test]
+    fn deep_sky_markers_respect_magnitude_limit() {
+        // At limit -10, no Messier object qualifies (brightest, M45, is ~1.6).
+        let none = deep_sky_markers(-10.0);
+        assert!(none.is_empty());
+        // At limit 2.0, only M45 (Pleiades, mag ≈1.6) survives → 1 × 8 = 8 verts.
+        let only_m45 = deep_sky_markers(2.0);
+        assert_eq!(only_m45.len(), 8);
+        // At default (7.0), the count must be strictly between the limit-2
+        // and limit-99 counts — keeps the contract that the slider does
+        // something monotonic without pinning a precise number that drifts
+        // when the catalogue magnitudes change.
+        let default = deep_sky_markers(DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT);
+        assert!(default.len() > 8 && default.len() < 110 * 8);
+    }
+
+    #[test]
+    fn deep_sky_markers_skip_nan_and_inf() {
+        // NaN must not pass the threshold check (the `!(a <= b)` invariant).
+        let v = deep_sky_markers(f32::NAN);
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn sanitised_deep_sky_limit_clamps_and_replaces_nan() {
+        assert_eq!(sanitised_deep_sky_limit(7.0), 7.0);
+        assert_eq!(sanitised_deep_sky_limit(-99.0), DEEP_SKY_MAG_MIN);
+        assert_eq!(sanitised_deep_sky_limit(999.0), DEEP_SKY_MAG_MAX);
+        assert_eq!(
+            sanitised_deep_sky_limit(f32::NAN),
+            DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT
+        );
+    }
+
+    #[test]
+    fn tangent_basis_is_orthonormal_and_falls_back_at_pole() {
+        for p in [
+            [1.0_f32, 0.0, 0.0],
+            [0.0_f32, 1.0, 0.0],
+            [0.0_f32, 0.0, 1.0],  // pole — fallback path
+            [0.0_f32, 0.0, -1.0], // pole — fallback path
+            [0.5_f32, 0.5, 0.707_106_77],
+        ] {
+            let (u, v) = tangent_basis(p);
+            // Unit length.
+            let lu = (u[0] * u[0] + u[1] * u[1] + u[2] * u[2]).sqrt();
+            let lv = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            assert!((lu - 1.0).abs() < 1.0e-5);
+            assert!((lv - 1.0).abs() < 1.0e-5);
+            // Orthogonal to p and to each other.
+            let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+            assert!(dot(u, p).abs() < 1.0e-5);
+            assert!(dot(v, p).abs() < 1.0e-5);
+            assert!(dot(u, v).abs() < 1.0e-5);
         }
     }
 }

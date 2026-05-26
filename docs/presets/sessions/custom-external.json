@@ -23,7 +23,8 @@
   "overlays": {
     "layers": [],
     "gridStepDeg": 15.0,
-    "opacity": 0.0
+    "opacity": 0.0,
+    "deepSkyMagnitudeLimit": 7.0
   },
   "projection": {
     "projection": "perspective",

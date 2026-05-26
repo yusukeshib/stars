@@ -18,6 +18,9 @@ const CONSTELLATION_TABLES: &[(&str, &str, &[u8; 8])] = &[
 
 const HYG_CATALOG: &str = "../catalog/data/hyg_v42.csv";
 const STAR_LABEL_COUNT: usize = 50;
+const MESSIER_CATALOG: &str = "data/messier.csv";
+const MESSIER_BINARY: &str = "messier.bin";
+const MESSIER_BINARY_MAGIC: &[u8; 8] = b"MSSR1\0\0\0";
 
 const CONSTELLATION_NAMES: &[(&str, &str)] = &[
     ("And", "Andromeda"),
@@ -139,10 +142,153 @@ fn main() {
     }
 
     println!("cargo:rerun-if-changed={HYG_CATALOG}");
-    write_label_catalog();
+    println!("cargo:rerun-if-changed={MESSIER_CATALOG}");
+    let messier_rows = read_messier_rows(MESSIER_CATALOG);
+    write_messier_binary(&messier_rows);
+    write_label_catalog(&messier_rows);
 }
 
-fn write_label_catalog() {
+// ---------------------------------------------------------------------------
+// Messier catalog: source CSV → OUT_DIR/messier.bin
+//
+// The binary format mirrors the constellation tables so the renderer's
+// decoder stays small: 8-byte magic + 4-byte LE count + N records.
+//
+// Per-object record (24 bytes):
+//   i16 × 3   J2000 unit-vector position (quantised by i16::MAX)
+//   i16       Messier number (1..=110)
+//   i16       NGC number (-1 if no NGC entry)
+//   i16       magnitude × 100 (signed; -1 → unknown if ever needed)
+//   i16       major-axis size in arcminutes × 10 (max ~3276 arcmin = 54.6°,
+//             well above the largest Messier object Pleiades ≈ 110')
+//   u8        kind tag (see MessierKind in src/deepsky.rs)
+//   u8        padding
+//
+// Quantisation precision: positions are accurate to ~10⁻⁴ of a unit sphere
+// (≈0.6 arcsec) which is far below the renderer's marker scale.
+// ---------------------------------------------------------------------------
+
+// The build script only needs the columns it emits into either `messier.bin`
+// (consumed by the marker pass) or `label_data.rs` (consumed by the text
+// pass). Adding the `name` / `ngc` / `kind_tag` fields back is the natural
+// extension point when richer Messier metadata is exposed (P3-02 identifier
+// preservation, future hover/copy UI).
+#[derive(Debug, Clone)]
+struct MessierRow {
+    m: u16,
+    ngc: Option<u16>,
+    ra_hours: f64,
+    dec_deg: f64,
+    mag: f64,
+    kind_tag: u8,
+    size_arcmin: f64,
+}
+
+fn read_messier_rows(input: &str) -> Vec<MessierRow> {
+    let text = fs::read_to_string(input).expect("read Messier catalog");
+    let mut rows = Vec::new();
+    let mut header: Option<Vec<String>> = None;
+    for (line_number, raw_line) in text.lines().enumerate() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if header.is_none() {
+            header = Some(trimmed.split(',').map(|s| s.trim().to_string()).collect());
+            continue;
+        }
+        let headers = header.as_ref().expect("header set above");
+        let fields: Vec<String> = trimmed.split(',').map(clean_csv_field).collect();
+        let get = |name: &str| -> &str {
+            let idx = headers
+                .iter()
+                .position(|h| h == name)
+                .unwrap_or_else(|| panic!("{input}: missing column {name}"));
+            fields.get(idx).map(String::as_str).unwrap_or("").trim()
+        };
+        let parse_f64 = |name: &str| -> f64 {
+            get(name)
+                .parse::<f64>()
+                .unwrap_or_else(|_| panic!("{input}: invalid {name} at line {}", line_number + 1))
+        };
+        let m_value: u16 = get("m")
+            .parse()
+            .unwrap_or_else(|_| panic!("{input}: invalid m at line {}", line_number + 1));
+        if !(1..=110).contains(&m_value) {
+            panic!(
+                "{input}: Messier number {m_value} out of range at line {}",
+                line_number + 1
+            );
+        }
+        let ngc_raw = get("ngc");
+        let ngc = ngc_raw
+            .strip_prefix("NGC")
+            .and_then(|s| s.parse::<u16>().ok());
+        let kind_tag = match get("type") {
+            "OC" => 1u8,
+            "GC" => 2,
+            "G" => 3,
+            "N" => 4,
+            "PN" => 5,
+            "SNR" => 6,
+            _ => 0,
+        };
+        rows.push(MessierRow {
+            m: m_value,
+            ngc,
+            ra_hours: parse_f64("ra_hours"),
+            dec_deg: parse_f64("dec_deg"),
+            mag: parse_f64("mag"),
+            kind_tag,
+            size_arcmin: parse_f64("size_arcmin"),
+        });
+    }
+    if rows.is_empty() {
+        panic!("{input}: no Messier rows parsed");
+    }
+    // Guarantee a stable on-disk order so the binary hash is reproducible.
+    rows.sort_by_key(|r| r.m);
+    // Sanity: every Messier number 1..=110 present exactly once.
+    let mut seen = [false; 111];
+    for row in &rows {
+        let idx = row.m as usize;
+        if seen[idx] {
+            panic!("{input}: duplicate Messier number M{idx}");
+        }
+        seen[idx] = true;
+    }
+    for (n, present) in seen.iter().enumerate().skip(1) {
+        if !present {
+            panic!("{input}: missing Messier number M{n}");
+        }
+    }
+    rows
+}
+
+fn write_messier_binary(rows: &[MessierRow]) {
+    const RECORD_LEN: usize = 6 + 4 * 2 + 2;
+    let out_path = Path::new(&env::var("OUT_DIR").expect("OUT_DIR is set")).join(MESSIER_BINARY);
+    let mut bytes = Vec::with_capacity(12 + rows.len() * RECORD_LEN);
+    bytes.extend_from_slice(MESSIER_BINARY_MAGIC);
+    bytes.extend_from_slice(&(rows.len() as u32).to_le_bytes());
+    for row in rows {
+        let unit = radec_to_unit(row.ra_hours, row.dec_deg);
+        for v in unit {
+            bytes.extend_from_slice(&quantize_unit_f32(v).to_le_bytes());
+        }
+        bytes.extend_from_slice(&(row.m as i16).to_le_bytes());
+        bytes.extend_from_slice(&(row.ngc.map(|n| n as i16).unwrap_or(-1)).to_le_bytes());
+        let mag_q = (row.mag * 100.0).round().clamp(-32768.0, 32767.0) as i16;
+        bytes.extend_from_slice(&mag_q.to_le_bytes());
+        let size_q = (row.size_arcmin * 10.0).round().clamp(0.0, 32767.0) as i16;
+        bytes.extend_from_slice(&size_q.to_le_bytes());
+        bytes.push(row.kind_tag);
+        bytes.push(0);
+    }
+    fs::write(out_path, bytes).expect("write compact Messier catalog");
+}
+
+fn write_label_catalog(messier_rows: &[MessierRow]) {
     let rows = read_hyg_rows(HYG_CATALOG);
     let mut stars = rows.clone();
     stars.sort_by(|a, b| a.mag.total_cmp(&b.mag));
@@ -222,6 +368,22 @@ fn write_label_catalog() {
         code.push_str(&format!(
             "    RawConstellationLabel {{ position: [{:.6}, {:.6}, {:.6}], text: {:?} }},\n",
             pos[0], pos[1], pos[2], text
+        ));
+    }
+    code.push_str("];\n");
+
+    // Messier label catalogue: "M1", "M31", ... rendered with the same text
+    // pipeline as star/constellation labels. The magnitude is forwarded as
+    // the priority key so brighter objects survive screen-space culling first,
+    // matching the existing star-label policy.
+    code.push_str("pub(crate) struct RawMessierLabel { pub(crate) position: [f32; 3], pub(crate) text: &'static str, pub(crate) magnitude: f32 }\n");
+    code.push_str("pub(crate) const MESSIER_LABELS: &[RawMessierLabel] = &[\n");
+    for row in messier_rows {
+        let pos = radec_to_unit(row.ra_hours, row.dec_deg);
+        let label = format!("M{}", row.m);
+        code.push_str(&format!(
+            "    RawMessierLabel {{ position: [{:.6}, {:.6}, {:.6}], text: {:?}, magnitude: {:.3} }},\n",
+            pos[0], pos[1], pos[2], label, row.mag as f32
         ));
     }
     code.push_str("];\n");

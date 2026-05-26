@@ -1,5 +1,6 @@
 mod camera;
 mod constellations;
+mod deepsky;
 mod overlay;
 mod pipeline;
 mod renderer;
@@ -12,7 +13,7 @@ pub use camera::{
     Atmosphere, AtmospherePreset, Camera, ExternalViewpoint, EyepieceSimulation, LocalView,
     SkyProjection, SkyViewpoint,
 };
-pub use overlay::{OverlayConfig, OverlayKind};
+pub use overlay::{OverlayConfig, OverlayKind, DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT};
 pub use renderer::Renderer;
 pub use vertex::{
     build_star_instance, magnitude_to_render_params, RenderParams, StarInstance,

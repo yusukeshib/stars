@@ -5,7 +5,12 @@ declare module "stars-web" {
     static create(canvasId: string): Promise<StarView>;
     set_observer(latDeg: number, lngDeg: number, timeUnixMs: number): void;
     set_view(azimuthRad: number, altitudeRad: number, fovYRad: number): void;
-    set_overlays(layers: string[], gridStepDeg: number, opacity: number): void;
+    set_overlays(
+      layers: string[],
+      gridStepDeg: number,
+      opacity: number,
+      deepSkyMagnitudeLimit: number,
+    ): void;
     set_planets_enabled(enabled: boolean): void;
     set_eyepiece_simulation(
       enabled: boolean,

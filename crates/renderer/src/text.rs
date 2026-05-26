@@ -103,6 +103,12 @@ struct TextConfig {
     constellations: bool,
     cardinals: bool,
     degrees: bool,
+    /// Messier deep-sky labels ("M1", "M31", …).
+    deep_sky: bool,
+    /// V magnitude cutoff for the Messier deep-sky labels. Mirrors
+    /// [`OverlayConfig::deep_sky_magnitude_limit`] after the same NaN /
+    /// out-of-range sanitisation used by the line-marker pass.
+    deep_sky_magnitude_limit: f32,
     grid_step_deg: f64,
     opacity: f32,
 }
@@ -115,6 +121,10 @@ impl TextConfig {
             constellations: config.layers.contains(&OverlayKind::ConstellationLabels),
             cardinals: config.layers.contains(&OverlayKind::CardinalLabels),
             degrees: config.layers.contains(&OverlayKind::DegreeLabels),
+            deep_sky: config.layers.contains(&OverlayKind::DeepSkyLabels),
+            deep_sky_magnitude_limit: crate::overlay::sanitised_deep_sky_limit(
+                config.deep_sky_magnitude_limit,
+            ),
             grid_step_deg: config.grid_step_deg.clamp(1.0, 90.0),
             // Text is a legibility layer, not radiance or translucent geometry.
             // Keep labels fully opaque even when the line-overlay opacity slider
@@ -132,6 +142,8 @@ impl Default for TextConfig {
             constellations: false,
             cardinals: false,
             degrees: false,
+            deep_sky: false,
+            deep_sky_magnitude_limit: crate::overlay::DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT,
             grid_step_deg: 15.0,
             opacity: 0.6,
         }
@@ -517,6 +529,31 @@ impl TextRenderer {
                 });
             }
         }
+        if self.config.deep_sky {
+            let limit = self.config.deep_sky_magnitude_limit;
+            for label in MESSIER_LABELS {
+                if !matches!(
+                    label.magnitude.partial_cmp(&limit),
+                    Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal),
+                ) {
+                    // Skips NaN magnitudes without panicking; same policy as
+                    // the marker builder in `overlay::deep_sky_markers`.
+                    continue;
+                }
+                out.push(LabelCandidate {
+                    frame: LabelFrame::Equatorial,
+                    position: label.position,
+                    text: Cow::Borrowed(label.text),
+                    // Greenish-yellow, matching the deep-sky marker palette
+                    // so the marker + label visually pair together.
+                    color: [0.60, 0.92, 0.65, alpha],
+                    // Brighter (lower-mag) objects win the label-placement
+                    // tie-break against fainter ones.
+                    priority: label.magnitude,
+                    placement: LabelPlacement::LeftAlignedToAnchor,
+                });
+            }
+        }
         if self.config.degrees {
             let step = self.config.grid_step_deg.max(5.0).round() as i32;
             let mut az = step;
@@ -897,6 +934,16 @@ fn collect_static_test_candidates<'a>(out: &mut Vec<LabelCandidate<'a>>) {
             placement: LabelPlacement::Centered,
         });
     }
+    for label in MESSIER_LABELS {
+        out.push(LabelCandidate {
+            frame: LabelFrame::Equatorial,
+            position: label.position,
+            text: Cow::Borrowed(label.text),
+            color: [1.0; 4],
+            priority: label.magnitude,
+            placement: LabelPlacement::LeftAlignedToAnchor,
+        });
+    }
 }
 
 #[cfg(test)]
@@ -907,12 +954,15 @@ mod tests {
     fn generated_label_catalogs_are_populated() {
         assert_eq!(STAR_LABELS.len(), 50);
         assert!(CONSTELLATION_LABELS.len() >= 80);
+        assert_eq!(MESSIER_LABELS.len(), 110);
         assert!(STAR_LABELS
             .iter()
             .any(|label| label.text.contains("Sirius")));
         assert!(CONSTELLATION_LABELS
             .iter()
             .any(|label| label.text == "Orion"));
+        assert!(MESSIER_LABELS.iter().any(|l| l.text == "M31"));
+        assert!(MESSIER_LABELS.iter().any(|l| l.text == "M110"));
     }
 
     #[test]
