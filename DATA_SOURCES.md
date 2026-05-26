@@ -131,7 +131,7 @@ Maintenance rule:
 
 Repository location:
 
-- `crates/renderer/data/messier.csv`
+- `crates/catalog/data/messier.csv`
 
 Manifest id:
 
@@ -161,10 +161,11 @@ License:
 
 Implementation areas:
 
-- `crates/renderer/build.rs`
-- `crates/renderer/src/deepsky.rs`
-- `crates/renderer/src/overlay.rs`
-- `crates/renderer/src/text.rs`
+- `crates/catalog/build.rs` (emits `messier.bin`);
+- `crates/catalog/src/deepsky.rs` (`MessierCatalog` decoder + tests);
+- `crates/renderer/build.rs` (bakes the `M1`..`M110` label-position table);
+- `crates/renderer/src/overlay.rs` (4-segment diamond marker);
+- `crates/renderer/src/text.rs` (label rendering).
 
 Maintenance rules:
 
@@ -178,7 +179,75 @@ Maintenance rules:
   distribution well. Treat the values as catalogue-grade ordering, not
   photometric ground truth.
 
-Future NGC / IC ingest follows the same manifest pattern; see ROADMAP `V-42`.
+### Bright NGC / IC deep-sky subset
+
+Repository location:
+
+- `crates/catalog/data/openngc_bright.csv`
+
+Manifest id:
+
+- `openngc-bright-catalog` in `data/manifest.toml`.
+
+Used for:
+
+- `OverlayKind::DeepSkyObjects` markers and `OverlayKind::DeepSkyLabels` text;
+- ~1,250 NGC / IC objects rendered as 8-segment ring markers (distinct from
+  the Messier diamond shape) and `NGC7000`, `IC434`, … labels, filtered by
+  the same `OverlayConfig::deep_sky_magnitude_limit` slider as the Messier
+  overlay.
+
+Source:
+
+- OpenNGC (`mattiaverga/OpenNGC`) main `NGC.csv` + `addendum.csv`.
+  Filter (`scripts/extract-openngc-bright.py`):
+  - exclude Messier rows (covered by `messier-catalog`);
+  - exclude OpenNGC type codes `*`, `**`, `*Ass`, `NonEx`, `Other`;
+  - keep `min(V-Mag, B-Mag - 0.6) ≤ 11.5 mag` when either band is
+    published;
+  - keep emission / reflection / diffuse nebulae (`EmN`, `RfN`, `Neb`,
+    `HII`, `Cl+N`, `SNR`) with major axis ≥ 30 arcmin even when no
+    integrated photometry is published (sentinel magnitude = 99.00 so the
+    default density slider hides them).
+
+Citations:
+
+- Dreyer, J. L. E. 1888, MmRAS 49, 1 (original NGC);
+- Dreyer, J. L. E. 1908, MmRAS 59, 105 (IC);
+- Verga, M. (current), OpenNGC repository — modernised compilation.
+
+License:
+
+- Retained columns are factual numerical data (J2000 coordinates, V-band
+  magnitudes, major-axis sizes, classifications) treated as public-domain
+  factual values; OpenNGC is acknowledged as the upstream compilation.
+
+Implementation areas:
+
+- `scripts/extract-openngc-bright.py` (deterministic regenerator);
+- `crates/catalog/build.rs` (emits `openngc_bright.bin`);
+- `crates/catalog/src/deepsky.rs` (`NgcBrightCatalog` decoder + tests);
+- `crates/renderer/build.rs` (bakes the NGC / IC label-position table);
+- `crates/renderer/src/overlay.rs` (8-segment ring marker);
+- `crates/renderer/src/text.rs` (label rendering).
+
+Maintenance rules:
+
+- `scripts/extract-openngc-bright.py` is the single source of truth for the
+  committed CSV. Re-run with `--ngc <path>` / `--addendum <path>` against a
+  cached OpenNGC snapshot to get byte-stable output, then update the
+  manifest `sha256` and `bytes` fields together.
+- The committed subset is documented to miss a small number of famous
+  diffuse objects that OpenNGC marks as duplicates or lacks size /
+  photometry for (NGC 2244 Rosette cluster, IC 1396, IC 2118). The planned
+  runtime streaming backend in the V-42 follow-up PR will expose those
+  entries via the full OpenNGC catalogue without re-baking this subset.
+- Magnitudes are single-value approximations; for large emission nebulae
+  with sentinel magnitudes (e.g. NGC 7000, NGC 2237) the slider must be
+  opened past the sentinel to surface them.
+- Object names must follow `NGC<n>` or `IC<n>` form (suffix letters
+  allowed). Other OpenNGC designations (Caldwell, ESO, Melotte) are
+  skipped by the extraction script and belong to the runtime backend.
 
 ### IAU / Delporte constellation boundaries
 
@@ -387,9 +456,9 @@ row to `data/manifest.toml`:
 - Gaia DR3 catalog;
 - SIMBAD / VizieR identifier linking;
 - DE440 ephemeris data;
-- Messier catalog;
-- NGC / IC catalog;
 - AAVSO variable-star light curves;
+- full OpenNGC ~14,000-entry NGC / IC catalog (runtime-loaded streaming
+  backend, the V-42 follow-up to the shipped bright subset);
 - telescope / eyepiece preset data;
 - curated public demo-gallery session files;
 - large-catalog spatial indexes, LOD subsets, or WASM-specific extracts.

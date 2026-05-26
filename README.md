@@ -141,8 +141,9 @@ platform** (numerical engine + reach). The Visual identification overlays
 (`V-01`–`V-12`), dark-sky physical realism pipeline (`V-13`–`V-23`),
 atmospheric refraction and Sun / Moon / planet rendering (`V-29`–`V-36`),
 full-sky projections (`V-40`), out-of-Earth galactic and custom external
-viewpoints (`V-41`, `V-44`), and telescope eyepiece simulation (`V-43`) have
-shipped; the Messier slice of the deep-sky overlay (`V-42`) is in. The Library
+viewpoints (`V-41`, `V-44`), telescope eyepiece simulation (`V-43`), and the
+deep-sky overlay covering Messier objects plus the bright NGC / IC subset
+(`V-42`) have shipped. The Library
 track has shipped IAU-grade time / precession / nutation / aberration / proper
 motion (`L-01`–`L-05`), planning helpers (`L-07`, `L-08`), sharable JSON
 sessions, scene presets, the validation / demo gallery, citation metadata,
@@ -155,9 +156,9 @@ best work is:
    (`V-28`);
 2. atmospheric self-consistency: unified spectral extinction (`V-37`),
    Hošek-Wilkie daylight (`V-38`), light-pollution / Bortle (`V-39`);
-3. NGC / IC follow-up to the shipped Messier overlay (`V-42`),
-   accessibility (`L-24`), observation-planning polish (`L-09`), and
-   variable-star light curves (`L-20`);
+3. accessibility (`L-24`), observation-planning polish (`L-09`), the
+   runtime full-OpenNGC streaming backend that follows the embedded
+   `V-42` bright subset, and variable-star light curves (`L-20`);
 4. Python bindings (`L-21`) and headless server mode (`L-22`);
 5. large Gaia / Tycho / Hipparcos ingest (`L-17`) and identifier
    preservation (`L-18`) now that the data provenance manifest

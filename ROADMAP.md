@@ -112,8 +112,7 @@ side-effect, not the motivation.
 The Visual track is at "naked-eye physical realism is mostly there" — the
 remaining items are realism polish (`V-24`–`V-28`), the day/night
 optical-depth merge (`V-37`–`V-39`), niche visual features
-(`V-45`–`V-50`), the NGC / IC follow-up to the shipped Messier overlay
-(`V-42`), and rare phenomena (`V-47`–`V-49`).
+(`V-45`–`V-50`), and rare phenomena (`V-47`–`V-49`).
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
@@ -174,7 +173,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-39` | **Light pollution / Bortle map** | ⬜ |
 | `V-40` | Full-sky projections (Mollweide / Aitoff / Hammer) | ✅ |
 | `V-41` | Out-of-Earth galactic-north viewpoint | ✅ |
-| `V-42` | Deep-sky overlay (Messier shipped; NGC / IC follow-up) | ⏳ |
+| `V-42` | Deep-sky overlay (Messier + bright NGC / IC subset) | ✅ |
 | `V-43` | Telescope eyepiece simulation | ✅ |
 | `V-44` | Custom external viewpoint origin | ✅ |
 | `V-45` | **Telescope-side optical artifacts** | ⬜ |
@@ -1198,11 +1197,11 @@ Drimmel-Spergel + Reid arm-trace model.
 
 ---
 
-### `V-42` Deep-sky overlay — ⏳ Messier slice shipped; NGC / IC follow-up open
+### `V-42` Deep-sky overlay — ✅ done (Messier + bright NGC / IC subset)
 
-**Item.** Messier objects first, then NGC / IC with density controls.
-Each object renders as a small extended marker (size from catalog
-dimensions) plus a label.
+**Item.** Messier objects, plus a bright NGC / IC subset embedded
+alongside them, with density controls. Each object renders as a small
+extended marker (size from catalog dimensions) plus a label.
 
 **Scientific basis.** Messier 1781 (110 objects, well-documented historic
 catalogue); NGC / IC (Dreyer 1888 / 1908, modernised in OpenNGC under a
@@ -1213,39 +1212,57 @@ major / minor-axis fields.
 - Messier, C. 1781, *Catalogue des Nébuleuses et des Amas d'Étoiles*.
 - Dreyer, J. L. E. 1888, MmRAS 49, 1 (NGC); 1908, MmRAS 59, 105 (IC).
 - Frommert, H., Kronberg, C. (current), *SEDS Messier Database*.
-- OpenNGC (Casasola, contemporary maintained NGC / IC compilation).
+- Verga, M. (current), OpenNGC — maintained NGC / IC compilation.
 
-**Status — Messier (shipped, PR #48).**
+**Status — Messier slice (PR #48).**
 - 110 Messier objects rendered as diamond markers with `M1`..`M110` text
-  labels, gated by a V-magnitude density slider exposed in CLI / desktop
-  / web. Default magnitude limit 7.0 reveals the canonical naked-eye
+  labels, gated by a V-magnitude density slider exposed in CLI / desktop /
+  web. Default magnitude limit 7.0 reveals the canonical naked-eye
   showpieces; slider up to 99 shows every Messier object.
-- Embedded data: `crates/renderer/data/messier.csv` (sourced from
-  OpenNGC factual data with NGC 2000.0 / SEDS backfill), build-script-
-  compacted into a binary; build asserts every M number 1..=110 appears
-  exactly once.
-- Implementation: `renderer::deepsky`, `renderer::overlay`
-  (`DeepSkyObjects` / `DeepSkyLabels` variants, `deep_sky_magnitude_limit`),
-  `renderer::text`, `stars-host-common::session`
-  (`deepSkyMagnitudeLimit`), `apps/{cli,viewer,web}`.
-- Provenance: `messier-catalog` row in `data/manifest.toml`.
 
-**Open — NGC / IC follow-up.**
-- `crates/catalog/src/deepsky.rs`: extend the trait + Messier embedded
-  default with an optional NGC / IC streaming backend.
-- `data/manifest.toml`: OpenNGC snapshot row with SHA-256, source,
-  licence; ship a downloader rather than committing the full archive.
-- Reuse the existing magnitude slider for density control.
+**Status — NGC / IC subset (this PR).**
+- Trait abstraction: `catalog::deepsky::DeepSkyCatalog` with embedded
+  `MessierCatalog` and `NgcBrightCatalog` implementations. The renderer
+  consumes the trait so the planned runtime full-OpenNGC backend slots
+  in without further renderer churn.
+- Embedded data: `crates/catalog/data/openngc_bright.csv` (~1,250
+  objects, V ≤ 11.5 mag plus large diffuse nebulae lacking integrated
+  photometry, sentinel-magnitude tagged). Produced deterministically by
+  `scripts/extract-openngc-bright.py` from the upstream OpenNGC snapshot.
+- Marker shape differentiation: Messier objects keep their 4-segment
+  diamond; NGC / IC objects render as an 8-segment ring so the user reads
+  the catalogue at a glance without consulting the label.
+- Label tinting: Messier labels stay warm green; NGC / IC labels are a
+  slightly cooler teal so the marker / label pairing remains visible.
+- Density control: existing `OverlayConfig::deep_sky_magnitude_limit`
+  slider applies to both catalogues simultaneously — no new host
+  plumbing required.
+- Provenance: relocated `messier-catalog` row in `data/manifest.toml`
+  (now under `crates/catalog/data/`) plus the new `openngc-bright-catalog`
+  row with the extraction script as `preprocessing`.
 
 **Tests / validation.**
-- Shipped: build-script invariants on the Messier binary; M31 position
-  / extent vs. SEDS reference; visual scenes including the Andromeda
-  region.
-- Pending: NGC / IC roundtrip tests, density-slider behaviour at high
-  object counts.
+- `catalog::deepsky` unit tests pin Messier completeness, anchor objects
+  (NGC 7000, 253, 869 / 884, 5128, 1499, 6960, IC 434), the sentinel-
+  magnitude filter policy, and inclusive-magnitude filtering.
+- `renderer::overlay` updated tests pin the Messier diamond contribution
+  and a multiple-of-16 NGC ring contribution at the show-all magnitude
+  limit, NaN-safe gating, and slider monotonicity.
+- `renderer::text` asserts the deep-sky label table contains exactly 110
+  Messier entries plus the canonical NGC 7000 and IC 434 anchors.
+- `stars-manifest` integration tests re-verify both deep-sky CSV hashes
+  against the on-disk bytes.
 
-**Hosts wired.** CLI / viewer / web (Messier slice; NGC / IC follow-up
-will reuse the same host plumbing).
+**Hosts wired.** CLI / viewer / web (the existing density slider drives
+both Messier and NGC / IC overlays).
+
+**Follow-up.** A runtime streaming backend (`OpenNgcCsvCatalog`) for the
+full ~14,000-entry OpenNGC catalogue is the next PR. It will surface the
+Dup-marked objects and the famous diffuse nebulae with undersized
+upstream `MajAx` (NGC 2244 Rosette cluster, IC 1396, IC 2118 Witch Head)
+that the committed bright subset deliberately misses. Identifier
+preservation through the renderer (hover / click → NGC / PGC IDs) tracks
+separately as `L-18`.
 
 ---
 

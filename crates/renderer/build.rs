@@ -18,9 +18,17 @@ const CONSTELLATION_TABLES: &[(&str, &str, &[u8; 8])] = &[
 
 const HYG_CATALOG: &str = "../catalog/data/hyg_v42.csv";
 const STAR_LABEL_COUNT: usize = 50;
-const MESSIER_CATALOG: &str = "data/messier.csv";
-const MESSIER_BINARY: &str = "messier.bin";
-const MESSIER_BINARY_MAGIC: &[u8; 8] = b"MSSR1\0\0\0";
+// Deep-sky catalogues live in the `catalog` crate (see
+// `crates/catalog/data/`). The renderer only reads them here to bake the
+// label-position table consumed by `text.rs`; the binary marker tables are
+// emitted by the catalog crate's own build script.
+const MESSIER_CATALOG: &str = "../catalog/data/messier.csv";
+const OPENNGC_CATALOG: &str = "../catalog/data/openngc_bright.csv";
+/// Magnitudes brighter than this trigger label rendering at the default
+/// (low-density) screen budget. Sentinel-magnitude entries from OpenNGC
+/// stay below this threshold so they remain hidden until the user opens
+/// the density slider.
+const NGC_LABEL_MAG_CEILING: f32 = 90.0;
 
 const CONSTELLATION_NAMES: &[(&str, &str)] = &[
     ("And", "Andromeda"),
@@ -143,49 +151,38 @@ fn main() {
 
     println!("cargo:rerun-if-changed={HYG_CATALOG}");
     println!("cargo:rerun-if-changed={MESSIER_CATALOG}");
+    println!("cargo:rerun-if-changed={OPENNGC_CATALOG}");
     let messier_rows = read_messier_rows(MESSIER_CATALOG);
-    write_messier_binary(&messier_rows);
-    write_label_catalog(&messier_rows);
+    let ngc_rows = read_openngc_rows(OPENNGC_CATALOG);
+    write_label_catalog(&messier_rows, &ngc_rows);
 }
 
 // ---------------------------------------------------------------------------
-// Messier catalog: source CSV → OUT_DIR/messier.bin
+// Deep-sky label generation
 //
-// The binary format mirrors the constellation tables so the renderer's
-// decoder stays small: 8-byte magic + 4-byte LE count + N records.
-//
-// Per-object record (24 bytes):
-//   i16 × 3   J2000 unit-vector position (quantised by i16::MAX)
-//   i16       Messier number (1..=110)
-//   i16       NGC number (-1 if no NGC entry)
-//   i16       magnitude × 100 (signed; -1 → unknown if ever needed)
-//   i16       major-axis size in arcminutes × 10 (max ~3276 arcmin = 54.6°,
-//             well above the largest Messier object Pleiades ≈ 110')
-//   u8        kind tag (see MessierKind in src/deepsky.rs)
-//   u8        padding
-//
-// Quantisation precision: positions are accurate to ~10⁻⁴ of a unit sphere
-// (≈0.6 arcsec) which is far below the renderer's marker scale.
+// The renderer only needs each object's screen position, label string, and a
+// magnitude-priority key so the text-pass culling sees brighter objects
+// first. The catalog crate owns the binary marker tables, and the label
+// pipeline reads its CSVs solely to derive a static `RawDeepSkyLabel`
+// table baked into `OUT_DIR/label_data.rs`.
 // ---------------------------------------------------------------------------
 
-// The build script only needs the columns it emits into either `messier.bin`
-// (consumed by the marker pass) or `label_data.rs` (consumed by the text
-// pass). Adding the `name` / `ngc` / `kind_tag` fields back is the natural
-// extension point when richer Messier metadata is exposed (P3-02 identifier
-// preservation, future hover/copy UI).
+/// Internal label-row representation; only the fields the text overlay
+/// reads at compile time are retained.
 #[derive(Debug, Clone)]
-struct MessierRow {
-    m: u16,
-    ngc: Option<u16>,
+struct DeepSkyLabelRow {
+    text: String,
     ra_hours: f64,
     dec_deg: f64,
     mag: f64,
-    kind_tag: u8,
-    size_arcmin: f64,
 }
 
-fn read_messier_rows(input: &str) -> Vec<MessierRow> {
-    let text = fs::read_to_string(input).expect("read Messier catalog");
+fn read_deepsky_csv(
+    input: &str,
+    name_column: &str,
+    decode_label: impl Fn(&str, usize) -> String,
+) -> Vec<DeepSkyLabelRow> {
+    let text = fs::read_to_string(input).unwrap_or_else(|e| panic!("read {input}: {e}"));
     let mut rows = Vec::new();
     let mut header: Option<Vec<String>> = None;
     for (line_number, raw_line) in text.lines().enumerate() {
@@ -206,89 +203,56 @@ fn read_messier_rows(input: &str) -> Vec<MessierRow> {
                 .unwrap_or_else(|| panic!("{input}: missing column {name}"));
             fields.get(idx).map(String::as_str).unwrap_or("").trim()
         };
-        let parse_f64 = |name: &str| -> f64 {
+        let parse_f = |name: &str| -> f64 {
             get(name)
                 .parse::<f64>()
                 .unwrap_or_else(|_| panic!("{input}: invalid {name} at line {}", line_number + 1))
         };
-        let m_value: u16 = get("m")
-            .parse()
-            .unwrap_or_else(|_| panic!("{input}: invalid m at line {}", line_number + 1));
-        if !(1..=110).contains(&m_value) {
-            panic!(
-                "{input}: Messier number {m_value} out of range at line {}",
-                line_number + 1
-            );
-        }
-        let ngc_raw = get("ngc");
-        let ngc = ngc_raw
-            .strip_prefix("NGC")
-            .and_then(|s| s.parse::<u16>().ok());
-        let kind_tag = match get("type") {
-            "OC" => 1u8,
-            "GC" => 2,
-            "G" => 3,
-            "N" => 4,
-            "PN" => 5,
-            "SNR" => 6,
-            _ => 0,
-        };
-        rows.push(MessierRow {
-            m: m_value,
-            ngc,
-            ra_hours: parse_f64("ra_hours"),
-            dec_deg: parse_f64("dec_deg"),
-            mag: parse_f64("mag"),
-            kind_tag,
-            size_arcmin: parse_f64("size_arcmin"),
+        let label = decode_label(get(name_column), line_number + 1);
+        rows.push(DeepSkyLabelRow {
+            text: label,
+            ra_hours: parse_f("ra_hours"),
+            dec_deg: parse_f("dec_deg"),
+            mag: parse_f("mag"),
         });
     }
     if rows.is_empty() {
-        panic!("{input}: no Messier rows parsed");
-    }
-    // Guarantee a stable on-disk order so the binary hash is reproducible.
-    rows.sort_by_key(|r| r.m);
-    // Sanity: every Messier number 1..=110 present exactly once.
-    let mut seen = [false; 111];
-    for row in &rows {
-        let idx = row.m as usize;
-        if seen[idx] {
-            panic!("{input}: duplicate Messier number M{idx}");
-        }
-        seen[idx] = true;
-    }
-    for (n, present) in seen.iter().enumerate().skip(1) {
-        if !present {
-            panic!("{input}: missing Messier number M{n}");
-        }
+        panic!("{input}: no rows parsed");
     }
     rows
 }
 
-fn write_messier_binary(rows: &[MessierRow]) {
-    const RECORD_LEN: usize = 6 + 4 * 2 + 2;
-    let out_path = Path::new(&env::var("OUT_DIR").expect("OUT_DIR is set")).join(MESSIER_BINARY);
-    let mut bytes = Vec::with_capacity(12 + rows.len() * RECORD_LEN);
-    bytes.extend_from_slice(MESSIER_BINARY_MAGIC);
-    bytes.extend_from_slice(&(rows.len() as u32).to_le_bytes());
-    for row in rows {
-        let unit = radec_to_unit(row.ra_hours, row.dec_deg);
-        for v in unit {
-            bytes.extend_from_slice(&quantize_unit_f32(v).to_le_bytes());
+fn read_messier_rows(input: &str) -> Vec<DeepSkyLabelRow> {
+    let mut rows = read_deepsky_csv(input, "m", |value, line| {
+        let n: u16 = value
+            .parse()
+            .unwrap_or_else(|_| panic!("{input}: invalid m at line {line}"));
+        if !(1..=110).contains(&n) {
+            panic!("{input}: Messier number M{n} out of range at line {line}");
         }
-        bytes.extend_from_slice(&(row.m as i16).to_le_bytes());
-        bytes.extend_from_slice(&(row.ngc.map(|n| n as i16).unwrap_or(-1)).to_le_bytes());
-        let mag_q = (row.mag * 100.0).round().clamp(-32768.0, 32767.0) as i16;
-        bytes.extend_from_slice(&mag_q.to_le_bytes());
-        let size_q = (row.size_arcmin * 10.0).round().clamp(0.0, 32767.0) as i16;
-        bytes.extend_from_slice(&size_q.to_le_bytes());
-        bytes.push(row.kind_tag);
-        bytes.push(0);
-    }
-    fs::write(out_path, bytes).expect("write compact Messier catalog");
+        format!("M{n}")
+    });
+    rows.sort_by(|a, b| {
+        let na: u32 = a.text.trim_start_matches('M').parse().unwrap_or(0);
+        let nb: u32 = b.text.trim_start_matches('M').parse().unwrap_or(0);
+        na.cmp(&nb)
+    });
+    assert_eq!(rows.len(), 110, "{input}: expected 110 Messier rows");
+    rows
 }
 
-fn write_label_catalog(messier_rows: &[MessierRow]) {
+fn read_openngc_rows(input: &str) -> Vec<DeepSkyLabelRow> {
+    read_deepsky_csv(input, "name", |value, line| {
+        // The catalog crate validates the NGC/IC name format; here we just
+        // pass the name through as the on-screen label.
+        if !value.starts_with("NGC") && !value.starts_with("IC") {
+            panic!("{input}: unrecognised deep-sky name {value:?} at line {line}");
+        }
+        value.to_string()
+    })
+}
+
+fn write_label_catalog(messier_rows: &[DeepSkyLabelRow], ngc_rows: &[DeepSkyLabelRow]) {
     let rows = read_hyg_rows(HYG_CATALOG);
     let mut stars = rows.clone();
     stars.sort_by(|a, b| a.mag.total_cmp(&b.mag));
@@ -372,18 +336,33 @@ fn write_label_catalog(messier_rows: &[MessierRow]) {
     }
     code.push_str("];\n");
 
-    // Messier label catalogue: "M1", "M31", ... rendered with the same text
-    // pipeline as star/constellation labels. The magnitude is forwarded as
-    // the priority key so brighter objects survive screen-space culling first,
-    // matching the existing star-label policy.
-    code.push_str("pub(crate) struct RawMessierLabel { pub(crate) position: [f32; 3], pub(crate) text: &'static str, pub(crate) magnitude: f32 }\n");
-    code.push_str("pub(crate) const MESSIER_LABELS: &[RawMessierLabel] = &[\n");
+    // Deep-sky labels: Messier objects ("M1".. "M110") and the bright NGC /
+    // IC subset. The two tables share the same `RawDeepSkyLabel` shape so
+    // the text pass can iterate them without per-source bookkeeping; their
+    // origin is preserved by the `is_messier` flag for callers that want to
+    // toggle the two groups independently in the future.
+    //
+    // Magnitudes are forwarded as the priority key so brighter objects
+    // survive screen-space culling first, matching the star-label policy.
+    code.push_str("pub(crate) struct RawDeepSkyLabel { pub(crate) position: [f32; 3], pub(crate) text: &'static str, pub(crate) magnitude: f32, pub(crate) is_messier: bool }\n");
+    code.push_str("pub(crate) const DEEP_SKY_LABELS: &[RawDeepSkyLabel] = &[\n");
     for row in messier_rows {
         let pos = radec_to_unit(row.ra_hours, row.dec_deg);
-        let label = format!("M{}", row.m);
         code.push_str(&format!(
-            "    RawMessierLabel {{ position: [{:.6}, {:.6}, {:.6}], text: {:?}, magnitude: {:.3} }},\n",
-            pos[0], pos[1], pos[2], label, row.mag as f32
+            "    RawDeepSkyLabel {{ position: [{:.6}, {:.6}, {:.6}], text: {:?}, magnitude: {:.3}, is_messier: true }},\n",
+            pos[0], pos[1], pos[2], row.text, row.mag as f32
+        ));
+    }
+    // NGC / IC labels are deliberately skipped above the sentinel cutoff to
+    // keep the bundled label list small (the marker pass still draws them).
+    for row in ngc_rows {
+        if (row.mag as f32) > NGC_LABEL_MAG_CEILING {
+            continue;
+        }
+        let pos = radec_to_unit(row.ra_hours, row.dec_deg);
+        code.push_str(&format!(
+            "    RawDeepSkyLabel {{ position: [{:.6}, {:.6}, {:.6}], text: {:?}, magnitude: {:.3}, is_messier: false }},\n",
+            pos[0], pos[1], pos[2], row.text, row.mag as f32
         ));
     }
     code.push_str("];\n");

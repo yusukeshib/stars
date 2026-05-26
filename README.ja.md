@@ -103,13 +103,13 @@ scripts            カタログ取得・README 画像生成・WASM build helper
 
 ## 現在の開発フォーカス
 
-作業は 2 つの直交トラックで管理されています（[`ROADMAP.md`](ROADMAP.md) 参照）：**V — Visual**（観測者が画面で見るもの）と **L — Library / platform**（数値エンジンと reach）。Visual の識別オーバーレイ (`V-01`–`V-12`)、暗夜空の物理パイプライン (`V-13`–`V-23`)、大気差と太陽/月/惑星描画 (`V-29`–`V-36`)、全天投影 (`V-40`)、地球外視点 (`V-41`, `V-44`)、望遠鏡接眼レンズ (`V-43`) は実装済み、Messier deep-sky overlay の初期 slice (`V-42`) も実装済。Library トラックは IAU 準拠の時間・譳動・章動・年周光行差・固有運動 (`L-01`–`L-05`)、観測計画ヘルパー (`L-07`, `L-08`)、シェア可能 JSON session、scene preset、validation gallery、citation metadata、standards-compliance ドキュメント、data provenance manifest を実装済み。
+作業は 2 つの直交トラックで管理されています（[`ROADMAP.md`](ROADMAP.md) 参照）：**V — Visual**（観測者が画面で見るもの）と **L — Library / platform**（数値エンジンと reach）。Visual の識別オーバーレイ (`V-01`–`V-12`)、暗夜空の物理パイプライン (`V-13`–`V-23`)、大気差と太陽/月/惑星描画 (`V-29`–`V-36`)、全天投影 (`V-40`)、地球外視点 (`V-41`, `V-44`)、望遠鏡接眼レンズ (`V-43`)、Messier + 明るい NGC / IC サブセットの deep-sky overlay (`V-42`) は実装済み。Library トラックは IAU 準拠の時間・譳動・章動・年周光行差・固有運動 (`L-01`–`L-05`)、観測計画ヘルパー (`L-07`, `L-08`)、シェア可能 JSON session、scene preset、validation gallery、citation metadata、standards-compliance ドキュメント、data provenance manifest を実装済み。
 
 次に着手すべきは：
 
 1. 裸眼で見えるのにて実装の暗夜空現象：シンチレーション (`V-24`)、大気分散 (`V-25`)、地球照 (`V-26`)、ビーナスベルト・地球影帯 (`V-27`)、分光的 airglow (`V-28`)。
 2. 大気モデルの自己整合性：統一スペクトル消散 (`V-37`)、Hošek-Wilkie 昼間空 (`V-38`)、光害 / Bortle (`V-39`)。
-3. Messier overlay の NGC / IC フォローアップ (`V-42`)、accessibility (`L-24`)、観測計画 polish (`L-09`)、変光星 light curve (`L-20`)。
+3. accessibility (`L-24`)、観測計画 polish (`L-09`)、変光星 light curve (`L-20`)、`V-42` 組込み subset の上に乗せる runtime OpenNGC streaming backend (次の PR)。
 4. Python bindings (`L-21`) と headless server mode (`L-22`)。
 5. data provenance manifest (`data/manifest.toml`) が入ったので、大規模 Gaia / Tycho / Hipparcos ingest (`L-17`) と identifier preservation (`L-18`) も着手可能です。
 

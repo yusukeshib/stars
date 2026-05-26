@@ -1,6 +1,5 @@
 mod camera;
 mod constellations;
-mod deepsky;
 mod overlay;
 mod pipeline;
 mod renderer;

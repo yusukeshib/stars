@@ -109,7 +109,7 @@ the upstream license.
 id = "messier-catalog"
 description = "110 Messier deep-sky objects: J2000 positions, magnitudes, sizes, and classifications."
 kind = "embedded"
-path = "crates/renderer/data/messier.csv"
+path = "crates/catalog/data/messier.csv"
 sha256 = "6c85285c94b299afe0cbc1b172467421b2fbb27e07305910d30822eb651895e8"
 bytes = 6505
 source = "https://github.com/mattiaverga/OpenNGC"
@@ -125,8 +125,10 @@ column is set), kept only the factual numerical columns (J2000 RA, J2000
 Dec, V magnitude, major-axis size, type, NGC id), normalised type strings
 to OC / GC / G / N / PN / SNR / Other, then added M40 (Winnecke 4), M45
 (Pleiades, no NGC id), and M102 (= NGC 5866) from NGC 2000.0 / SEDS
-standard values. The renderer's build script compacts this CSV into the
-i16 binary `messier.bin` consumed by `renderer::deepsky`.
+standard values. The catalog crate's build script compacts this CSV into
+the i16 binary `messier.bin` consumed by `catalog::deepsky`; the renderer
+build script additionally bakes the `M1`..`M110` label table out of the
+same source.
 
 Only facts (coordinates, brightness measurements, angular sizes) are
 retained, so the resulting subset is treated as public-domain factual data
@@ -135,8 +137,9 @@ DATA_SOURCES.md for the per-row caveats.
 """
 fields_used = ["m", "ngc", "ra_hours", "dec_deg", "mag", "type", "size_arcmin"]
 used_by = [
+    "crates/catalog/build.rs",
+    "crates/catalog/src/deepsky.rs",
     "crates/renderer/build.rs",
-    "crates/renderer/src/deepsky.rs",
     "crates/renderer/src/overlay.rs",
     "crates/renderer/src/text.rs",
 ]
@@ -147,6 +150,44 @@ integrated brightness for extended objects (M31, M42, M45 in particular
 have brightness distributions that no single number describes well). M40
 is a double-star asterism and M102's identification is disputed; both
 standard published identifications are used.
+"""
+
+[[artifact]]
+id = "openngc-bright-catalog"
+description = "Bright NGC / IC subset (V <= 11.5 mag + large diffuse nebulae) extracted from OpenNGC; ~1,250 deep-sky objects."
+kind = "embedded"
+path = "crates/catalog/data/openngc_bright.csv"
+sha256 = "48c8543249961a750dfb66d08b78cb0728d0fec08218a8766352d3ae4c321013"
+bytes = 49764
+source = "https://github.com/mattiaverga/OpenNGC"
+archive_id = "OpenNGC database_files/NGC.csv + addendum.csv (bright subset)"
+citation = "Dreyer, J. L. E. 1888, MmRAS 49, 1 (NGC); Dreyer 1908, MmRAS 59, 105 (IC); Verga, M. (current), OpenNGC."
+version = "OpenNGC main snapshot 2026-05"
+retrieved = "2026-05"
+license = "public-domain"
+license_url = "https://github.com/mattiaverga/OpenNGC/blob/master/LICENSE"
+preprocessing = "scripts/extract-openngc-bright.py"
+fields_used = ["name", "ra_hours", "dec_deg", "mag", "type", "size_arcmin"]
+used_by = [
+    "crates/catalog/build.rs",
+    "crates/catalog/src/deepsky.rs",
+    "crates/renderer/build.rs",
+    "crates/renderer/src/overlay.rs",
+    "crates/renderer/src/text.rs",
+]
+limitations = """
+Filter: min(V-Mag, B-Mag - 0.6) <= 11.5 mag, plus diffuse / emission /
+reflection nebulae (EmN / RfN / Neb / HII / Cl+N / SNR) with major axis
+>= 30 arcmin, excluding the Messier objects already covered by
+`messier-catalog`. Famous diffuse anchors lacking integrated photometry
+store the sentinel magnitude 99.00, so the default density slider hides
+them until the user opens it past the sentinel. OpenNGC's `Dup`-marked
+designations are skipped, which drops NGC 2244 (Rosette cluster, covered
+by its companion NGC 2237 emission nebula) and IC 2118 (Witch Head); the
+planned runtime streaming backend (`V-42` follow-up) will surface those
+entries via the full OpenNGC CSV. Magnitudes are single-value
+approximations of integrated brightness for extended objects and inherit
+OpenNGC's per-row photometric caveats.
 """
 
 [[artifact]]
