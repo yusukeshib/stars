@@ -114,7 +114,7 @@ Validation expectation:
 
 Current limitation:
 
-- Phase 3 still tracks higher-precision DE440 / publication-grade ephemeris
+- `L-06` still tracks higher-precision DE440 / publication-grade ephemeris
   work. Do not describe the current stack as final research-grade ephemerides.
 
 ### Atmosphere and sky colour
@@ -208,7 +208,7 @@ Validation expectation:
 Current limitation:
 
 - Renderer buffers and host hover/copy flows do not yet expose preserved IDs;
-  that remains tracked by `P3-02`.
+  that remains tracked by `L-18`.
 
 ### Reproducible scenes and visual regression
 

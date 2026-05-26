@@ -1,6 +1,6 @@
 # Catalog backend scaling design
 
-This page closes roadmap item `P3-00`: it defines the catalog seams that must be
+This page closes roadmap item `L-16` (legacy `P3-00`): it defines the catalog seams that must be
 stable before adding Hipparcos, Tycho-2, Gaia DR3, or larger deep-sky datasets.
 The current implementation remains HYG-backed, but `crates/catalog` now exposes
 minimal backend scaffolding so future ingest work extends an API instead of
@@ -43,7 +43,7 @@ rewriting host/rendering paths.
 
 The public `Star` struct now includes `identifiers: CatalogIdentifiers`. The
 existing renderer and host conversion paths keep ignoring those identifiers
-until `P3-02` wires ID-aware hover/copy/session behaviour through the renderer.
+until `L-18` (legacy `P3-02`) wires ID-aware hover/copy/session behaviour through the renderer.
 
 ## Backend boundaries
 
@@ -74,7 +74,7 @@ A backend is **not** responsible for:
   rows whose source is those catalogs.
 - Cross-match tables should fill the optional fields instead of replacing the
   source's primary ID.
-- Renderer buffers should receive compact numeric IDs only after `P3-02` defines
+- Renderer buffers should receive compact numeric IDs only after `L-18` (legacy `P3-02`) defines
   hover/click/session requirements; until then IDs stay CPU-side in `catalog`.
 
 ## LOD, paging, and spatial index plan
@@ -108,9 +108,9 @@ size-capped web subset is documented in the data manifest.
 
 ## Follow-on roadmap items
 
-- `P3-01` should implement actual Hipparcos / Tycho-2 / Gaia DR3 ingest behind
+- `L-17` (legacy `P3-01`) should implement actual Hipparcos / Tycho-2 / Gaia DR3 ingest behind
   this trait and update `DATA_SOURCES.md` plus the future machine-readable
   manifest.
-- `P3-02` should pass compact object IDs through renderer/host selection paths.
-- `P3-03` should build optional SIMBAD / VizieR links from preserved IDs without
+- `L-18` (legacy `P3-02`) should pass compact object IDs through renderer/host selection paths.
+- `L-19` (legacy `P3-03`) should build optional SIMBAD / VizieR links from preserved IDs without
   making external services part of deterministic rendering.

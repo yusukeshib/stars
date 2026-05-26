@@ -1,6 +1,6 @@
 # Notebook examples
 
-These examples are the Phase 3 bridge before full Python bindings land. They
+These examples are the Library-track bridge (`L-13`) before full Python bindings (`L-21`) land. They
 use schema-versioned JSON sessions plus the Rust CLI/example binaries so a
 notebook, the web UI, and `apps/cli` can all point at the same scene inputs.
 

@@ -31,7 +31,7 @@ is a CI failure.
 Downstream consumers cite artifacts by stable `id`. JSON sessions name the
 catalog snapshot they used via the manifest id (see
 [`ARCHITECTURE.md`](ARCHITECTURE.md) and `docs/catalog-backend-design.md`); a
-future Gaia / Tycho / Hipparcos backend (roadmap P3-01) will add new
+future Gaia / Tycho / Hipparcos backend (roadmap `L-17`) will add new
 artifacts under that contract.
 
 When adding a new data file, append a row to `data/manifest.toml` in the
@@ -178,7 +178,7 @@ Maintenance rules:
   distribution well. Treat the values as catalogue-grade ordering, not
   photometric ground truth.
 
-Future NGC / IC ingest follows the same manifest pattern; see ROADMAP `P4-03`.
+Future NGC / IC ingest follows the same manifest pattern; see ROADMAP `V-42`.
 
 ### IAU / Delporte constellation boundaries
 

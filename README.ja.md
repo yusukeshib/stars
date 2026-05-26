@@ -88,7 +88,7 @@ scripts            カタログ取得・README 画像生成・WASM build helper
 
 ## ドキュメント
 
-- [`ROADMAP.md`](ROADMAP.md) — フェーズ計画、未実装項目、完了条件。
+- [`ROADMAP.md`](ROADMAP.md) — Visual / Library の 2 トラック計画、未実装項目、各項目の実装詳細と参照文献。
 - [`PROGRESS.md`](PROGRESS.md) — 実装済み機能のログ。
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — crate 境界、データフロー、座標系、renderer pipeline、host integration。
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — セットアップ、チェック、PR 方針、数値変更時のルール。
@@ -103,12 +103,15 @@ scripts            カタログ取得・README 画像生成・WASM build helper
 
 ## 現在の開発フォーカス
 
-Phase 1、Phase 1'、Phase 2、citation / standards documentation、notebook 再現性 example、catalog backend scaling scaffold、data provenance manifest、Phase 4 の全天投影、Phase 4 の地球外・銀河視点、そして Phase 4 の望遠鏡接眼レンズシミュレーションは実装済みです。次は、見た目と UX を小さく拡張しつつ、残りの platform hook を固めるのが自然です。
+作業は 2 つの直交トラックで管理されています（[`ROADMAP.md`](ROADMAP.md) 参照）：**V — Visual**（観測者が画面で見るもの）と **L — Library / platform**（数値エンジンと reach）。Visual の識別オーバーレイ (`V-01`–`V-12`)、暗夜空の物理パイプライン (`V-13`–`V-23`)、大気差と太陽/月/惑星描画 (`V-29`–`V-36`)、全天投影 (`V-40`)、地球外視点 (`V-41`, `V-44`)、望遠鏡接眼レンズ (`V-43`) は実装済み、Messier deep-sky overlay の初期 slice (`V-42`) も実装済。Library トラックは IAU 準拠の時間・譳動・章動・年周光行差・固有運動 (`L-01`–`L-05`)、観測計画ヘルパー (`L-07`, `L-08`)、シェア可能 JSON session、scene preset、validation gallery、citation metadata、standards-compliance ドキュメント、data provenance manifest を実装済み。
 
-1. Messier / NGC などの deep-sky overlay。
-2. accessibility、観測計画機能の polish、変光星 light curve。
-3. Phase 3 platform 向けの Python bindings と headless server mode。
-4. data provenance manifest (`data/manifest.toml`) が入ったので、大規模 Gaia / Tycho / Hipparcos ingest も着手可能です。
+次に着手すべきは：
+
+1. 裸眼で見えるのにて実装の暗夜空現象：シンチレーション (`V-24`)、大気分散 (`V-25`)、地球照 (`V-26`)、ビーナスベルト・地球影帯 (`V-27`)、分光的 airglow (`V-28`)。
+2. 大気モデルの自己整合性：統一スペクトル消散 (`V-37`)、Hošek-Wilkie 昼間空 (`V-38`)、光害 / Bortle (`V-39`)。
+3. Messier overlay の NGC / IC フォローアップ (`V-42`)、accessibility (`L-24`)、観測計画 polish (`L-09`)、変光星 light curve (`L-20`)。
+4. Python bindings (`L-21`) と headless server mode (`L-22`)。
+5. data provenance manifest (`data/manifest.toml`) が入ったので、大規模 Gaia / Tycho / Hipparcos ingest (`L-17`) と identifier preservation (`L-18`) も着手可能です。
 
 ## 開発に参加する場合
 

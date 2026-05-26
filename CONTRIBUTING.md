@@ -189,7 +189,7 @@ Useful self-contained areas include:
 
 - text label infrastructure for stars, planets, constellations, cardinal
   directions, and degree marks;
-- Phase 4 full-sky projection plumbing;
+- Visual-track full-sky projection plumbing (`V-40`);
 - Messier-only first pass for deep-sky overlays;
 - README / validation-gallery scene generation;
 - documentation improvements and validation notes;

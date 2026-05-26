@@ -135,18 +135,33 @@ More detail lives in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Current focus
 
-Phase 1, Phase 1', Phase 2, citation/standards documentation, notebook
-reproducibility examples, catalog-backend scaling scaffolding, the data
-provenance manifest, Phase 4 full-sky projection work, Phase 4 out-of-Earth
-galactic / custom external viewpoints, and Phase 4 telescope eyepiece
-simulation are implemented. The next best work is to extend visually while
-finishing the remaining platform hooks:
+Work is organised along two orthogonal tracks (see [`ROADMAP.md`](ROADMAP.md)):
+**V — Visual** (what the observer sees on screen) and **L — Library /
+platform** (numerical engine + reach). The Visual identification overlays
+(`V-01`–`V-12`), dark-sky physical realism pipeline (`V-13`–`V-23`),
+atmospheric refraction and Sun / Moon / planet rendering (`V-29`–`V-36`),
+full-sky projections (`V-40`), out-of-Earth galactic and custom external
+viewpoints (`V-41`, `V-44`), and telescope eyepiece simulation (`V-43`) have
+shipped; the Messier slice of the deep-sky overlay (`V-42`) is in. The Library
+track has shipped IAU-grade time / precession / nutation / aberration / proper
+motion (`L-01`–`L-05`), planning helpers (`L-07`, `L-08`), sharable JSON
+sessions, scene presets, the validation / demo gallery, citation metadata,
+the standards-compliance page, and the data provenance manifest. The next
+best work is:
 
-1. deep-sky overlays for Messier / NGC-style objects;
-2. accessibility, observation-planning polish, and variable-star light curves;
-3. Python bindings and headless server mode for the Phase 3 platform;
-4. large Gaia / Tycho / Hipparcos ingest now that the data provenance
-   manifest (`data/manifest.toml`) is in place.
+1. dark-sky realism gaps the eye still sees through:
+   scintillation (`V-24`), atmospheric dispersion (`V-25`), lunar earthshine
+   (`V-26`), Belt of Venus / Earth-shadow band (`V-27`), spectral airglow
+   (`V-28`);
+2. atmospheric self-consistency: unified spectral extinction (`V-37`),
+   Hošek-Wilkie daylight (`V-38`), light-pollution / Bortle (`V-39`);
+3. NGC / IC follow-up to the shipped Messier overlay (`V-42`),
+   accessibility (`L-24`), observation-planning polish (`L-09`), and
+   variable-star light curves (`L-20`);
+4. Python bindings (`L-21`) and headless server mode (`L-22`);
+5. large Gaia / Tycho / Hipparcos ingest (`L-17`) and identifier
+   preservation (`L-18`) now that the data provenance manifest
+   (`data/manifest.toml`) is in place.
 
 ## Contributing
 
