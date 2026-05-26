@@ -63,7 +63,7 @@ argument parsing.
 
 ### `crates/catalog`
 
-Owns star catalog ingestion and catalog-space conversions:
+Owns star catalog ingestion, deep-sky catalogues, and catalog-space conversions:
 
 - `CatalogBackend`, `CatalogQuery`, `CatalogPage`, and `CatalogSource` as the
   Library-track backend seam (`L-17`) for larger catalogs;
@@ -73,6 +73,10 @@ Owns star catalog ingestion and catalog-space conversions:
 - HYG row filtering and conversion into `Star` records;
 - CPU-side `CatalogIdentifiers` for HYG / HIP / HD now, with Tycho-2 / Gaia DR3
   slots reserved for later ingest;
+- the `DeepSkyCatalog` trait + embedded `MessierCatalog` and
+  `NgcBrightCatalog` implementations consumed by the renderer's deep-sky
+  overlay (`V-42`); the trait is the slot for the planned runtime
+  full-OpenNGC streaming backend;
 - B−V colour conversion and RA/Dec-to-Cartesian helpers.
 
 Catalog stars are renderer-independent. They should not know about `wgpu`,

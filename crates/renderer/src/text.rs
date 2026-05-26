@@ -14,7 +14,17 @@ use wgpu::util::DeviceExt;
 use crate::camera::{Camera, CameraUniform, PlanetUniforms, PLANET_UNIFORM_COUNT};
 use crate::overlay::{OverlayConfig, OverlayKind};
 
-include!(concat!(env!("OUT_DIR"), "/label_data.rs"));
+// The generated `label_data.rs` is included as if it were written inline.
+// Some f32 magnitude / position literals happen to fall near constants from
+// `clippy::approx_constant`'s table (e.g. NGC 6752 has V ≈ 6.280, which
+// clippy reads as TAU). The catalogue numbers are not those constants, so
+// the lint is silenced module-wide; no hand-written code in this file uses
+// a TAU-shaped literal where the named constant should be preferred.
+#[allow(clippy::approx_constant)]
+mod label_data {
+    include!(concat!(env!("OUT_DIR"), "/label_data.rs"));
+}
+use label_data::{CONSTELLATION_LABELS, DEEP_SKY_LABELS, STAR_LABELS};
 
 const ASCII_FIRST: u8 = 32;
 const ASCII_LAST: u8 = 126;
@@ -103,9 +113,10 @@ struct TextConfig {
     constellations: bool,
     cardinals: bool,
     degrees: bool,
-    /// Messier deep-sky labels ("M1", "M31", …).
+    /// Deep-sky labels: Messier ("M1", "M31", …) plus the bright NGC / IC
+    /// subset ("NGC7000", "IC434", …).
     deep_sky: bool,
-    /// V magnitude cutoff for the Messier deep-sky labels. Mirrors
+    /// V magnitude cutoff for the deep-sky labels. Mirrors
     /// [`OverlayConfig::deep_sky_magnitude_limit`] after the same NaN /
     /// out-of-range sanitisation used by the line-marker pass.
     deep_sky_magnitude_limit: f32,
@@ -531,7 +542,7 @@ impl TextRenderer {
         }
         if self.config.deep_sky {
             let limit = self.config.deep_sky_magnitude_limit;
-            for label in MESSIER_LABELS {
+            for label in DEEP_SKY_LABELS {
                 if !matches!(
                     label.magnitude.partial_cmp(&limit),
                     Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal),
@@ -540,13 +551,20 @@ impl TextRenderer {
                     // the marker builder in `overlay::deep_sky_markers`.
                     continue;
                 }
+                // Messier and NGC labels share the same green tonal range so
+                // they pair visually with their respective markers, but NGC
+                // labels are tinted slightly cooler to mirror the marker-
+                // shape distinction (diamond vs. ring) added by V-42.
+                let color = if label.is_messier {
+                    [0.60, 0.92, 0.65, alpha]
+                } else {
+                    [0.55, 0.85, 0.78, alpha]
+                };
                 out.push(LabelCandidate {
                     frame: LabelFrame::Equatorial,
                     position: label.position,
                     text: Cow::Borrowed(label.text),
-                    // Greenish-yellow, matching the deep-sky marker palette
-                    // so the marker + label visually pair together.
-                    color: [0.60, 0.92, 0.65, alpha],
+                    color,
                     // Brighter (lower-mag) objects win the label-placement
                     // tie-break against fainter ones.
                     priority: label.magnitude,
@@ -934,7 +952,7 @@ fn collect_static_test_candidates<'a>(out: &mut Vec<LabelCandidate<'a>>) {
             placement: LabelPlacement::Centered,
         });
     }
-    for label in MESSIER_LABELS {
+    for label in DEEP_SKY_LABELS {
         out.push(LabelCandidate {
             frame: LabelFrame::Equatorial,
             position: label.position,
@@ -954,15 +972,26 @@ mod tests {
     fn generated_label_catalogs_are_populated() {
         assert_eq!(STAR_LABELS.len(), 50);
         assert!(CONSTELLATION_LABELS.len() >= 80);
-        assert_eq!(MESSIER_LABELS.len(), 110);
+        // All 110 Messier objects are always baked into the deep-sky label
+        // table; the rest of the entries come from the bright NGC / IC
+        // subset and exceed the Messier count comfortably.
+        let messier_count = DEEP_SKY_LABELS
+            .iter()
+            .filter(|label| label.is_messier)
+            .count();
+        assert_eq!(messier_count, 110);
+        assert!(DEEP_SKY_LABELS.len() > 110);
         assert!(STAR_LABELS
             .iter()
             .any(|label| label.text.contains("Sirius")));
         assert!(CONSTELLATION_LABELS
             .iter()
             .any(|label| label.text == "Orion"));
-        assert!(MESSIER_LABELS.iter().any(|l| l.text == "M31"));
-        assert!(MESSIER_LABELS.iter().any(|l| l.text == "M110"));
+        assert!(DEEP_SKY_LABELS.iter().any(|l| l.text == "M31"));
+        assert!(DEEP_SKY_LABELS.iter().any(|l| l.text == "M110"));
+        // V-42 NGC / IC follow-up: anchor showpieces must be labelled.
+        assert!(DEEP_SKY_LABELS.iter().any(|l| l.text == "NGC7000"));
+        assert!(DEEP_SKY_LABELS.iter().any(|l| l.text == "IC434"));
     }
 
     #[test]
