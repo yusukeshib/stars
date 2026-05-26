@@ -76,7 +76,12 @@ export function StarCanvas({
   // boot effect reads the latest value from the ref, and this effect re-fires
   // on any subsequent change.
   useEffect(() => {
-    handleRef.current?.set_overlays(overlays.layers, overlays.gridStepDeg, overlays.opacity);
+    handleRef.current?.set_overlays(
+      overlays.layers,
+      overlays.gridStepDeg,
+      overlays.opacity,
+      overlays.deepSkyMagnitudeLimit,
+    );
   }, [overlays]);
 
   useEffect(() => {
@@ -139,7 +144,7 @@ export function StarCanvas({
       // Apply whatever overlay state is current right now -- could be the
       // initial defaults or something the user toggled during the wasm boot.
       const ov = overlaysRef.current;
-      handle.set_overlays(ov.layers, ov.gridStepDeg, ov.opacity);
+      handle.set_overlays(ov.layers, ov.gridStepDeg, ov.opacity, ov.deepSkyMagnitudeLimit);
       const at = atmosphereRef.current;
       handle.set_atmosphere_config(
         at.enabled,

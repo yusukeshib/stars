@@ -129,6 +129,14 @@ struct Args {
     #[arg(long, default_value_t = 0.6)]
     overlay_opacity: f32,
 
+    /// Maximum V magnitude shown by the Messier deep-sky overlay. Lower
+    /// values show only the brightest objects (default 7.0 ≈ dark-sky
+    /// naked-eye limit); raise to 99.0 to show everything. Has no effect
+    /// unless `deep-sky-objects` or `deep-sky-labels` is enabled via
+    /// `--overlays`.
+    #[arg(long, default_value_t = renderer::DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT)]
+    deep_sky_magnitude_limit: f32,
+
     /// Limiting apparent magnitude of the simulated observer. Stars fainter
     /// than this fade through the shader's discard cutoff. Increasing this
     /// uniformly scales every star's linear flux ("more sensitive observer"
@@ -240,6 +248,7 @@ fn main() -> Result<()> {
             &args.overlays,
             args.grid_step_deg,
             args.overlay_opacity,
+            args.deep_sky_magnitude_limit,
         );
         let atmosphere = atmosphere_from_args(
             args.no_extinction,

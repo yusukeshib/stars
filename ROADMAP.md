@@ -69,8 +69,8 @@ Phase 1, Phase 1', Phase 2, the core stellar apparent-place corrections, catalog
 backend scaling scaffold/design, full-sky projections, the fixed external
 galactic viewpoint, telescope eyepiece simulation, custom external viewpoint
 origins, scene presets, notebook reproducibility examples, the validation/demo
-gallery workflow, citation metadata, the standards-compliance page, and the
-data provenance manifest are now complete. A row is `✅ done` only when the
+gallery workflow, citation metadata, the standards-compliance page, the data
+provenance manifest, and the Messier deep-sky overlay are now complete. A row is `✅ done` only when the
 model named in its references is implemented, documented, tested, and wired into
 all relevant hosts.
 
@@ -101,8 +101,9 @@ Phase 4 visual polish and the remaining Phase 3 platform hooks.
 These items are intentionally ordered before the largest catalog additions so
 future features have stable scenes, source manifests, and review hooks:
 
-1. **Visual and UX polish:** deep-sky overlays, accessibility, observation
-   planning polish, variable-star light curves, and eyepiece preset provenance.
+1. **Visual and UX polish:** accessibility, observation planning polish,
+   variable-star light curves, eyepiece preset provenance, and the deep-sky
+   NGC / IC follow-up to the Messier overlay.
 2. **Remaining Phase 3 platform hooks:** Python bindings and headless server
    mode now that the catalog/backend shape is documented.
 3. **Large catalog ingest:** Hipparcos / Tycho-2 / Gaia DR3. The machine-
@@ -182,7 +183,7 @@ Columns:
 | `P3-15` | 3 | **Public demo gallery** | Curated shareable scenes such as Tokyo tonight, summer Milky Way, lunar eclipse aid, and galactic-north view, backed by stable session files | ⬜ |
 | `P4-01` | 4 | **Full-sky projections** | Mollweide, Aitoff, and Hammer all-sky maps selectable in CLI, desktop, and web; perspective remains the default | ✅ done (`renderer::SkyProjection`, `shaders/{star,skyglow,overlay}.wgsl`, `apps/{cli,viewer,web}`) |
 | `P4-02` | 4 | **Out-of-Earth viewpoint** | `SkyViewpoint::GalacticNorth` moves the camera above the IAU galactic plane, places HYG stars by parsec distance, and draws an analytic top-down Milky Way disc in CLI, desktop, and web | ✅ done (`renderer::SkyViewpoint`, `shaders/{star,skyglow}.wgsl`, `apps/{cli,viewer,web}`) |
-| `P4-03` | 4 | **Deep-sky overlay** (Messier, NGC) | Light Messier catalog first, then NGC / IC with density controls; full NGC/IC is large and should follow the manifest rules | ⬜ |
+| `P4-03` | 4 | **Deep-sky overlay** (Messier, NGC) | 110 Messier objects ship as diamond markers + `M1`..`M110` labels with a V-magnitude density slider in CLI / desktop / web; `crates/renderer/data/messier.csv` is sourced from OpenNGC factual data with NGC 2000.0 / SEDS backfill and recorded in `data/manifest.toml`. NGC / IC follow-up uses the same manifest pattern and is tracked separately. | ✅ done (Messier; `renderer::deepsky`, `renderer::overlay`, `apps/{cli,viewer,web}`) |
 | `P4-04` | 4 | **Variable star light curves** | Pull AAVSO or documented snapshots; show side-panel light curves for a hovered variable with source, epoch, and uncertainty caveats | ⬜ |
 | `P4-05` | 4 | **Accessibility pass** | ARIA labels on every web control, keyboard navigation, high-contrast / colour-vision-safe modes, screen-reader summaries, and optional Az/Alt audio cues | ⬜ |
 | `P4-06` | 4 | **Telescope eyepiece simulation** | Plate scale, magnification, exit pupil, and true field of view from an OTA + eyepiece pair, exposed in CLI / desktop / web session URLs; future eyepiece preset catalogs should follow the provenance manifest rules | ✅ done (`renderer::EyepieceSimulation`, `apps/{cli,viewer,web}`) |

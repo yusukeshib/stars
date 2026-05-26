@@ -44,6 +44,8 @@ pub enum OverlayArg {
     GalacticEquator,
     ConstellationLines,
     ConstellationBoundaries,
+    DeepSkyObjects,
+    DeepSkyLabels,
     StarLabels,
     PlanetLabels,
     ConstellationLabels,
@@ -72,6 +74,8 @@ impl From<OverlayArg> for OverlayKind {
             OverlayArg::GalacticEquator => OverlayKind::GalacticEquator,
             OverlayArg::ConstellationLines => OverlayKind::ConstellationLines,
             OverlayArg::ConstellationBoundaries => OverlayKind::ConstellationBoundaries,
+            OverlayArg::DeepSkyObjects => OverlayKind::DeepSkyObjects,
+            OverlayArg::DeepSkyLabels => OverlayKind::DeepSkyLabels,
             OverlayArg::StarLabels => OverlayKind::StarLabels,
             OverlayArg::PlanetLabels => OverlayKind::PlanetLabels,
             OverlayArg::ConstellationLabels => OverlayKind::ConstellationLabels,
@@ -164,11 +168,16 @@ impl From<AtmospherePresetArg> for AtmospherePreset {
 /// overlay defaults, string parsing, or opacity clamping while preserving the
 /// engine/host boundary: `renderer` owns the render model; this crate owns the
 /// `clap`-facing mirror types.
+///
+/// `deep_sky_magnitude_limit` controls the density filter for the Messier
+/// deep-sky markers and labels; the renderer clamps it again on the inside
+/// so a stale host value cannot crash the marker builder.
 pub fn overlay_config_from_args(
     overlays_disabled: bool,
     overlays: &[OverlayArg],
     grid_step_deg: f64,
     overlay_opacity: f32,
+    deep_sky_magnitude_limit: f32,
 ) -> OverlayConfig {
     let layers = if overlays_disabled {
         Vec::new()
@@ -179,6 +188,7 @@ pub fn overlay_config_from_args(
         layers,
         grid_step_deg,
         opacity: overlay_opacity.clamp(0.0, 1.0),
+        deep_sky_magnitude_limit,
     }
 }
 
@@ -400,6 +410,8 @@ mod tests {
             OverlayArg::GalacticEquator,
             OverlayArg::ConstellationLines,
             OverlayArg::ConstellationBoundaries,
+            OverlayArg::DeepSkyObjects,
+            OverlayArg::DeepSkyLabels,
             OverlayArg::StarLabels,
             OverlayArg::PlanetLabels,
             OverlayArg::ConstellationLabels,
@@ -510,7 +522,7 @@ mod tests {
     #[test]
     fn overlay_config_helper_applies_disable_and_opacity_rules() {
         let overlays = [OverlayArg::Horizon, OverlayArg::ConstellationLines];
-        let enabled = overlay_config_from_args(false, &overlays, 30.0, 2.0);
+        let enabled = overlay_config_from_args(false, &overlays, 30.0, 2.0, 7.0);
         assert_eq!(
             enabled.layers,
             vec![OverlayKind::Horizon, OverlayKind::ConstellationLines]
@@ -518,7 +530,7 @@ mod tests {
         assert_eq!(enabled.grid_step_deg, 30.0);
         assert_eq!(enabled.opacity, 1.0);
 
-        let disabled = overlay_config_from_args(true, &overlays, 15.0, 0.5);
+        let disabled = overlay_config_from_args(true, &overlays, 15.0, 0.5, 7.0);
         assert!(disabled.layers.is_empty());
         assert_eq!(disabled.opacity, 0.5);
     }

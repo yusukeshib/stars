@@ -127,6 +127,59 @@ Maintenance rule:
   command in this file or in the generator script. Update the `sha256` field
   of the manifest entry in the same PR; `make manifest-check` enforces this.
 
+### Messier deep-sky catalog
+
+Repository location:
+
+- `crates/renderer/data/messier.csv`
+
+Manifest id:
+
+- `messier-catalog` in `data/manifest.toml`.
+
+Used for:
+
+- `OverlayKind::DeepSkyObjects` markers and `OverlayKind::DeepSkyLabels` text;
+- 110 Messier objects rendered as diamond markers and `M1`, `M31`, ...
+  labels, filtered by `OverlayConfig::deep_sky_magnitude_limit`.
+
+Source:
+
+- OpenNGC (`mattiaverga/OpenNGC`) main `NGC.csv`, Messier subset (rows where
+  the `M` column is set);
+- NGC 2000.0 (Sinnott & Skiff 1988, VizieR VII/118) and SEDS Messier database
+  (https://www.messier.seds.org/) backfill for M40 (Winnecke 4), M45
+  (Pleiades), and M102 (= NGC 5866) which lack standard NGC ids in OpenNGC;
+- M73's missing major-axis size is filled from SEDS (2.8 arcmin).
+
+License:
+
+- The retained columns are factual astronomical numbers (J2000 coordinates,
+  V magnitudes, major-axis angular sizes, classifications) and are treated
+  as public-domain factual data. OpenNGC is acknowledged as the upstream
+  compilation. See `data/manifest.toml` for the manifest entry.
+
+Implementation areas:
+
+- `crates/renderer/build.rs`
+- `crates/renderer/src/deepsky.rs`
+- `crates/renderer/src/overlay.rs`
+- `crates/renderer/src/text.rs`
+
+Maintenance rules:
+
+- The build script asserts every Messier number 1…110 appears exactly once;
+  removing or duplicating a row fails the build.
+- M40 and M102 use the standard published identifications (Winnecke 4 and
+  NGC 5866 respectively). Changing those identifications must update
+  `DATA_SOURCES.md`, the CSV, and the manifest hash together.
+- Magnitudes are V-band single-value approximations; for extended objects
+  like M31 / M42 / M45 no single number describes the brightness
+  distribution well. Treat the values as catalogue-grade ordering, not
+  photometric ground truth.
+
+Future NGC / IC ingest follows the same manifest pattern; see ROADMAP `P4-03`.
+
 ### IAU / Delporte constellation boundaries
 
 Repository location:

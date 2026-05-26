@@ -191,6 +191,13 @@ const en: Dictionary = {
   "overlayGroup.referenceGeometry.title": "Reference geometry",
   "overlayGroup.referenceGeometry.description":
     "Horizon, coordinate grids, and great circles for orientation.",
+  "overlayGroup.deepSky.title": "Deep-sky (Messier)",
+  "overlayGroup.deepSky.description":
+    "Diamond markers and labels for the 110 Messier objects, filtered by the magnitude slider below.",
+  "overlayGroup.deepSkyDensity.title": "Deep-sky density",
+  "overlayGroup.deepSkyDensity.description":
+    "Hide Messier objects fainter than this V magnitude. 7.0 keeps the dark-sky naked-eye showpieces (M31, M42, M44, M45, M13); raise to 99 to show everything.",
+  "overlayGroup.deepSkyMagnitudeLimit": "Magnitude limit",
   "overlayGroup.constellations.title": "Constellations",
   "overlayGroup.constellations.description":
     "Western stick figures and IAU boundary outlines.",
@@ -211,6 +218,8 @@ const en: Dictionary = {
   "overlay.galactic-equator": "Galactic equator",
   "overlay.constellation-lines": "Constellation lines",
   "overlay.constellation-boundaries": "Constellation boundaries (IAU)",
+  "overlay.deep-sky-objects": "Messier deep-sky markers",
+  "overlay.deep-sky-labels": "Messier labels (M1, M31, ...)",
   "overlay.star-labels": "Bright star labels",
   "overlay.planet-labels": "Sun/Moon/planet labels",
   "overlay.constellation-labels": "Constellation names",
@@ -362,6 +371,13 @@ const ja: Dictionary = {
   "overlayGroup.referenceGeometry.title": "参照幾何",
   "overlayGroup.referenceGeometry.description":
     "方位確認のための地平線、座標グリッド、大円を表示します。",
+  "overlayGroup.deepSky.title": "深宇宙天体 (メシエ)",
+  "overlayGroup.deepSky.description":
+    "110 個のメシエ天体をダイヤモンド型マーカーとラベルで表示します。下の明るさスライダーで描画対象を絞り込めます。",
+  "overlayGroup.deepSkyDensity.title": "深宇宙天体の描画密度",
+  "overlayGroup.deepSkyDensity.description":
+    "この V 等級より暗いメシエ天体を隠します。7.0 は暗い空で胉眼に見える見頃し (M31, M42, M44, M45, M13) を残します。99 まで上げるとすべて表示されます。",
+  "overlayGroup.deepSkyMagnitudeLimit": "等級の上限",
   "overlayGroup.constellations.title": "星座",
   "overlayGroup.constellations.description": "西洋星座の線と IAU 境界を表示します。",
   "overlayGroup.labels.title": "ラベル",
@@ -380,6 +396,8 @@ const ja: Dictionary = {
   "overlay.galactic-equator": "銀河赤道",
   "overlay.constellation-lines": "星座線",
   "overlay.constellation-boundaries": "星座境界 (IAU)",
+  "overlay.deep-sky-objects": "メシエ深宇宙天体マーカー",
+  "overlay.deep-sky-labels": "メシエラベル (M1, M31, …)",
   "overlay.star-labels": "明るい星のラベル",
   "overlay.planet-labels": "太陽 / 月 / 惑星のラベル",
   "overlay.constellation-labels": "星座名",

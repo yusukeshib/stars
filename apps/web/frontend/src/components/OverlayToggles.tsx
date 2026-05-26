@@ -1,6 +1,8 @@
 import type { CSSProperties } from "react";
 
 import {
+  MAX_DEEP_SKY_MAGNITUDE_LIMIT,
+  MIN_DEEP_SKY_MAGNITUDE_LIMIT,
   OVERLAY_LAYERS,
   type OverlayConfig,
   type OverlayLayer,
@@ -37,6 +39,11 @@ const OVERLAY_GROUPS: OverlayGroup[] = [
     titleKey: "overlayGroup.constellations.title",
     descriptionKey: "overlayGroup.constellations.description",
     layers: ["constellation-lines", "constellation-boundaries"],
+  },
+  {
+    titleKey: "overlayGroup.deepSky.title",
+    descriptionKey: "overlayGroup.deepSky.description",
+    layers: ["deep-sky-objects", "deep-sky-labels"],
   },
   {
     titleKey: "overlayGroup.labels.title",
@@ -129,6 +136,22 @@ export function OverlayToggles({ config, onChange }: Props) {
             step={0.05}
             format={(v) => v.toFixed(2)}
             onChange={(v) => onChange({ ...config, opacity: v })}
+          />
+        </div>
+      </div>
+
+      <div style={groupStyle}>
+        <div style={groupLegendStyle}>{t("overlayGroup.deepSkyDensity.title")}</div>
+        <p style={groupDescriptionStyle}>{t("overlayGroup.deepSkyDensity.description")}</p>
+        <div style={{ marginTop: 4, display: "grid", gap: 8 }}>
+          <Slider
+            label={t("overlayGroup.deepSkyMagnitudeLimit")}
+            value={config.deepSkyMagnitudeLimit}
+            min={MIN_DEEP_SKY_MAGNITUDE_LIMIT}
+            max={MAX_DEEP_SKY_MAGNITUDE_LIMIT}
+            step={0.5}
+            format={(v) => v.toFixed(1)}
+            onChange={(v) => onChange({ ...config, deepSkyMagnitudeLimit: v })}
           />
         </div>
       </div>

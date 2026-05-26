@@ -113,6 +113,7 @@ function isView(v: unknown): v is View {
 
 const GRID_STEP_RANGE: [number, number] = [1, 90];
 const OPACITY_RANGE: [number, number] = [0, 1];
+const DEEP_SKY_MAG_RANGE: [number, number] = [-5, 99];
 const TURBIDITY_RANGE: [number, number] = [1.7, 10];
 const OBSERVER_ALTITUDE_RANGE: [number, number] = [0, 9000];
 const OZONE_RANGE: [number, number] = [0, 600];
@@ -134,7 +135,8 @@ function isOverlayConfig(v: unknown): v is OverlayConfig {
     Array.isArray(o.layers) &&
     o.layers.every(isOverlayLayer) &&
     inRange(o.gridStepDeg, GRID_STEP_RANGE) &&
-    inRange(o.opacity, OPACITY_RANGE)
+    inRange(o.opacity, OPACITY_RANGE) &&
+    inRange(o.deepSkyMagnitudeLimit, DEEP_SKY_MAG_RANGE)
   );
 }
 

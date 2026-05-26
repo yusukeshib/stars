@@ -191,17 +191,24 @@ impl StarView {
     /// that match the CLI's `--overlays` flag: "horizon", "cardinals",
     /// "alt-az-grid", "equatorial-grid", "ecliptic", "celestial-equator",
     /// "meridian", "galactic-equator", "constellation-lines",
-    /// "constellation-boundaries", "star-labels", "planet-labels",
-    /// "constellation-labels", "cardinal-labels", and "degree-labels".
+    /// "constellation-boundaries", "deep-sky-objects", "deep-sky-labels",
+    /// "star-labels", "planet-labels", "constellation-labels",
+    /// "cardinal-labels", and "degree-labels".
     /// Unknown names are ignored with a
     /// warning so the JS layer can evolve without breaking older builds.
     ///
-    /// `grid_step_deg` and `opacity` are passed through to the renderer, which
-    /// applies its own clamps; finite values outside the renderer's accepted
-    /// range are silently coerced. Non-finite values would propagate into the
-    /// geometry generators and produce NaN vertices, so we replace them with
-    /// the renderer's defaults here.
-    pub fn set_overlays(&self, layers: Vec<String>, grid_step_deg: f64, opacity: f32) {
+    /// `grid_step_deg`, `opacity`, and `deep_sky_magnitude_limit` are passed
+    /// through to the renderer, which applies its own clamps; finite values
+    /// outside the renderer's accepted range are silently coerced. Non-finite
+    /// values would propagate into the geometry generators and produce NaN
+    /// vertices, so we replace them with the renderer's defaults here.
+    pub fn set_overlays(
+        &self,
+        layers: Vec<String>,
+        grid_step_deg: f64,
+        opacity: f32,
+        deep_sky_magnitude_limit: f32,
+    ) {
         let kinds: Vec<OverlayKind> = layers
             .iter()
             .filter_map(|name| {
@@ -218,6 +225,7 @@ impl StarView {
             15.0
         };
         let opacity = if opacity.is_finite() { opacity } else { 0.6 };
+        // The renderer clamps and NaN-replaces internally; we just forward.
         let s = &mut *self.state.borrow_mut();
         s.renderer.set_overlays(
             &s.device,
@@ -225,6 +233,7 @@ impl StarView {
                 layers: kinds,
                 grid_step_deg,
                 opacity,
+                deep_sky_magnitude_limit,
             },
         );
     }

@@ -449,6 +449,7 @@ fn external_scene(
             layers: Vec::new(),
             grid_step_deg: 15.0,
             opacity: 0.0,
+            deep_sky_magnitude_limit: OverlayConfig::default().deep_sky_magnitude_limit,
         },
         atmosphere_preset: AtmospherePreset::ClearRural,
         atmosphere: Atmosphere::OFF,
@@ -475,6 +476,7 @@ fn overlay_config(layers: &[OverlayKind]) -> OverlayConfig {
         layers: layers.to_vec(),
         grid_step_deg: 15.0,
         opacity: 0.6,
+        deep_sky_magnitude_limit: OverlayConfig::default().deep_sky_magnitude_limit,
     }
 }
 

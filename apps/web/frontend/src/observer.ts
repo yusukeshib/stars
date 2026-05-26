@@ -23,6 +23,8 @@ export const OVERLAY_LAYERS = [
   "galactic-equator",
   "constellation-lines",
   "constellation-boundaries",
+  "deep-sky-objects",
+  "deep-sky-labels",
   "star-labels",
   "planet-labels",
   "constellation-labels",
@@ -31,16 +33,24 @@ export const OVERLAY_LAYERS = [
 ] as const;
 export type OverlayLayer = (typeof OVERLAY_LAYERS)[number];
 
+/// Default Messier deep-sky magnitude cutoff. Kept in sync with
+/// `DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT` in `crates/renderer/src/overlay.rs`.
+export const DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT = 7;
+export const MIN_DEEP_SKY_MAGNITUDE_LIMIT = -5;
+export const MAX_DEEP_SKY_MAGNITUDE_LIMIT = 99;
+
 export type OverlayConfig = {
   layers: OverlayLayer[];
   gridStepDeg: number;
   opacity: number;
+  deepSkyMagnitudeLimit: number;
 };
 
 export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
   layers: ["horizon", "cardinal-labels"],
   gridStepDeg: 15,
   opacity: 0.6,
+  deepSkyMagnitudeLimit: DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT,
 };
 
 export const ATMOSPHERE_PRESETS = ["clear-rural", "hazy-urban", "high-altitude"] as const;
@@ -156,11 +166,6 @@ export const ATMOSPHERE_PRESET_DEFAULTS: Record<AtmospherePreset, Pick<Atmospher
   "hazy-urban": { turbidity: 5.0, observerAltitudeM: 0, ozoneDu: 325, visibilityKm: 12, pressureHpa: 1010, temperatureC: 15 },
   "high-altitude": { turbidity: 2.0, observerAltitudeM: 2500, ozoneDu: 275, visibilityKm: 80, pressureHpa: 750, temperatureC: 0 },
 };
-
-// Human-readable labels for atmosphere presets, sky projections, sky viewpoints,
-// and overlay layers live in `i18n.tsx` under the `atmospherePreset.*`,
-// `projection.*`, `viewpoint.*`, and `overlay.*` keys. Components resolve them
-// via the `useT()` hook so the labels follow the active locale.
 
 export const isAtmospherePreset = (s: unknown): s is AtmospherePreset =>
   typeof s === "string" && (ATMOSPHERE_PRESETS as readonly string[]).includes(s);

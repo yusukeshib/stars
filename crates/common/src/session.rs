@@ -95,6 +95,11 @@ pub struct SessionOverlays {
     pub layers: Vec<OverlayArg>,
     pub grid_step_deg: f64,
     pub opacity: f32,
+    /// V magnitude cutoff for `deep-sky-objects` / `deep-sky-labels`. Optional
+    /// so sessions written before the field existed still round-trip: when
+    /// absent, the renderer-side default is used at apply time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deep_sky_magnitude_limit: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -230,6 +235,7 @@ impl StarSession {
                     .collect(),
                 grid_step_deg: scene.overlays.grid_step_deg,
                 opacity: scene.overlays.opacity,
+                deep_sky_magnitude_limit: Some(scene.overlays.deep_sky_magnitude_limit),
             },
             projection: SessionProjection {
                 projection: ProjectionArg::from(scene.projection),
@@ -308,6 +314,13 @@ impl StarSession {
                     1.0,
                     "overlays.opacity",
                 )? as f32,
+                deep_sky_magnitude_limit: match self.overlays.deep_sky_magnitude_limit {
+                    Some(value) => {
+                        finite_in_range(value as f64, -5.0, 99.0, "overlays.deepSkyMagnitudeLimit")?
+                            as f32
+                    }
+                    None => OverlayConfig::default().deep_sky_magnitude_limit,
+                },
             },
             atmosphere_preset,
             atmosphere: self.atmosphere.to_atmosphere()?,
@@ -544,6 +557,8 @@ impl From<OverlayKind> for OverlayArg {
             OverlayKind::GalacticEquator => Self::GalacticEquator,
             OverlayKind::ConstellationLines => Self::ConstellationLines,
             OverlayKind::ConstellationBoundaries => Self::ConstellationBoundaries,
+            OverlayKind::DeepSkyObjects => Self::DeepSkyObjects,
+            OverlayKind::DeepSkyLabels => Self::DeepSkyLabels,
             OverlayKind::StarLabels => Self::StarLabels,
             OverlayKind::PlanetLabels => Self::PlanetLabels,
             OverlayKind::ConstellationLabels => Self::ConstellationLabels,
@@ -633,6 +648,7 @@ mod tests {
                 layers: vec![OverlayKind::Horizon, OverlayKind::CardinalLabels],
                 grid_step_deg: 15.0,
                 opacity: 0.6,
+                deep_sky_magnitude_limit: OverlayConfig::default().deep_sky_magnitude_limit,
             },
             atmosphere_preset: AtmospherePreset::ClearRural,
             atmosphere: Atmosphere::CLEAR_RURAL,
