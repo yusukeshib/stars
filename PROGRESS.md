@@ -565,6 +565,50 @@ Validation:
 - Rust workspace tests, WASM check, and frontend TypeScript check cover host
   wiring.
 
+## Web UI internationalisation (English + Japanese)
+
+The web frontend now ships a minimal, dependency-free i18n layer covering
+English and Japanese. The same React build serves either locale; nothing in
+the Rust engine or WASM bridge had to change.
+
+Locale selection priority:
+
+1. `?lang=en|ja` URL parameter (so shared session URLs can pin a language);
+2. `localStorage["stars:locale"]` (the user's most recent manual choice);
+3. `navigator.language` / `navigator.languages` prefix match;
+4. fallback to `en`.
+
+A language switcher in the Settings popover persists the choice through
+`localStorage`, and the active locale is mirrored onto `<html lang="…">` so
+assistive tech sees the right language. English remains the source of truth
+for the key set; missing Japanese keys fall back to English at lookup time.
+
+The canonical English strings emitted by the wasm planning bridge
+(`PlanningBody::name`, `TwilightBand::label` — e.g. `"Mercury"`,
+`"Civil twilight"`) stay in Rust; the JS side translates them via
+`translateWasmBody` / `translateWasmTwilight` so the renderer stays
+locale-agnostic.
+
+Primary implementation areas:
+
+- `apps/web/frontend/src/i18n.tsx` (context, provider, hook, dictionaries,
+  WASM-string translation helpers);
+- `apps/web/frontend/src/main.tsx` wraps the root in `<I18nProvider>`;
+- `apps/web/frontend/src/App.tsx`,
+  `apps/web/frontend/src/components/StatusBar.tsx`, and
+  `apps/web/frontend/src/components/OverlayToggles.tsx` resolve every
+  user-facing string through `useT()`;
+- the legacy `OVERLAY_LABELS`, `ATMOSPHERE_PRESET_LABELS`,
+  `SKY_PROJECTION_LABELS`, and `SKY_VIEWPOINT_LABELS` constants in
+  `observer.ts` were removed in favour of `overlay.*`, `atmospherePreset.*`,
+  `projection.*`, and `viewpoint.*` keys.
+
+Validation:
+
+- `make frontend-check` (TypeScript strict mode) covers the React refactor.
+  No numerical behaviour changes, so no new pinned numerical tests were
+  added.
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

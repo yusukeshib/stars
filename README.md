@@ -39,6 +39,8 @@ The current engine already includes:
   pupil, and true field of view from an OTA + eyepiece pair;
 - shareable schema-versioned JSON sessions across CLI, desktop, and web, plus
   compact web session URLs;
+- bilingual web UI (English and Japanese) with browser-language detection,
+  a `?lang=en|ja` URL override for sharing, and an in-app language switcher;
 - deterministic validation/demo scene presets, notebook reproducibility examples,
   catalog-backend scaling scaffolding, and an opt-in generated gallery for
   screenshot review;

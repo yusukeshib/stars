@@ -1,17 +1,17 @@
 import type { CSSProperties } from "react";
 
 import {
-  OVERLAY_LABELS,
   OVERLAY_LAYERS,
   type OverlayConfig,
   type OverlayLayer,
 } from "../observer";
+import { useT } from "../i18n";
 
 type EditableOverlayLayer = Exclude<OverlayLayer, "cardinals">;
 
 type OverlayGroup = {
-  title: string;
-  description: string;
+  titleKey: string;
+  descriptionKey: string;
   layers: EditableOverlayLayer[];
 };
 
@@ -21,8 +21,8 @@ const EDITABLE_OVERLAY_LAYERS = OVERLAY_LAYERS.filter(
 
 const OVERLAY_GROUPS: OverlayGroup[] = [
   {
-    title: "Reference geometry",
-    description: "Horizon, coordinate grids, and great circles for orientation.",
+    titleKey: "overlayGroup.referenceGeometry.title",
+    descriptionKey: "overlayGroup.referenceGeometry.description",
     layers: [
       "horizon",
       "alt-az-grid",
@@ -34,13 +34,13 @@ const OVERLAY_GROUPS: OverlayGroup[] = [
     ],
   },
   {
-    title: "Constellations",
-    description: "Western stick figures and IAU boundary outlines.",
+    titleKey: "overlayGroup.constellations.title",
+    descriptionKey: "overlayGroup.constellations.description",
     layers: ["constellation-lines", "constellation-boundaries"],
   },
   {
-    title: "Labels",
-    description: "Names and degree markers drawn over the sky.",
+    titleKey: "overlayGroup.labels.title",
+    descriptionKey: "overlayGroup.labels.description",
     layers: [
       "star-labels",
       "planet-labels",
@@ -59,6 +59,8 @@ type Props = {
 /// Checkbox list of overlay layers plus grid-step and opacity sliders. The web
 /// UI exposes the useful line/grid overlays while hiding legacy cardinal marks.
 export function OverlayToggles({ config, onChange }: Props) {
+  const t = useT();
+
   const toggle = (layer: OverlayLayer) => {
     const has = config.layers.includes(layer);
     const next = has
@@ -73,9 +75,9 @@ export function OverlayToggles({ config, onChange }: Props) {
   return (
     <div style={{ display: "grid", gap: 10 }}>
       {OVERLAY_GROUPS.map((group) => (
-        <fieldset key={group.title} style={groupStyle}>
-          <legend style={groupLegendStyle}>{group.title}</legend>
-          <p style={groupDescriptionStyle}>{group.description}</p>
+        <fieldset key={group.titleKey} style={groupStyle}>
+          <legend style={groupLegendStyle}>{t(group.titleKey)}</legend>
+          <p style={groupDescriptionStyle}>{t(group.descriptionKey)}</p>
           <div style={{ display: "grid", gap: 4 }}>
             {group.layers.map((layer) => {
               const checked = config.layers.includes(layer);
@@ -99,7 +101,7 @@ export function OverlayToggles({ config, onChange }: Props) {
                     onChange={() => toggle(layer)}
                     style={{ accentColor: "#8fb1ff" }}
                   />
-                  <span style={{ opacity: checked ? 1 : 0.65 }}>{OVERLAY_LABELS[layer]}</span>
+                  <span style={{ opacity: checked ? 1 : 0.65 }}>{t(`overlay.${layer}`)}</span>
                 </label>
               );
             })}
@@ -108,10 +110,10 @@ export function OverlayToggles({ config, onChange }: Props) {
       ))}
 
       <div style={groupStyle}>
-        <div style={groupLegendStyle}>Line styling</div>
+        <div style={groupLegendStyle}>{t("overlayGroup.lineStyling.title")}</div>
         <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
           <Slider
-            label="Grid step"
+            label={t("overlayGroup.gridStep")}
             value={config.gridStepDeg}
             min={5}
             max={45}
@@ -120,7 +122,7 @@ export function OverlayToggles({ config, onChange }: Props) {
             onChange={(v) => onChange({ ...config, gridStepDeg: v })}
           />
           <Slider
-            label="Line opacity"
+            label={t("overlayGroup.lineOpacity")}
             value={config.opacity}
             min={0}
             max={1}

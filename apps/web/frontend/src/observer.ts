@@ -157,11 +157,10 @@ export const ATMOSPHERE_PRESET_DEFAULTS: Record<AtmospherePreset, Pick<Atmospher
   "high-altitude": { turbidity: 2.0, observerAltitudeM: 2500, ozoneDu: 275, visibilityKm: 80, pressureHpa: 750, temperatureC: 0 },
 };
 
-export const ATMOSPHERE_PRESET_LABELS: Record<AtmospherePreset, string> = {
-  "clear-rural": "Clear rural",
-  "hazy-urban": "Hazy urban",
-  "high-altitude": "High altitude",
-};
+// Human-readable labels for atmosphere presets, sky projections, sky viewpoints,
+// and overlay layers live in `i18n.tsx` under the `atmospherePreset.*`,
+// `projection.*`, `viewpoint.*`, and `overlay.*` keys. Components resolve them
+// via the `useT()` hook so the labels follow the active locale.
 
 export const isAtmospherePreset = (s: unknown): s is AtmospherePreset =>
   typeof s === "string" && (ATMOSPHERE_PRESETS as readonly string[]).includes(s);
@@ -171,38 +170,6 @@ export const isSkyProjection = (s: unknown): s is SkyProjection =>
 
 export const isSkyViewpoint = (s: unknown): s is SkyViewpoint =>
   typeof s === "string" && (SKY_VIEWPOINTS as readonly string[]).includes(s);
-
-export const SKY_PROJECTION_LABELS: Record<SkyProjection, string> = {
-  perspective: "Perspective",
-  mollweide: "Mollweide (full sky)",
-  aitoff: "Aitoff (full sky)",
-  hammer: "Hammer (full sky)",
-};
-
-export const SKY_VIEWPOINT_LABELS: Record<SkyViewpoint, string> = {
-  earth: "Earth-centred sky",
-  "galactic-north": "Milky Way from above",
-  "custom-external": "Custom external camera",
-};
-
-/// Human-readable labels for the UI; order also drives display order.
-export const OVERLAY_LABELS: Record<OverlayLayer, string> = {
-  horizon: "Horizon",
-  cardinals: "Cardinal marks (N/E/S/W)",
-  "alt-az-grid": "Alt-Az grid (observer)",
-  "equatorial-grid": "Equatorial grid (J2000)",
-  ecliptic: "Ecliptic",
-  "celestial-equator": "Celestial equator",
-  meridian: "Local meridian",
-  "galactic-equator": "Galactic equator",
-  "constellation-lines": "Constellation lines",
-  "constellation-boundaries": "Constellation boundaries (IAU)",
-  "star-labels": "Bright star labels",
-  "planet-labels": "Sun/Moon/planet labels",
-  "constellation-labels": "Constellation names",
-  "cardinal-labels": "Cardinal labels (N/E/S/W)",
-  "degree-labels": "Degree labels",
-};
 
 export const isOverlayLayer = (s: unknown): s is OverlayLayer =>
   typeof s === "string" && (OVERLAY_LAYERS as readonly string[]).includes(s);

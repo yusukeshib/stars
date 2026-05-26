@@ -28,6 +28,7 @@ import {
 } from "./observer";
 import { loadConfig, saveConfig } from "./storage";
 import { parseStarSessionJson, starSessionJson, type SessionState } from "./session";
+import { useT } from "./i18n";
 
 const DEFAULT_OBSERVER: Observer = {
   latitudeDeg: 35.68, // Tokyo as a sensible default
@@ -279,6 +280,7 @@ const URL_SESSION = loadSessionFromUrl();
 const URL_ATMOSPHERE = URL_SESSION?.atmosphere ?? (typeof window !== "undefined" ? loadAtmosphereFromUrl() : null);
 
 export function App() {
+  const t = useT();
   const [observer, setObserver] = useState<Observer>(URL_SESSION?.observer ?? PERSISTED?.observer ?? DEFAULT_OBSERVER);
   const [view, setView] = useState<View>(URL_SESSION?.view ?? PERSISTED?.view ?? DEFAULT_VIEW);
   const [overlays, setOverlays] = useState<OverlayConfig>(
@@ -439,7 +441,12 @@ export function App() {
           try {
             applySessionState(parseStarSessionJson(raw));
           } catch (error) {
-            window.alert(error instanceof Error ? error.message : "Invalid session JSON.");
+            // Session-parser errors carry developer-facing messages from
+            // `session.ts` (e.g. "Unsupported session schemaVersion"). They
+            // stay in English; only the generic fallback is translated.
+            window.alert(
+              error instanceof Error ? error.message : t("card.session.invalidJson"),
+            );
           }
         }}
         onUseGeolocation={useGeolocation}

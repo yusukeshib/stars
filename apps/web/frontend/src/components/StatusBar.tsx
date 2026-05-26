@@ -1,11 +1,8 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   ATMOSPHERE_PRESET_DEFAULTS,
-  ATMOSPHERE_PRESET_LABELS,
   ATMOSPHERE_PRESETS,
-  SKY_PROJECTION_LABELS,
   SKY_PROJECTIONS,
-  SKY_VIEWPOINT_LABELS,
   SKY_VIEWPOINTS,
   eyepieceExitPupilMm,
   eyepieceMagnification,
@@ -25,6 +22,16 @@ import {
   type View,
 } from "../observer";
 import { OverlayToggles } from "./OverlayToggles";
+import {
+  LOCALES,
+  LOCALE_LABELS,
+  translateWasmBody,
+  translateWasmTwilight,
+  useLocale,
+  useSetLocale,
+  useT,
+  type Translator,
+} from "../i18n";
 
 type Props = {
   observer: Observer;
@@ -83,13 +90,14 @@ const fmtDeg = (n: number) => `${n.toFixed(1)}°`;
 const COMPASS_DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 const compass = (az: number) => COMPASS_DIRS[Math.round(az / 45) % 8];
 const pad = (n: number) => n.toString().padStart(2, "0");
-function twilightLabel(sunAltDeg: number | null): string {
-  if (sunAltDeg === null) return "Sky model initializing";
-  if (sunAltDeg >= 0) return `Daylight (Sun ${sunAltDeg.toFixed(1)}°)`;
-  if (sunAltDeg >= -6) return `Civil twilight (Sun ${sunAltDeg.toFixed(1)}°)`;
-  if (sunAltDeg >= -12) return `Nautical twilight (Sun ${sunAltDeg.toFixed(1)}°)`;
-  if (sunAltDeg >= -18) return `Astronomical twilight (Sun ${sunAltDeg.toFixed(1)}°)`;
-  return `Night (Sun ${sunAltDeg.toFixed(1)}°)`;
+function twilightLabel(t: Translator, sunAltDeg: number | null): string {
+  if (sunAltDeg === null) return t("twilight.initializing");
+  const alt = sunAltDeg.toFixed(1);
+  if (sunAltDeg >= 0) return t("twilight.daylight", { alt });
+  if (sunAltDeg >= -6) return t("twilight.civil", { alt });
+  if (sunAltDeg >= -12) return t("twilight.nautical", { alt });
+  if (sunAltDeg >= -18) return t("twilight.astronomical", { alt });
+  return t("twilight.night", { alt });
 }
 
 function fmtDate(ms: number): string {
@@ -165,6 +173,7 @@ export function StatusBar({
   onImportSessionJson,
   onUseGeolocation,
 }: Props) {
+  const t = useT();
   const [openPopover, setOpenPopover] = useState<Popover | null>(null);
   const [addressQuery, setAddressQuery] = useState("");
   const [addressLookup, setAddressLookup] = useState<AddressLookupState>({
@@ -196,12 +205,12 @@ export function StatusBar({
   const lookupAddress = async () => {
     const query = addressQuery.trim();
     if (!query) {
-      setAddressLookup({ status: "error", message: "Enter an address or place name." });
+      setAddressLookup({ status: "error", message: t("location.enterAddress") });
       return;
     }
 
     const lookupId = ++addressLookupSeq.current;
-    setAddressLookup({ status: "loading", message: "Searching address…" });
+    setAddressLookup({ status: "loading", message: t("location.searching") });
     try {
       const params = new URLSearchParams({
         q: query,
@@ -216,7 +225,7 @@ export function StatusBar({
       const place = firstGeocodingResult(await response.json());
       if (lookupId !== addressLookupSeq.current) return;
       if (!place) {
-        setAddressLookup({ status: "error", message: "No matching place found." });
+        setAddressLookup({ status: "error", message: t("location.noMatch") });
         return;
       }
 
@@ -233,13 +242,15 @@ export function StatusBar({
       });
       setAddressLookup({
         status: "success",
-        message: place.display_name ?? place.name ?? "Location updated from address.",
+        // Nominatim returns localized place names already; show them verbatim
+        // and fall back to the generic translated success message.
+        message: place.display_name ?? place.name ?? t("location.updated"),
       });
     } catch {
       if (lookupId !== addressLookupSeq.current) return;
       setAddressLookup({
         status: "error",
-        message: "Address lookup failed. Check your connection and try again.",
+        message: t("location.lookupFailed"),
       });
     }
   };
@@ -294,15 +305,15 @@ export function StatusBar({
     setOpenPopover(openPopover === "time" ? null : "time");
   };
 
-  const twilight = twilightLabel(sunAltitudeDeg);
+  const twilight = twilightLabel(t, sunAltitudeDeg);
 
   return (
     <div ref={rootRef} style={containerStyle}>
       {openPopover === "location" && (
-        <PopoverPanel title="Location" onClose={() => setOpenPopover(null)}>
+        <PopoverPanel title={t("location.title")} onClose={() => setOpenPopover(null)}>
           <SliderNumberRow
             id="quick-lat"
-            label="Latitude"
+            label={t("location.latitude")}
             value={observer.latitudeDeg}
             min={-90}
             max={90}
@@ -311,7 +322,7 @@ export function StatusBar({
           />
           <SliderNumberRow
             id="quick-lng"
-            label="Longitude"
+            label={t("location.longitude")}
             value={observer.longitudeDeg}
             min={-180}
             max={180}
@@ -327,14 +338,14 @@ export function StatusBar({
             style={addressLookupFormStyle}
           >
             <label htmlFor="quick-address" style={labelStyle}>
-              Address / place lookup
+              {t("location.addressLabel")}
             </label>
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
               <input
                 id="quick-address"
                 type="search"
                 value={addressQuery}
-                placeholder="Tokyo Tower, Paris, Mauna Kea…"
+                placeholder={t("location.addressPlaceholder")}
                 onChange={(e) => {
                   addressLookupSeq.current += 1;
                   setAddressQuery(e.target.value);
@@ -349,7 +360,7 @@ export function StatusBar({
                 disabled={addressLookup.status === "loading"}
                 style={buttonStyle}
               >
-                {addressLookup.status === "loading" ? "Finding…" : "Find"}
+                {addressLookup.status === "loading" ? t("location.finding") : t("location.find")}
               </button>
             </div>
             {addressLookup.message && (
@@ -363,15 +374,15 @@ export function StatusBar({
           </form>
 
           <button type="button" onClick={onUseGeolocation} style={buttonStyle}>
-            Use my location
+            {t("location.useMyLocation")}
           </button>
         </PopoverPanel>
       )}
 
       {openPopover === "time" && (
-        <PopoverPanel title="Time" onClose={() => setOpenPopover(null)}>
+        <PopoverPanel title={t("time.title")} onClose={() => setOpenPopover(null)}>
           <label htmlFor="quick-datetime" style={labelStyle}>
-            Local date/time
+            {t("time.localDateTime")}
           </label>
           <input
             id="quick-datetime"
@@ -385,7 +396,7 @@ export function StatusBar({
           />
 
           <label htmlFor="quick-date" style={{ ...labelStyle, marginTop: 10 }}>
-            Date picker
+            {t("time.datePicker")}
           </label>
           <input
             id="quick-date"
@@ -400,32 +411,31 @@ export function StatusBar({
 
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             <button type="button" onClick={() => onSetTime(Date.now())} style={buttonStyle}>
-              Now
+              {t("time.now")}
             </button>
             <button
               type="button"
               onClick={() => onSetTime(timeMs - 60 * 60 * 1000)}
               style={buttonStyle}
             >
-              −1h
+              {t("time.minus1h")}
             </button>
             <button
               type="button"
               onClick={() => onSetTime(timeMs + 60 * 60 * 1000)}
               style={buttonStyle}
             >
-              +1h
+              {t("time.plus1h")}
             </button>
           </div>
           <p style={{ margin: "10px 0 0", fontSize: 11, opacity: 0.55 }}>
-            The clock keeps ticking after each quick change. Drag the date in the status bar
-            left/right by one day, or the time by 10 minutes.
+            {t("time.helper")}
           </p>
         </PopoverPanel>
       )}
 
       {openPopover === "settings" && (
-        <PopoverPanel title="Settings" onClose={() => setOpenPopover(null)}>
+        <PopoverPanel title={t("settings.title")} onClose={() => setOpenPopover(null)}>
           <SettingsPanel
             overlays={overlays}
             atmosphere={atmosphere}
@@ -454,7 +464,7 @@ export function StatusBar({
             onClick={() => setOpenPopover(openPopover === "location" ? null : "location")}
             style={chipButtonStyle(openPopover === "location")}
           >
-            <span style={mutedStyle}>Location </span>
+            <span style={mutedStyle}>{t("status.location")} </span>
             <span style={underlinedValueStyle(openPopover === "location")}>
               {observer.latitudeDeg.toFixed(2)}°, {observer.longitudeDeg.toFixed(2)}°
             </span>
@@ -466,9 +476,9 @@ export function StatusBar({
             onClick={toggleTimePopover}
             style={chipButtonStyle(openPopover === "time")}
           >
-            <span style={mutedStyle}>Time </span>
+            <span style={mutedStyle}>{t("status.time")} </span>
             <span
-              title="Drag left/right to change the date by one day per step"
+              title={t("status.dragDateTitle")}
               onPointerDown={(e) => beginTimeDrag(e, "date")}
               onPointerMove={updateTimeDrag}
               onPointerUp={endTimeDrag}
@@ -479,7 +489,7 @@ export function StatusBar({
             </span>
             <span style={mutedStyle}> </span>
             <span
-              title="Drag left/right to change the time by 10 minutes per step"
+              title={t("status.dragClockTitle")}
               onPointerDown={(e) => beginTimeDrag(e, "clock")}
               onPointerMove={updateTimeDrag}
               onPointerUp={endTimeDrag}
@@ -491,26 +501,26 @@ export function StatusBar({
           </button>
         </div>
         <div style={{ marginTop: 4, textAlign: "left" }}>
-          <span style={mutedStyle}>Az </span>
+          <span style={mutedStyle}>{t("status.az")} </span>
           {fmtDeg(view.azimuthDeg)} ({compass(view.azimuthDeg)})
           <span style={separatorStyle}>  ·  </span>
-          <span style={mutedStyle}>Alt </span>
+          <span style={mutedStyle}>{t("status.alt")} </span>
           {fmtDeg(view.altitudeDeg)}
           <span style={separatorStyle}>  ·  </span>
-          <span style={mutedStyle}>FOV </span>
+          <span style={mutedStyle}>{t("status.fov")} </span>
           {projection.viewpoint === "earth" && projection.projection !== "perspective"
-            ? "full sky"
+            ? t("status.fovFullSky")
             : eyepiece.enabled && projection.viewpoint === "earth" && projection.projection === "perspective"
-              ? `${eyepieceTrueFieldDeg(eyepiece).toFixed(2)}° eyepiece`
+              ? t("status.fovEyepiece", { value: eyepieceTrueFieldDeg(eyepiece).toFixed(2) })
               : fmtDeg(view.fovDeg)}
           <span style={separatorStyle}>  ·  </span>
-          <span style={mutedStyle}>Projection </span>
-          {SKY_PROJECTION_LABELS[projection.projection]}
+          <span style={mutedStyle}>{t("status.projection")} </span>
+          {t(`projection.${projection.projection}`)}
           <span style={separatorStyle}>  ·  </span>
-          <span style={mutedStyle}>Viewpoint </span>
-          {SKY_VIEWPOINT_LABELS[projection.viewpoint]}
+          <span style={mutedStyle}>{t("status.viewpoint")} </span>
+          {t(`viewpoint.${projection.viewpoint}`)}
           <span style={separatorStyle}>  ·  </span>
-          <span style={mutedStyle}>Sky </span>
+          <span style={mutedStyle}>{t("status.sky")} </span>
           {twilight}
           <span style={separatorStyle}>  ·  </span>
           <button
@@ -520,7 +530,7 @@ export function StatusBar({
             onClick={() => setOpenPopover(openPopover === "settings" ? null : "settings")}
             style={inlineButtonStyle}
           >
-            <span style={underlinedValueStyle(openPopover === "settings")}>Settings</span>
+            <span style={underlinedValueStyle(openPopover === "settings")}>{t("status.settings")}</span>
           </button>
         </div>
       </div>
@@ -537,11 +547,17 @@ function PopoverPanel({
   children: React.ReactNode;
   onClose: () => void;
 }) {
+  const t = useT();
   return (
-    <div role="dialog" aria-label={`${title} quick controls`} style={popoverStyle}>
+    <div role="dialog" aria-label={t("popover.dialogLabel", { title })} style={popoverStyle}>
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontSize: 11, opacity: 0.65, letterSpacing: 0.8 }}>{title.toUpperCase()}</div>
-        <button type="button" aria-label={`Close ${title} quick controls`} onClick={onClose} style={closeButtonStyle}>
+        <button
+          type="button"
+          aria-label={t("popover.close", { title })}
+          onClick={onClose}
+          style={closeButtonStyle}
+        >
           ×
         </button>
       </header>
@@ -584,6 +600,9 @@ function SettingsPanel({
   onCopySessionJson,
   onImportSessionJson,
 }: SettingsPanelProps) {
+  const t = useT();
+  const locale = useLocale();
+  const setLocale = useSetLocale();
   const sessionFileRef = useRef<HTMLInputElement>(null);
   const setAtmospherePreset = (preset: AtmospherePreset) => {
     onSetAtmosphere({
@@ -595,10 +614,23 @@ function SettingsPanel({
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
-      <SettingCard
-        title="View & objects"
-        description="Choose the map projection and the solar-system bodies drawn with the stars."
-      >
+      <SettingCard title={t("locale.label")}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 2 }}>
+          {LOCALES.map((code) => (
+            <button
+              key={code}
+              type="button"
+              aria-pressed={locale === code}
+              onClick={() => setLocale(code)}
+              style={localeButtonStyle(locale === code)}
+            >
+              {LOCALE_LABELS[code]}
+            </button>
+          ))}
+        </div>
+      </SettingCard>
+
+      <SettingCard title={t("card.view.title")} description={t("card.view.description")}>
         <label style={checkboxRowStyle}>
           <input
             type="checkbox"
@@ -606,11 +638,11 @@ function SettingsPanel({
             onChange={(e) => onSetPlanets({ enabled: e.target.checked })}
             style={{ accentColor: "#8fb1ff" }}
           />
-          Mercury → Neptune
+          {t("card.view.mercuryToNeptune")}
         </label>
 
         <label htmlFor="sky-viewpoint" style={{ ...labelStyle, marginTop: 10 }}>
-          Viewpoint
+          {t("card.view.viewpoint")}
         </label>
         <select
           id="sky-viewpoint"
@@ -620,7 +652,7 @@ function SettingsPanel({
         >
           {SKY_VIEWPOINTS.map((v) => (
             <option key={v} value={v}>
-              {SKY_VIEWPOINT_LABELS[v]}
+              {t(`viewpoint.${v}`)}
             </option>
           ))}
         </select>
@@ -629,7 +661,7 @@ function SettingsPanel({
           <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
             <Vec3NumberRow
               id="external-origin-pc"
-              label="Origin pc (X, Y, Z)"
+              label={t("card.view.originPc")}
               value={projection.external.originPc}
               min={-1_000_000}
               max={1_000_000}
@@ -638,7 +670,7 @@ function SettingsPanel({
             />
             <Vec3NumberRow
               id="external-target-pc"
-              label="Target pc (X, Y, Z)"
+              label={t("card.view.targetPc")}
               value={projection.external.targetPc}
               min={-1_000_000}
               max={1_000_000}
@@ -647,7 +679,7 @@ function SettingsPanel({
             />
             <Vec3NumberRow
               id="external-up"
-              label="Up vector (X, Y, Z)"
+              label={t("card.view.up")}
               value={projection.external.up}
               min={-10}
               max={10}
@@ -658,7 +690,7 @@ function SettingsPanel({
         )}
 
         <label htmlFor="sky-projection" style={{ ...labelStyle, marginTop: 10 }}>
-          Screen projection
+          {t("card.view.screenProjection")}
         </label>
         <select
           id="sky-projection"
@@ -669,18 +701,16 @@ function SettingsPanel({
         >
           {SKY_PROJECTIONS.map((p) => (
             <option key={p} value={p}>
-              {SKY_PROJECTION_LABELS[p]}
+              {t(`projection.${p}`)}
             </option>
           ))}
         </select>
-        <p style={helperTextStyle}>
-          Earth full-sky maps ignore FOV but still rotate with azimuth/altitude. External viewpoints use a perspective parsec-scale camera in IAU galactic Cartesian coordinates (Sun at 0,0,0; +X l=0°; +Y l=90°; +Z north galactic pole) and hide Earth-local overlays.
-        </p>
+        <p style={helperTextStyle}>{t("card.view.helper")}</p>
       </SettingCard>
 
       <SettingCard
-        title="Telescope eyepiece"
-        description="Derive plate scale and true field of view from an OTA + eyepiece pair. Active only for Earth perspective views."
+        title={t("card.telescope.title")}
+        description={t("card.telescope.description")}
       >
         <label style={{ ...checkboxRowStyle, marginBottom: 10 }}>
           <input
@@ -689,12 +719,12 @@ function SettingsPanel({
             onChange={(e) => onSetEyepiece({ ...eyepiece, enabled: e.target.checked })}
             style={{ accentColor: "#8fb1ff" }}
           />
-          Enable eyepiece simulation
+          {t("card.telescope.enable")}
         </label>
         <div style={advancedControlGridStyle}>
           <SliderNumberRow
             id="eyepiece-aperture"
-            label="OTA aperture (mm)"
+            label={t("card.telescope.aperture")}
             value={eyepiece.apertureMm}
             min={10}
             max={2000}
@@ -706,7 +736,7 @@ function SettingsPanel({
           />
           <SliderNumberRow
             id="eyepiece-focal-length"
-            label="OTA focal length (mm)"
+            label={t("card.telescope.focal")}
             value={eyepiece.focalLengthMm}
             min={50}
             max={20000}
@@ -718,7 +748,7 @@ function SettingsPanel({
           />
           <SliderNumberRow
             id="eyepiece-ocular-focal"
-            label="Eyepiece focal length (mm)"
+            label={t("card.telescope.eyepieceFocal")}
             value={eyepiece.eyepieceFocalLengthMm}
             min={1}
             max={100}
@@ -734,7 +764,7 @@ function SettingsPanel({
           />
           <SliderNumberRow
             id="eyepiece-afov"
-            label="Apparent field (°)"
+            label={t("card.telescope.afov")}
             value={eyepiece.apparentFovDeg}
             min={1}
             max={120}
@@ -746,7 +776,7 @@ function SettingsPanel({
           />
           <SliderNumberRow
             id="eyepiece-field-stop"
-            label="Field stop (mm, 0 = AFOV estimate)"
+            label={t("card.telescope.fieldStop")}
             value={eyepiece.fieldStopMm}
             min={0}
             max={120}
@@ -758,13 +788,18 @@ function SettingsPanel({
           />
         </div>
         <p style={helperTextStyle}>
-          {eyepieceMagnification(eyepiece).toFixed(1)}× · {eyepieceTrueFieldDeg(eyepiece).toFixed(3)}° true field · {eyepiecePlateScaleArcsecPerMm(eyepiece).toFixed(1)}″/mm plate scale · {eyepieceExitPupilMm(eyepiece).toFixed(1)} mm exit pupil
+          {t("card.telescope.summary", {
+            mag: eyepieceMagnification(eyepiece).toFixed(1),
+            trueField: eyepieceTrueFieldDeg(eyepiece).toFixed(3),
+            plateScale: eyepiecePlateScaleArcsecPerMm(eyepiece).toFixed(1),
+            exitPupil: eyepieceExitPupilMm(eyepiece).toFixed(1),
+          })}
         </p>
       </SettingCard>
 
       <SettingCard
-        title="Overlays"
-        description="Reference lines and labels are grouped by purpose so it is easier to find what to turn on."
+        title={t("card.overlays.title")}
+        description={t("card.overlays.description")}
       >
         <OverlayToggles config={overlays} onChange={onSetOverlays} />
       </SettingCard>
@@ -772,8 +807,8 @@ function SettingsPanel({
       {planning && <PlanningPanel planning={planning} />}
 
       <SettingCard
-        title="Atmosphere & extinction"
-        description="Model sky colour, haze, refraction, and local air conditions."
+        title={t("card.atmosphere.title")}
+        description={t("card.atmosphere.description")}
       >
         <label style={{ ...checkboxRowStyle, marginBottom: 10 }}>
           <input
@@ -782,11 +817,11 @@ function SettingsPanel({
             onChange={(e) => onSetAtmosphere({ ...atmosphere, enabled: e.target.checked })}
             style={{ accentColor: "#8fb1ff" }}
           />
-          Atmosphere / extinction
+          {t("card.atmosphere.enable")}
         </label>
 
         <label htmlFor="atmosphere-preset" style={labelStyle}>
-          Preset
+          {t("card.atmosphere.preset")}
         </label>
         <select
           id="atmosphere-preset"
@@ -797,7 +832,7 @@ function SettingsPanel({
         >
           {ATMOSPHERE_PRESETS.map((preset) => (
             <option key={preset} value={preset}>
-              {ATMOSPHERE_PRESET_LABELS[preset]}
+              {t(`atmospherePreset.${preset}`)}
             </option>
           ))}
         </select>
@@ -805,7 +840,7 @@ function SettingsPanel({
         <div style={advancedControlGridStyle}>
           <SliderNumberRow
             id="atmosphere-turbidity"
-            label="Turbidity"
+            label={t("card.atmosphere.turbidity")}
             value={atmosphere.turbidity}
             min={1.7}
             max={10}
@@ -818,7 +853,7 @@ function SettingsPanel({
           />
           <SliderNumberRow
             id="atmosphere-altitude"
-            label="Observer altitude (m)"
+            label={t("card.atmosphere.altitude")}
             value={atmosphere.observerAltitudeM}
             min={0}
             max={9000}
@@ -834,7 +869,7 @@ function SettingsPanel({
           />
           <SliderNumberRow
             id="atmosphere-ozone"
-            label="Ozone column (DU)"
+            label={t("card.atmosphere.ozone")}
             value={atmosphere.ozoneDu}
             min={0}
             max={600}
@@ -847,7 +882,7 @@ function SettingsPanel({
           />
           <SliderNumberRow
             id="atmosphere-visibility"
-            label="Visibility (km)"
+            label={t("card.atmosphere.visibility")}
             value={atmosphere.visibilityKm}
             min={1}
             max={200}
@@ -860,7 +895,7 @@ function SettingsPanel({
           />
           <SliderNumberRow
             id="atmosphere-pressure"
-            label="Pressure (hPa)"
+            label={t("card.atmosphere.pressure")}
             value={atmosphere.pressureHpa}
             min={0}
             max={1100}
@@ -873,7 +908,7 @@ function SettingsPanel({
           />
           <SliderNumberRow
             id="atmosphere-temperature"
-            label="Temperature (°C)"
+            label={t("card.atmosphere.temperature")}
             value={atmosphere.temperatureC}
             min={-80}
             max={60}
@@ -888,18 +923,18 @@ function SettingsPanel({
       </SettingCard>
 
       <SettingCard
-        title="Session"
-        description="Share this exact location, time, projection, and display setup. JSON sessions are schema-versioned and preserve time scales plus catalog/correction metadata."
+        title={t("card.session.title")}
+        description={t("card.session.description")}
       >
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button type="button" onClick={onCopySessionUrl} style={buttonStyle}>
-            Copy session URL
+            {t("card.session.copyUrl")}
           </button>
           <button type="button" onClick={onCopySessionJson} style={buttonStyle}>
-            Copy JSON
+            {t("card.session.copyJson")}
           </button>
           <button type="button" onClick={() => sessionFileRef.current?.click()} style={buttonStyle}>
-            Load JSON
+            {t("card.session.loadJson")}
           </button>
         </div>
         <input
@@ -914,9 +949,7 @@ function SettingsPanel({
             onImportSessionJson(await file.text());
           }}
         />
-        <p style={{ ...helperTextStyle, marginTop: 10 }}>
-          Drag the sky to look around · scroll to zoom
-        </p>
+        <p style={{ ...helperTextStyle, marginTop: 10 }}>{t("card.session.helper")}</p>
       </SettingCard>
     </div>
   );
@@ -928,13 +961,13 @@ function SettingCard({
   children,
 }: {
   title: string;
-  description: string;
+  description?: string;
   children: React.ReactNode;
 }) {
   return (
     <section style={settingCardStyle}>
       <div style={settingCardTitleStyle}>{title}</div>
-      <p style={settingCardDescriptionStyle}>{description}</p>
+      {description ? <p style={settingCardDescriptionStyle}>{description}</p> : null}
       {children}
     </section>
   );
@@ -947,10 +980,11 @@ function fmtEventTime(ms: number | null): string {
 }
 
 function PlanningPanel({ planning }: { planning: PlanningTable }) {
+  const t = useT();
   return (
     <SettingCard
-      title="Planning"
-      description="Tonight's rise, transit, set, and twilight windows for major objects."
+      title={t("card.planning.title")}
+      description={t("card.planning.description")}
     >
       <div style={{ maxHeight: 170, overflow: "auto", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
         {planning.rows.map((row) => (
@@ -964,10 +998,10 @@ function PlanningPanel({ planning }: { planning: PlanningTable }) {
               borderBottom: "1px solid rgba(255,255,255,0.06)",
             }}
           >
-            <span>{row.name}</span>
-            <span title="Rise">↑ {fmtEventTime(row.riseMs)}</span>
-            <span title="Transit">↟ {fmtEventTime(row.transitMs)}</span>
-            <span title="Set">↓ {fmtEventTime(row.setMs)}</span>
+            <span>{translateWasmBody(t, row.name)}</span>
+            <span title={t("card.planning.rise")}>↑ {fmtEventTime(row.riseMs)}</span>
+            <span title={t("card.planning.transit")}>↟ {fmtEventTime(row.transitMs)}</span>
+            <span title={t("card.planning.set")}>↓ {fmtEventTime(row.setMs)}</span>
             <span>{row.transitAltitudeDeg === null ? "—" : `${row.transitAltitudeDeg.toFixed(0)}°`}</span>
           </div>
         ))}
@@ -975,7 +1009,7 @@ function PlanningPanel({ planning }: { planning: PlanningTable }) {
       <div style={{ marginTop: 8, display: "grid", gap: 3 }}>
         {planning.twilight.map((segment) => (
           <div key={`${segment.label}-${segment.startMs}`} style={{ opacity: 0.72 }}>
-            {segment.label}: {fmtEventTime(segment.startMs)}–{fmtEventTime(segment.endMs)}
+            {translateWasmTwilight(t, segment.label)}: {fmtEventTime(segment.startMs)}–{fmtEventTime(segment.endMs)}
           </div>
         ))}
       </div>
@@ -1255,3 +1289,15 @@ const closeButtonStyle: React.CSSProperties = {
   font: "15px/1 ui-monospace, monospace",
   padding: 0,
 };
+
+const localeButtonStyle = (active: boolean): React.CSSProperties => ({
+  background: active ? "rgba(120, 160, 230, 0.45)" : "rgba(80, 130, 220, 0.18)",
+  color: "#e6edf5",
+  border: active
+    ? "1px solid rgba(170, 200, 255, 0.7)"
+    : "1px solid rgba(120, 160, 230, 0.3)",
+  borderRadius: 5,
+  padding: "5px 12px",
+  cursor: "pointer",
+  font: "inherit",
+});
