@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ATMOSPHERE_PRESET_DEFAULTS,
   ATMOSPHERE_PRESETS,
   SKY_PROJECTIONS,
   SKY_VIEWPOINTS,
+  clampAltitude,
+  clampFov,
   eyepieceExitPupilMm,
   eyepieceMagnification,
   eyepiecePlateScaleArcsecPerMm,
   eyepieceTrueFieldDeg,
+  wrapAzimuth,
   type AtmosphereConfig,
   type AtmospherePreset,
   type EyepieceConfig,
@@ -22,13 +25,10 @@ import {
   type View,
 } from "../observer";
 import { OverlayToggles } from "./OverlayToggles";
+import { STEP_DRAG_CURSOR, useStepDrag } from "./useStepDrag";
 import {
-  LOCALES,
-  LOCALE_LABELS,
   translateWasmBody,
   translateWasmTwilight,
-  useLocale,
-  useSetLocale,
   useT,
   type Translator,
 } from "../i18n";
@@ -51,7 +51,7 @@ type Props = {
   onSetPlanets: (next: PlanetsConfig) => void;
   onSetProjection: (next: ProjectionConfig) => void;
   onSetEyepiece: (next: EyepieceConfig) => void;
-  onCopySessionUrl: () => void | Promise<void>;
+  onSetView: (next: View) => void;
   onCopySessionJson: () => void | Promise<void>;
   onImportSessionJson: (raw: string) => void;
   onUseGeolocation: () => void;
@@ -59,7 +59,6 @@ type Props = {
 
 type Popover = "location" | "time" | "settings";
 type AddressLookupStatus = "idle" | "loading" | "success" | "error";
-type TimeDragTarget = "date" | "clock";
 
 type AddressLookupState = {
   status: AddressLookupStatus;
@@ -73,19 +72,16 @@ type NominatimPlace = {
   name?: string;
 };
 
-type TimeDragState = {
-  pointerId: number;
-  target: TimeDragTarget;
-  startX: number;
-  baseTimeMs: number;
-  lastStep: number;
-  moved: boolean;
-  element: HTMLElement;
-};
-
 const CLOCK_DRAG_STEP_MS = 10 * 60 * 1000;
 const TIME_DRAG_PX_PER_STEP = 24;
-const TIME_DRAG_CLICK_SLOP_PX = 4;
+const LOCATION_DRAG_PX_PER_STEP = 12;
+const LOCATION_DRAG_STEP_DEG = 0.1;
+const VIEW_DRAG_PX_PER_STEP = 12;
+const AZ_DRAG_STEP_DEG = 1;
+const ALT_DRAG_STEP_DEG = 0.5;
+/// Multiplicative FOV factor per step. <1 so dragging right (positive steps)
+/// zooms in (smaller FOV) to mirror scroll-wheel direction in StarCanvas.
+const FOV_DRAG_STEP_FACTOR = 0.97;
 const fmtDeg = (n: number) => `${n.toFixed(1)}°`;
 const COMPASS_DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 const compass = (az: number) => COMPASS_DIRS[Math.round(az / 45) % 8];
@@ -120,22 +116,10 @@ function toLocalDatetimeInput(ms: number): string {
   return `${toLocalDateInput(ms)}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function setLocalDatePart(ms: number, dateValue: string): number | null {
-  const [year, month, day] = dateValue.split("-").map(Number);
-  if (!year || !month || !day) return null;
-  const d = new Date(ms);
-  d.setFullYear(year, month - 1, day);
-  return d.getTime();
-}
-
 function addLocalDays(ms: number, days: number): number {
   const d = new Date(ms);
   d.setDate(d.getDate() + days);
   return d.getTime();
-}
-
-function applyTimeDragStep(ms: number, target: TimeDragTarget, steps: number): number {
-  return target === "date" ? addLocalDays(ms, steps) : ms + steps * CLOCK_DRAG_STEP_MS;
 }
 
 const clamp = (value: number, min: number, max: number) =>
@@ -168,7 +152,7 @@ export function StatusBar({
   onSetPlanets,
   onSetProjection,
   onSetEyepiece,
-  onCopySessionUrl,
+  onSetView,
   onCopySessionJson,
   onImportSessionJson,
   onUseGeolocation,
@@ -180,10 +164,59 @@ export function StatusBar({
     status: "idle",
     message: null,
   });
-  const rootRef = useRef<HTMLDivElement>(null);
   const addressLookupSeq = useRef(0);
-  const timeDragRef = useRef<TimeDragState | null>(null);
-  const suppressNextTimeClick = useRef(false);
+
+  // ---- Status-strip value scrubbers -------------------------------------
+  // Each useStepDrag call wires one draggable text handle. Drag right to
+  // increase the value; the parent button still toggles the popover on a
+  // pure click (no horizontal motion past the slop threshold).
+
+  const dateDrag = useStepDrag<number>({
+    pxPerStep: TIME_DRAG_PX_PER_STEP,
+    onStart: () => timeMs,
+    onStep: (base, steps) => onSetTime(addLocalDays(base, steps)),
+  });
+  const clockDrag = useStepDrag<number>({
+    pxPerStep: TIME_DRAG_PX_PER_STEP,
+    onStart: () => timeMs,
+    onStep: (base, steps) => onSetTime(base + steps * CLOCK_DRAG_STEP_MS),
+  });
+  const latDrag = useStepDrag<number>({
+    pxPerStep: LOCATION_DRAG_PX_PER_STEP,
+    onStart: () => observer.latitudeDeg,
+    onStep: (base, steps) =>
+      onSetObserver({
+        ...observer,
+        latitudeDeg: clamp(base + steps * LOCATION_DRAG_STEP_DEG, -90, 90),
+      }),
+  });
+  const lngDrag = useStepDrag<number>({
+    pxPerStep: LOCATION_DRAG_PX_PER_STEP,
+    onStart: () => observer.longitudeDeg,
+    onStep: (base, steps) =>
+      onSetObserver({
+        ...observer,
+        longitudeDeg: clamp(base + steps * LOCATION_DRAG_STEP_DEG, -180, 180),
+      }),
+  });
+  const azDrag = useStepDrag<number>({
+    pxPerStep: VIEW_DRAG_PX_PER_STEP,
+    onStart: () => view.azimuthDeg,
+    onStep: (base, steps) =>
+      onSetView({ ...view, azimuthDeg: wrapAzimuth(base + steps * AZ_DRAG_STEP_DEG) }),
+  });
+  const altDrag = useStepDrag<number>({
+    pxPerStep: VIEW_DRAG_PX_PER_STEP,
+    onStart: () => view.altitudeDeg,
+    onStep: (base, steps) =>
+      onSetView({ ...view, altitudeDeg: clampAltitude(base + steps * ALT_DRAG_STEP_DEG) }),
+  });
+  const fovDrag = useStepDrag<number>({
+    pxPerStep: VIEW_DRAG_PX_PER_STEP,
+    onStart: () => view.fovDeg,
+    onStep: (base, steps) =>
+      onSetView({ ...view, fovDeg: clampFov(base * Math.pow(FOV_DRAG_STEP_FACTOR, steps)) }),
+  });
 
   useEffect(() => {
     if (!openPopover) return;
@@ -255,80 +288,54 @@ export function StatusBar({
     }
   };
 
-  const beginTimeDrag = (
-    event: ReactPointerEvent<HTMLSpanElement>,
-    target: TimeDragTarget,
-  ) => {
-    if (event.button !== 0) return;
-    const element = event.currentTarget;
-    element.setPointerCapture(event.pointerId);
-    timeDragRef.current = {
-      pointerId: event.pointerId,
-      target,
-      startX: event.clientX,
-      baseTimeMs: timeMs,
-      lastStep: 0,
-      moved: false,
-      element,
-    };
+  const togglePopover = (popover: Popover, dragConsumed: boolean) => {
+    if (dragConsumed) return;
+    setOpenPopover(openPopover === popover ? null : popover);
   };
 
-  const updateTimeDrag = (event: ReactPointerEvent<HTMLSpanElement>) => {
-    const drag = timeDragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-
-    const deltaX = event.clientX - drag.startX;
-    if (Math.abs(deltaX) >= TIME_DRAG_CLICK_SLOP_PX) drag.moved = true;
-
-    const steps = Math.trunc(deltaX / TIME_DRAG_PX_PER_STEP);
-    if (steps === drag.lastStep) return;
-    drag.lastStep = steps;
-    onSetTime(applyTimeDragStep(drag.baseTimeMs, drag.target, steps));
-  };
-
-  const endTimeDrag = (event: ReactPointerEvent<HTMLSpanElement>) => {
-    const drag = timeDragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-
-    if (drag.moved) suppressNextTimeClick.current = true;
-    if (drag.element.hasPointerCapture(event.pointerId)) {
-      drag.element.releasePointerCapture(event.pointerId);
-    }
-    timeDragRef.current = null;
-  };
-
-  const toggleTimePopover = () => {
-    if (suppressNextTimeClick.current) {
-      suppressNextTimeClick.current = false;
-      return;
-    }
-    setOpenPopover(openPopover === "time" ? null : "time");
+  const cycleProjection = () => {
+    if (projection.viewpoint !== "earth") return;
+    const i = SKY_PROJECTIONS.indexOf(projection.projection);
+    const next = SKY_PROJECTIONS[(i + 1) % SKY_PROJECTIONS.length];
+    onSetProjection({ ...projection, projection: next });
   };
 
   const twilight = twilightLabel(t, sunAltitudeDeg);
+  const fovDraggable =
+    projection.viewpoint === "earth" && projection.projection === "perspective" && !eyepiece.enabled;
+  const projectionToggleable = projection.viewpoint === "earth";
 
   return (
-    <div ref={rootRef} style={containerStyle}>
+    <>
+      {openPopover !== null && (
+        <div
+          aria-hidden
+          onPointerDown={() => setOpenPopover(null)}
+          style={backdropStyle}
+        />
+      )}
       {openPopover === "location" && (
         <PopoverPanel title={t("location.title")} onClose={() => setOpenPopover(null)}>
-          <SliderNumberRow
-            id="quick-lat"
-            label={t("location.latitude")}
-            value={observer.latitudeDeg}
-            min={-90}
-            max={90}
-            step={0.1}
-            onChange={setLatitude}
-          />
-          <SliderNumberRow
-            id="quick-lng"
-            label={t("location.longitude")}
-            value={observer.longitudeDeg}
-            min={-180}
-            max={180}
-            step={0.1}
-            onChange={setLongitude}
-          />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <NumberInputRow
+              id="quick-lat"
+              label={t("location.latitude")}
+              value={observer.latitudeDeg}
+              min={-90}
+              max={90}
+              step={0.0001}
+              onChange={setLatitude}
+            />
+            <NumberInputRow
+              id="quick-lng"
+              label={t("location.longitude")}
+              value={observer.longitudeDeg}
+              min={-180}
+              max={180}
+              step={0.0001}
+              onChange={setLongitude}
+            />
+          </div>
 
           <form
             onSubmit={(e) => {
@@ -395,20 +402,6 @@ export function StatusBar({
             style={{ ...inputStyle, width: "100%" }}
           />
 
-          <label htmlFor="quick-date" style={{ ...labelStyle, marginTop: 10 }}>
-            {t("time.datePicker")}
-          </label>
-          <input
-            id="quick-date"
-            type="date"
-            value={toLocalDateInput(timeMs)}
-            onChange={(e) => {
-              const next = setLocalDatePart(timeMs, e.target.value);
-              if (next !== null && !Number.isNaN(next)) onSetTime(next);
-            }}
-            style={{ ...inputStyle, width: "100%" }}
-          />
-
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             <button type="button" onClick={() => onSetTime(Date.now())} style={buttonStyle}>
               {t("time.now")}
@@ -435,7 +428,11 @@ export function StatusBar({
       )}
 
       {openPopover === "settings" && (
-        <PopoverPanel title={t("settings.title")} onClose={() => setOpenPopover(null)}>
+        <PopoverPanel
+          title={t("settings.title")}
+          onClose={() => setOpenPopover(null)}
+          fillViewport
+        >
           <SettingsPanel
             overlays={overlays}
             atmosphere={atmosphere}
@@ -448,93 +445,131 @@ export function StatusBar({
             onSetPlanets={onSetPlanets}
             onSetProjection={onSetProjection}
             onSetEyepiece={onSetEyepiece}
-            onCopySessionUrl={onCopySessionUrl}
             onCopySessionJson={onCopySessionJson}
             onImportSessionJson={onImportSessionJson}
           />
         </PopoverPanel>
       )}
 
+      <div style={containerStyle}>
       <div style={stripStyle}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-start" }}>
-          <button
-            type="button"
-            aria-expanded={openPopover === "location"}
-            aria-haspopup="dialog"
-            onClick={() => setOpenPopover(openPopover === "location" ? null : "location")}
-            style={chipButtonStyle(openPopover === "location")}
+        <button
+          type="button"
+          aria-expanded={openPopover === "location"}
+          aria-haspopup="dialog"
+          onClick={() => togglePopover("location", latDrag.consumeDragClick() || lngDrag.consumeDragClick())}
+          style={chipButtonStyle(openPopover === "location")}
+        >
+          <span style={mutedStyle}>{t("status.location")} </span>
+          <span
+            title={t("status.dragLatTitle")}
+            {...latDrag.handlers}
+            style={draggableTimeValueStyle(openPopover === "location")}
           >
-            <span style={mutedStyle}>{t("status.location")} </span>
-            <span style={underlinedValueStyle(openPopover === "location")}>
-              {observer.latitudeDeg.toFixed(2)}°, {observer.longitudeDeg.toFixed(2)}°
-            </span>
-          </button>
-          <button
-            type="button"
-            aria-expanded={openPopover === "time"}
-            aria-haspopup="dialog"
-            onClick={toggleTimePopover}
-            style={chipButtonStyle(openPopover === "time")}
+            {observer.latitudeDeg.toFixed(2)}°
+          </span>
+          <span style={mutedStyle}>, </span>
+          <span
+            title={t("status.dragLngTitle")}
+            {...lngDrag.handlers}
+            style={draggableTimeValueStyle(openPopover === "location")}
           >
-            <span style={mutedStyle}>{t("status.time")} </span>
-            <span
-              title={t("status.dragDateTitle")}
-              onPointerDown={(e) => beginTimeDrag(e, "date")}
-              onPointerMove={updateTimeDrag}
-              onPointerUp={endTimeDrag}
-              onPointerCancel={endTimeDrag}
-              style={draggableTimeValueStyle(openPopover === "time")}
-            >
-              {fmtDate(timeMs)}
-            </span>
-            <span style={mutedStyle}> </span>
-            <span
-              title={t("status.dragClockTitle")}
-              onPointerDown={(e) => beginTimeDrag(e, "clock")}
-              onPointerMove={updateTimeDrag}
-              onPointerUp={endTimeDrag}
-              onPointerCancel={endTimeDrag}
-              style={draggableTimeValueStyle(openPopover === "time")}
-            >
-              {fmtClock(timeMs)}
-            </span>
-          </button>
-        </div>
-        <div style={{ marginTop: 4, textAlign: "left" }}>
-          <span style={mutedStyle}>{t("status.az")} </span>
+            {observer.longitudeDeg.toFixed(2)}°
+          </span>
+        </button>
+        <span style={separatorStyle}>  ·  </span>
+        <button
+          type="button"
+          aria-expanded={openPopover === "time"}
+          aria-haspopup="dialog"
+          onClick={() => togglePopover("time", dateDrag.consumeDragClick() || clockDrag.consumeDragClick())}
+          style={chipButtonStyle(openPopover === "time")}
+        >
+          <span style={mutedStyle}>{t("status.time")} </span>
+          <span
+            title={t("status.dragDateTitle")}
+            {...dateDrag.handlers}
+            style={draggableTimeValueStyle(openPopover === "time")}
+          >
+            {fmtDate(timeMs)}
+          </span>
+          <span style={mutedStyle}> </span>
+          <span
+            title={t("status.dragClockTitle")}
+            {...clockDrag.handlers}
+            style={draggableTimeValueStyle(openPopover === "time")}
+          >
+            {fmtClock(timeMs)}
+          </span>
+        </button>
+        <span style={separatorStyle}>  ·  </span>
+        <span style={mutedStyle}>{t("status.az")} </span>
+        <span
+          title={t("status.dragAzTitle")}
+          {...azDrag.handlers}
+          style={draggableValueStyle}
+        >
           {fmtDeg(view.azimuthDeg)} ({compass(view.azimuthDeg)})
-          <span style={separatorStyle}>  ·  </span>
-          <span style={mutedStyle}>{t("status.alt")} </span>
+        </span>
+        <span style={separatorStyle}>  ·  </span>
+        <span style={mutedStyle}>{t("status.alt")} </span>
+        <span
+          title={t("status.dragAltTitle")}
+          {...altDrag.handlers}
+          style={draggableValueStyle}
+        >
           {fmtDeg(view.altitudeDeg)}
-          <span style={separatorStyle}>  ·  </span>
-          <span style={mutedStyle}>{t("status.fov")} </span>
-          {projection.viewpoint === "earth" && projection.projection !== "perspective"
-            ? t("status.fovFullSky")
-            : eyepiece.enabled && projection.viewpoint === "earth" && projection.projection === "perspective"
-              ? t("status.fovEyepiece", { value: eyepieceTrueFieldDeg(eyepiece).toFixed(2) })
-              : fmtDeg(view.fovDeg)}
-          <span style={separatorStyle}>  ·  </span>
-          <span style={mutedStyle}>{t("status.projection")} </span>
-          {t(`projection.${projection.projection}`)}
-          <span style={separatorStyle}>  ·  </span>
-          <span style={mutedStyle}>{t("status.viewpoint")} </span>
-          {t(`viewpoint.${projection.viewpoint}`)}
-          <span style={separatorStyle}>  ·  </span>
-          <span style={mutedStyle}>{t("status.sky")} </span>
-          {twilight}
-          <span style={separatorStyle}>  ·  </span>
+        </span>
+        <span style={separatorStyle}>  ·  </span>
+        <span style={mutedStyle}>{t("status.fov")} </span>
+        {projection.viewpoint === "earth" && projection.projection !== "perspective" ? (
+          t("status.fovFullSky")
+        ) : eyepiece.enabled && projection.viewpoint === "earth" && projection.projection === "perspective" ? (
+          t("status.fovEyepiece", { value: eyepieceTrueFieldDeg(eyepiece).toFixed(2) })
+        ) : fovDraggable ? (
+          <span
+            title={t("status.dragFovTitle")}
+            {...fovDrag.handlers}
+            style={draggableValueStyle}
+          >
+            {fmtDeg(view.fovDeg)}
+          </span>
+        ) : (
+          fmtDeg(view.fovDeg)
+        )}
+        <span style={separatorStyle}>  ·  </span>
+        <span style={mutedStyle}>{t("status.projection")} </span>
+        {projectionToggleable ? (
           <button
             type="button"
-            aria-expanded={openPopover === "settings"}
-            aria-haspopup="dialog"
-            onClick={() => setOpenPopover(openPopover === "settings" ? null : "settings")}
+            onClick={cycleProjection}
+            title={t("status.cycleProjection")}
             style={inlineButtonStyle}
           >
-            <span style={underlinedValueStyle(openPopover === "settings")}>{t("status.settings")}</span>
+            <span style={underlinedValueStyle(false)}>{t(`projection.${projection.projection}`)}</span>
           </button>
-        </div>
+        ) : (
+          t(`projection.${projection.projection}`)
+        )}
+        <span style={separatorStyle}>  ·  </span>
+        <span style={mutedStyle}>{t("status.viewpoint")} </span>
+        {t(`viewpoint.${projection.viewpoint}`)}
+        <span style={separatorStyle}>  ·  </span>
+        <span style={mutedStyle}>{t("status.sky")} </span>
+        {twilight}
+        <span style={separatorStyle}>  ·  </span>
+        <button
+          type="button"
+          aria-expanded={openPopover === "settings"}
+          aria-haspopup="dialog"
+          onClick={() => setOpenPopover(openPopover === "settings" ? null : "settings")}
+          style={inlineButtonStyle}
+        >
+          <span style={underlinedValueStyle(openPopover === "settings")}>{t("status.settings")}</span>
+        </button>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -542,15 +577,24 @@ function PopoverPanel({
   title,
   children,
   onClose,
+  fillViewport = false,
 }: {
   title: string;
   children: React.ReactNode;
   onClose: () => void;
+  /// When true, the popover stretches from near the viewport top down to the
+  /// status strip. Use for the dense settings panel; leave false for the
+  /// short location/time popovers that should hug their anchor chip.
+  fillViewport?: boolean;
 }) {
   const t = useT();
   return (
-    <div role="dialog" aria-label={t("popover.dialogLabel", { title })} style={popoverStyle}>
-      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+    <div
+      role="dialog"
+      aria-label={t("popover.dialogLabel", { title })}
+      style={fillViewport ? popoverFillViewportStyle : popoverStyle}
+    >
+      <header style={popoverHeaderStyle}>
         <div style={{ fontSize: 11, opacity: 0.65, letterSpacing: 0.8 }}>{title.toUpperCase()}</div>
         <button
           type="button"
@@ -561,7 +605,7 @@ function PopoverPanel({
           ×
         </button>
       </header>
-      <div style={{ marginTop: 10 }}>{children}</div>
+      <div style={popoverBodyStyle}>{children}</div>
     </div>
   );
 }
@@ -579,10 +623,12 @@ type SettingsPanelProps = Pick<
   | "onSetPlanets"
   | "onSetProjection"
   | "onSetEyepiece"
-  | "onCopySessionUrl"
   | "onCopySessionJson"
   | "onImportSessionJson"
 >;
+
+type SettingsTab = "sky" | "view" | "environment" | "session";
+const SETTINGS_TABS: SettingsTab[] = ["sky", "view", "environment", "session"];
 
 function SettingsPanel({
   overlays,
@@ -596,13 +642,11 @@ function SettingsPanel({
   onSetPlanets,
   onSetProjection,
   onSetEyepiece,
-  onCopySessionUrl,
   onCopySessionJson,
   onImportSessionJson,
 }: SettingsPanelProps) {
   const t = useT();
-  const locale = useLocale();
-  const setLocale = useSetLocale();
+  const [tab, setTab] = useState<SettingsTab>("sky");
   const sessionFileRef = useRef<HTMLInputElement>(null);
   const setAtmospherePreset = (preset: AtmospherePreset) => {
     onSetAtmosphere({
@@ -613,35 +657,51 @@ function SettingsPanel({
   };
 
   return (
-    <div style={{ display: "grid", gap: 10 }}>
-      <SettingCard title={t("locale.label")}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 2 }}>
-          {LOCALES.map((code) => (
-            <button
-              key={code}
-              type="button"
-              aria-pressed={locale === code}
-              onClick={() => setLocale(code)}
-              style={localeButtonStyle(locale === code)}
-            >
-              {LOCALE_LABELS[code]}
-            </button>
-          ))}
-        </div>
-      </SettingCard>
+    <div style={{ display: "grid", gap: 14 }}>
+      <div role="tablist" aria-label={t("settings.tabsLabel")} style={settingsTabBarStyle}>
+        {SETTINGS_TABS.map((id) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            type="button"
+            onClick={() => setTab(id)}
+            style={settingsTabButtonStyle(tab === id)}
+          >
+            {t(`settings.tab.${id}`)}
+          </button>
+        ))}
+      </div>
 
-      <SettingCard title={t("card.view.title")} description={t("card.view.description")}>
-        <label style={checkboxRowStyle}>
-          <input
-            type="checkbox"
-            checked={planets.enabled}
-            onChange={(e) => onSetPlanets({ enabled: e.target.checked })}
-            style={{ accentColor: "#8fb1ff" }}
-          />
-          {t("card.view.mercuryToNeptune")}
-        </label>
+      {tab === "sky" && (
+        <>
+          <SettingCard title={t("card.solarSystem.title")} description={t("card.solarSystem.description")}>
+            <label style={checkboxRowStyle}>
+              <input
+                type="checkbox"
+                checked={planets.enabled}
+                onChange={(e) => onSetPlanets({ enabled: e.target.checked })}
+                style={{ accentColor: "#8fb1ff" }}
+              />
+              {t("card.view.mercuryToNeptune")}
+            </label>
+          </SettingCard>
 
-        <label htmlFor="sky-viewpoint" style={{ ...labelStyle, marginTop: 10 }}>
+          <SettingCard
+            title={t("card.overlays.title")}
+            description={t("card.overlays.description")}
+          >
+            <OverlayToggles config={overlays} onChange={onSetOverlays} />
+          </SettingCard>
+
+          {planning && <PlanningPanel planning={planning} />}
+        </>
+      )}
+
+      {tab === "view" && (
+        <>
+          <SettingCard title={t("card.view.title")} description={t("card.view.description")}>
+            <label htmlFor="sky-viewpoint" style={labelStyle}>
           {t("card.view.viewpoint")}
         </label>
         <select
@@ -705,13 +765,13 @@ function SettingsPanel({
             </option>
           ))}
         </select>
-        <p style={helperTextStyle}>{t("card.view.helper")}</p>
-      </SettingCard>
+            <p style={helperTextStyle}>{t("card.view.helper")}</p>
+          </SettingCard>
 
-      <SettingCard
-        title={t("card.telescope.title")}
-        description={t("card.telescope.description")}
-      >
+          <SettingCard
+            title={t("card.telescope.title")}
+            description={t("card.telescope.description")}
+          >
         <label style={{ ...checkboxRowStyle, marginBottom: 10 }}>
           <input
             type="checkbox"
@@ -787,29 +847,23 @@ function SettingsPanel({
             }
           />
         </div>
-        <p style={helperTextStyle}>
-          {t("card.telescope.summary", {
-            mag: eyepieceMagnification(eyepiece).toFixed(1),
-            trueField: eyepieceTrueFieldDeg(eyepiece).toFixed(3),
-            plateScale: eyepiecePlateScaleArcsecPerMm(eyepiece).toFixed(1),
-            exitPupil: eyepieceExitPupilMm(eyepiece).toFixed(1),
-          })}
-        </p>
-      </SettingCard>
+            <p style={helperTextStyle}>
+              {t("card.telescope.summary", {
+                mag: eyepieceMagnification(eyepiece).toFixed(1),
+                trueField: eyepieceTrueFieldDeg(eyepiece).toFixed(3),
+                plateScale: eyepiecePlateScaleArcsecPerMm(eyepiece).toFixed(1),
+                exitPupil: eyepieceExitPupilMm(eyepiece).toFixed(1),
+              })}
+            </p>
+          </SettingCard>
+        </>
+      )}
 
-      <SettingCard
-        title={t("card.overlays.title")}
-        description={t("card.overlays.description")}
-      >
-        <OverlayToggles config={overlays} onChange={onSetOverlays} />
-      </SettingCard>
-
-      {planning && <PlanningPanel planning={planning} />}
-
-      <SettingCard
-        title={t("card.atmosphere.title")}
-        description={t("card.atmosphere.description")}
-      >
+      {tab === "environment" && (
+        <SettingCard
+          title={t("card.atmosphere.title")}
+          description={t("card.atmosphere.description")}
+        >
         <label style={{ ...checkboxRowStyle, marginBottom: 10 }}>
           <input
             type="checkbox"
@@ -920,37 +974,37 @@ function SettingsPanel({
             }
           />
         </div>
-      </SettingCard>
+        </SettingCard>
+      )}
 
-      <SettingCard
-        title={t("card.session.title")}
-        description={t("card.session.description")}
-      >
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" onClick={onCopySessionUrl} style={buttonStyle}>
-            {t("card.session.copyUrl")}
-          </button>
-          <button type="button" onClick={onCopySessionJson} style={buttonStyle}>
-            {t("card.session.copyJson")}
-          </button>
-          <button type="button" onClick={() => sessionFileRef.current?.click()} style={buttonStyle}>
-            {t("card.session.loadJson")}
-          </button>
-        </div>
-        <input
-          ref={sessionFileRef}
-          type="file"
-          accept="application/json,.json"
-          style={{ display: "none" }}
-          onChange={async (event) => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = "";
-            if (!file) return;
-            onImportSessionJson(await file.text());
-          }}
-        />
-        <p style={{ ...helperTextStyle, marginTop: 10 }}>{t("card.session.helper")}</p>
-      </SettingCard>
+      {tab === "session" && (
+        <SettingCard
+          title={t("card.session.title")}
+          description={t("card.session.description")}
+        >
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" onClick={onCopySessionJson} style={buttonStyle}>
+              {t("card.session.copyJson")}
+            </button>
+            <button type="button" onClick={() => sessionFileRef.current?.click()} style={buttonStyle}>
+              {t("card.session.loadJson")}
+            </button>
+          </div>
+          <input
+            ref={sessionFileRef}
+            type="file"
+            accept="application/json,.json"
+            style={{ display: "none" }}
+            onChange={async (event) => {
+              const file = event.currentTarget.files?.[0];
+              event.currentTarget.value = "";
+              if (!file) return;
+              onImportSessionJson(await file.text());
+            }}
+          />
+          <p style={{ ...helperTextStyle, marginTop: 10 }}>{t("card.session.helper")}</p>
+        </SettingCard>
+      )}
     </div>
   );
 }
@@ -1064,6 +1118,47 @@ function Vec3NumberRow({
   );
 }
 
+function NumberInputRow({
+  id,
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div>
+      <label htmlFor={id} style={labelStyle}>
+        {label}
+      </label>
+      <input
+        id={id}
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => {
+          const raw = e.target.value;
+          if (raw === "") return;
+          const next = Number(raw);
+          if (Number.isFinite(next)) onChange(next);
+        }}
+        style={{ ...inputStyle, width: "100%" }}
+      />
+    </div>
+  );
+}
+
 function SliderNumberRow({
   id,
   label,
@@ -1137,12 +1232,9 @@ const containerStyle: React.CSSProperties = {
 };
 
 const stripStyle: React.CSSProperties = {
-  padding: "8px 10px",
-  background: "rgba(10, 12, 22, 0.58)",
-  borderRadius: 8,
-  backdropFilter: "blur(8px)",
-  boxShadow: "0 2px 10px rgba(0,0,0,0.35)",
-  opacity: 0.9,
+  // No background: the strip floats directly over the sky. Text shadow keeps
+  // it readable against bright Milky Way / horizon regions.
+  textShadow: "0 1px 2px rgba(0, 0, 0, 0.85), 0 0 4px rgba(0, 0, 0, 0.7)",
 };
 
 const chipButtonStyle = (_active: boolean): React.CSSProperties => ({
@@ -1175,24 +1267,80 @@ const underlinedValueStyle = (active: boolean): React.CSSProperties => ({
 
 const draggableTimeValueStyle = (active: boolean): React.CSSProperties => ({
   ...underlinedValueStyle(active),
-  cursor: "ew-resize",
+  cursor: STEP_DRAG_CURSOR,
   touchAction: "none",
   userSelect: "none",
 });
 
-const popoverStyle: React.CSSProperties = {
-  position: "absolute",
-  left: 0,
-  bottom: "calc(100% + 10px)",
+const draggableValueStyle: React.CSSProperties = {
+  cursor: STEP_DRAG_CURSOR,
+  touchAction: "none",
+  userSelect: "none",
+  textDecoration: "underline",
+  textDecorationColor: "rgba(207, 216, 227, 0.35)",
+  textDecorationStyle: "dotted",
+  textUnderlineOffset: 3,
+};
+
+/// Click-to-dismiss backdrop. Transparent so the sky stays visible while a
+/// popover is open; sits below the popover (which has its own zIndex above).
+const backdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 4,
+};
+
+const popoverShellStyle: React.CSSProperties = {
+  position: "fixed",
+  left: 14,
   width: "min(420px, calc(100vw - 28px))",
-  maxHeight: "calc(100vh - 110px)",
-  overflowY: "auto",
-  overscrollBehavior: "contain",
-  padding: "12px 14px 14px",
+  display: "flex",
+  flexDirection: "column",
   background: "rgba(14, 18, 30, 0.96)",
   borderRadius: 12,
   boxShadow: "0 12px 34px rgba(0, 0, 0, 0.55)",
   backdropFilter: "blur(10px)",
+  zIndex: 6,
+  overflow: "hidden",
+  // Popovers are siblings of the status strip (not nested), so they do not
+  // inherit color/font from `containerStyle`. Re-apply them here so the inner
+  // controls pick up the same monospace + light-grey look.
+  color: "#cfd8e3",
+  font: "12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace",
+};
+
+/// Short popovers (location, time): anchor just above the status strip.
+const popoverStyle: React.CSSProperties = {
+  ...popoverShellStyle,
+  bottom: 56,
+  maxHeight: "calc(100vh - 80px)",
+};
+
+/// Settings popover: dense list — stretch from near the viewport top down
+/// to just above the status strip so the top stays attached to the window.
+const popoverFillViewportStyle: React.CSSProperties = {
+  ...popoverShellStyle,
+  top: 14,
+  bottom: 56,
+};
+
+const popoverHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  padding: "12px 14px 10px",
+  background: "rgba(14, 18, 30, 0.98)",
+  borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+  flexShrink: 0,
+};
+
+/// Scrolling body that sits under the sticky header.
+const popoverBodyStyle: React.CSSProperties = {
+  padding: "10px 14px 14px",
+  overflowY: "auto",
+  overscrollBehavior: "contain",
+  flex: 1,
+  minHeight: 0,
 };
 
 const mutedStyle: React.CSSProperties = { opacity: 0.55 };
@@ -1206,10 +1354,6 @@ const labelStyle: React.CSSProperties = {
 
 const addressLookupFormStyle: React.CSSProperties = {
   margin: "12px 0 10px",
-  padding: "10px",
-  background: "rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.08)",
-  borderRadius: 8,
 };
 
 const lookupMessageStyle = (status: AddressLookupStatus): React.CSSProperties => ({
@@ -1232,12 +1376,33 @@ const checkboxRowStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
-const settingCardStyle: React.CSSProperties = {
-  padding: "11px 12px 12px",
-  background: "rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.09)",
-  borderRadius: 10,
+/// Flat "section" look: a small uppercase heading. Sections are separated
+/// purely by the parent grid `gap` — no boxes, borders, or background tints,
+/// to avoid the previous card-in-card-in-card depth in the settings panel.
+const settingCardStyle: React.CSSProperties = {};
+
+const settingsTabBarStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 4,
+  borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+  paddingBottom: 0,
 };
+
+const settingsTabButtonStyle = (active: boolean): React.CSSProperties => ({
+  appearance: "none",
+  background: "transparent",
+  border: 0,
+  borderBottom: active ? "2px solid rgba(170, 200, 255, 0.85)" : "2px solid transparent",
+  color: active ? "#e6edf5" : "#cfd8e3",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 11,
+  letterSpacing: 0.65,
+  textTransform: "uppercase",
+  opacity: active ? 1 : 0.65,
+  padding: "6px 10px",
+  marginBottom: -1,
+});
 
 const settingCardTitleStyle: React.CSSProperties = {
   color: "#dbe7ff",
@@ -1247,7 +1412,7 @@ const settingCardTitleStyle: React.CSSProperties = {
 };
 
 const settingCardDescriptionStyle: React.CSSProperties = {
-  margin: "4px 0 10px",
+  margin: "4px 0 8px",
   opacity: 0.55,
   fontSize: 11,
 };
@@ -1290,14 +1455,3 @@ const closeButtonStyle: React.CSSProperties = {
   padding: 0,
 };
 
-const localeButtonStyle = (active: boolean): React.CSSProperties => ({
-  background: active ? "rgba(120, 160, 230, 0.45)" : "rgba(80, 130, 220, 0.18)",
-  color: "#e6edf5",
-  border: active
-    ? "1px solid rgba(170, 200, 255, 0.7)"
-    : "1px solid rgba(120, 160, 230, 0.3)",
-  borderRadius: 5,
-  padding: "5px 12px",
-  cursor: "pointer",
-  font: "inherit",
-});

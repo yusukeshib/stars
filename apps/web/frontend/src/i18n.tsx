@@ -1,10 +1,8 @@
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useMemo,
-  useState,
   type ReactNode,
 } from "react";
 
@@ -21,38 +19,28 @@ import {
 /// site via `translateWasmBody` / `translateWasmTwilight` so the renderer
 /// stays locale-agnostic.
 
-export const LOCALES = ["en", "ja"] as const;
+const LOCALES = ["en", "ja"] as const;
 export type Locale = (typeof LOCALES)[number];
 export const DEFAULT_LOCALE: Locale = "en";
-
-export const LOCALE_LABELS: Record<Locale, string> = {
-  en: "English",
-  ja: "日本語",
-};
 
 const isLocale = (s: unknown): s is Locale =>
   typeof s === "string" && (LOCALES as readonly string[]).includes(s);
 
-const STORAGE_KEY = "stars:locale";
-
-/// Resolve the initial locale at module load.
+/// Resolve the locale once at module load from the browser environment.
 ///
 /// Priority:
 ///   1. `?lang=` URL parameter (so shared session URLs can pin a language).
-///   2. `localStorage["stars:locale"]` (so the user's last manual pick wins).
-///   3. `navigator.language` / `navigator.languages` prefix match.
-///   4. `DEFAULT_LOCALE` ("en").
+///   2. `navigator.language` / `navigator.languages` prefix match.
+///   3. `DEFAULT_LOCALE` ("en").
+///
+/// There is no in-app language switcher: the UI follows the browser. Users
+/// who want to override pass `?lang=ja` (or `?lang=en`) in the URL, or change
+/// their browser's preferred language.
 function detectInitialLocale(): Locale {
   if (typeof window === "undefined") return DEFAULT_LOCALE;
   const params = new URLSearchParams(window.location.search);
   const urlLang = params.get("lang");
   if (isLocale(urlLang)) return urlLang;
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (isLocale(stored)) return stored;
-  } catch {
-    // localStorage may be unavailable (private mode); fall through.
-  }
   const candidates = [navigator.language, ...(navigator.languages ?? [])];
   for (const candidate of candidates) {
     if (!candidate) continue;
@@ -67,9 +55,6 @@ function detectInitialLocale(): Locale {
 type Dictionary = Record<string, string>;
 
 const en: Dictionary = {
-  // Locale switcher
-  "locale.label": "Language",
-
   // Status bar — chips
   "status.location": "Location",
   "status.time": "Time",
@@ -84,6 +69,12 @@ const en: Dictionary = {
   "status.settings": "Settings",
   "status.dragDateTitle": "Drag left/right to change the date by one day per step",
   "status.dragClockTitle": "Drag left/right to change the time by 10 minutes per step",
+  "status.dragLatTitle": "Drag left/right to change latitude by 0.1° per step",
+  "status.dragLngTitle": "Drag left/right to change longitude by 0.1° per step",
+  "status.dragAzTitle": "Drag left/right to change azimuth by 1° per step",
+  "status.dragAltTitle": "Drag left/right to change altitude by 0.5° per step",
+  "status.dragFovTitle": "Drag right to zoom in, left to zoom out",
+  "status.cycleProjection": "Click to cycle screen projection",
 
   // Twilight summary line in the status bar
   "twilight.initializing": "Sky model initializing",
@@ -115,7 +106,6 @@ const en: Dictionary = {
   // Time popover
   "time.title": "Time",
   "time.localDateTime": "Local date/time",
-  "time.datePicker": "Date picker",
   "time.now": "Now",
   "time.minus1h": "−1h",
   "time.plus1h": "+1h",
@@ -124,6 +114,14 @@ const en: Dictionary = {
 
   // Settings popover
   "settings.title": "Settings",
+  "settings.tabsLabel": "Settings sections",
+  "settings.tab.sky": "Sky",
+  "settings.tab.view": "View",
+  "settings.tab.environment": "Environment",
+  "settings.tab.session": "Session",
+
+  "card.solarSystem.title": "Solar system",
+  "card.solarSystem.description": "Draw the major bodies alongside the stars.",
 
   // Settings — View & objects card
   "card.view.title": "View & objects",
@@ -174,7 +172,6 @@ const en: Dictionary = {
   "card.session.title": "Session",
   "card.session.description":
     "Share this exact location, time, projection, and display setup. JSON sessions are schema-versioned and preserve time scales plus catalog/correction metadata.",
-  "card.session.copyUrl": "Copy session URL",
   "card.session.copyJson": "Copy JSON",
   "card.session.loadJson": "Load JSON",
   "card.session.helper": "Drag the sky to look around · scroll to zoom",
@@ -265,8 +262,6 @@ const en: Dictionary = {
 };
 
 const ja: Dictionary = {
-  "locale.label": "言語",
-
   "status.location": "現在地",
   "status.time": "時刻",
   "status.az": "方位",
@@ -280,6 +275,12 @@ const ja: Dictionary = {
   "status.settings": "設定",
   "status.dragDateTitle": "左右にドラッグで日付を 1 日ずつ変更",
   "status.dragClockTitle": "左右にドラッグで時刻を 10 分ずつ変更",
+  "status.dragLatTitle": "左右にドラッグで緯度を 0.1° ずつ変更",
+  "status.dragLngTitle": "左右にドラッグで経度を 0.1° ずつ変更",
+  "status.dragAzTitle": "左右にドラッグで方位を 1° ずつ変更",
+  "status.dragAltTitle": "左右にドラッグで高度を 0.5° ずつ変更",
+  "status.dragFovTitle": "右ドラッグでズームイン、左ドラッグでズームアウト",
+  "status.cycleProjection": "クリックで画面投影を切り替え",
 
   "twilight.initializing": "空モデルを初期化中",
   "twilight.daylight": "昼 (太陽 {alt}°)",
@@ -307,7 +308,6 @@ const ja: Dictionary = {
 
   "time.title": "時刻",
   "time.localDateTime": "ローカル日時",
-  "time.datePicker": "日付",
   "time.now": "現在",
   "time.minus1h": "−1時間",
   "time.plus1h": "+1時間",
@@ -315,6 +315,14 @@ const ja: Dictionary = {
     "クイック操作後も時計は進み続けます。ステータスバーの日付を左右にドラッグで 1 日ずつ、時刻を左右にドラッグで 10 分ずつ変更できます。",
 
   "settings.title": "設定",
+  "settings.tabsLabel": "設定セクション",
+  "settings.tab.sky": "天体",
+  "settings.tab.view": "視点",
+  "settings.tab.environment": "環境",
+  "settings.tab.session": "セッション",
+
+  "card.solarSystem.title": "太陽系天体",
+  "card.solarSystem.description": "主要な太陽系天体を星と一緒に描画します。",
 
   "card.view.title": "視点と天体",
   "card.view.description": "地図投影と、星と一緒に描画する太陽系天体を選択します。",
@@ -358,7 +366,6 @@ const ja: Dictionary = {
   "card.session.title": "セッション",
   "card.session.description":
     "現在の位置、時刻、投影、表示設定をそのまま共有します。JSON セッションは schema-versioned で、時刻系・カタログ・補正のメタデータも保持します。",
-  "card.session.copyUrl": "セッション URL をコピー",
   "card.session.copyJson": "JSON をコピー",
   "card.session.loadJson": "JSON を読み込み",
   "card.session.helper": "空をドラッグで視点移動 · スクロールでズーム",
@@ -457,66 +464,45 @@ function makeTranslator(locale: Locale): Translator {
 
 type I18nContextValue = {
   locale: Locale;
-  setLocale: (next: Locale) => void;
   t: Translator;
 };
-
-const I18nContext = createContext<I18nContextValue | null>(null);
 
 /// Re-evaluated once at module load. Components only see this through the
 /// context so SSR / tests can override by mounting their own provider.
 const INITIAL_LOCALE = detectInitialLocale();
 
-export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(INITIAL_LOCALE);
+const I18nContext = createContext<I18nContextValue>({
+  locale: INITIAL_LOCALE,
+  t: makeTranslator(INITIAL_LOCALE),
+});
 
+export function I18nProvider({ children }: { children: ReactNode }) {
   // Mirror onto <html lang="…"> so assistive tech and CSS lang selectors see
   // the right language. The static `lang="en"` in index.html is the boot-time
   // fallback for the brief moment before React mounts.
   useEffect(() => {
     if (typeof document !== "undefined") {
-      document.documentElement.lang = locale;
-    }
-  }, [locale]);
-
-  const setLocale = useCallback((next: Locale) => {
-    setLocaleState(next);
-    try {
-      localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      // Persistence is best-effort; runtime switch still works.
+      document.documentElement.lang = INITIAL_LOCALE;
     }
   }, []);
 
   const value = useMemo<I18nContextValue>(
-    () => ({ locale, setLocale, t: makeTranslator(locale) }),
-    [locale, setLocale],
+    () => ({ locale: INITIAL_LOCALE, t: makeTranslator(INITIAL_LOCALE) }),
+    [],
   );
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 
-function useI18n(): I18nContextValue {
-  const value = useContext(I18nContext);
-  if (!value) {
-    throw new Error("useI18n must be used inside <I18nProvider>");
-  }
-  return value;
-}
-
-/// Returns the active translator. Components that only need text should use
-/// this; components that need to render a language switcher use `useLocale` /
-/// `useSetLocale` alongside.
+/// Returns the active translator. The locale is fixed for the lifetime of
+/// the page — there is no in-app switcher; refresh after changing
+/// `?lang=` or the browser preference.
 export function useT(): Translator {
-  return useI18n().t;
+  return useContext(I18nContext).t;
 }
 
 export function useLocale(): Locale {
-  return useI18n().locale;
-}
-
-export function useSetLocale(): (next: Locale) => void {
-  return useI18n().setLocale;
+  return useContext(I18nContext).locale;
 }
 
 /// Translate a body name emitted by the wasm bridge (e.g. "Mercury"). Falls

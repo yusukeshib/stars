@@ -80,10 +80,10 @@ export function OverlayToggles({ config, onChange }: Props) {
   };
 
   return (
-    <div style={{ display: "grid", gap: 10 }}>
+    <div style={{ display: "grid", gap: 14 }}>
       {OVERLAY_GROUPS.map((group) => (
-        <fieldset key={group.titleKey} style={groupStyle}>
-          <legend style={groupLegendStyle}>{t(group.titleKey)}</legend>
+        <section key={group.titleKey} style={groupStyle}>
+          <div style={groupLegendStyle}>{t(group.titleKey)}</div>
           <p style={groupDescriptionStyle}>{t(group.descriptionKey)}</p>
           <div style={{ display: "grid", gap: 4 }}>
             {group.layers.map((layer) => {
@@ -113,10 +113,10 @@ export function OverlayToggles({ config, onChange }: Props) {
               );
             })}
           </div>
-        </fieldset>
+        </section>
       ))}
 
-      <div style={groupStyle}>
+      <section style={groupStyle}>
         <div style={groupLegendStyle}>{t("overlayGroup.lineStyling.title")}</div>
         <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
           <Slider
@@ -138,9 +138,9 @@ export function OverlayToggles({ config, onChange }: Props) {
             onChange={(v) => onChange({ ...config, opacity: v })}
           />
         </div>
-      </div>
+      </section>
 
-      <div style={groupStyle}>
+      <section style={groupStyle}>
         <div style={groupLegendStyle}>{t("overlayGroup.deepSkyDensity.title")}</div>
         <p style={groupDescriptionStyle}>{t("overlayGroup.deepSkyDensity.description")}</p>
         <div style={{ marginTop: 4, display: "grid", gap: 8 }}>
@@ -154,21 +154,16 @@ export function OverlayToggles({ config, onChange }: Props) {
             onChange={(v) => onChange({ ...config, deepSkyMagnitudeLimit: v })}
           />
         </div>
-      </div>
+      </section>
     </div>
   );
 }
 
-const groupStyle: CSSProperties = {
-  margin: 0,
-  padding: "9px 10px 10px",
-  background: "rgba(255, 255, 255, 0.035)",
-  border: "1px solid rgba(255, 255, 255, 0.08)",
-  borderRadius: 8,
-};
+/// Flat sub-section: no box; the parent SettingCard already provides the
+/// visual frame. Sibling sections are separated by the parent grid `gap`.
+const groupStyle: CSSProperties = {};
 
 const groupLegendStyle: CSSProperties = {
-  padding: "0 4px",
   color: "#dbe7ff",
   fontSize: 11,
   letterSpacing: 0.45,
