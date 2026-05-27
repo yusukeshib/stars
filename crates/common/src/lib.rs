@@ -287,10 +287,10 @@ pub fn eyepiece_from_args(enabled: bool, overrides: EyepieceOverrides) -> Eyepie
 /// ever-growing positional argument list.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AtmosphereOverrides {
-    pub turbidity: Option<f32>,
+    pub aerosol_beta: Option<f32>,
+    pub aerosol_alpha: Option<f32>,
     pub observer_altitude_m: Option<f32>,
     pub ozone_du: Option<f32>,
-    pub visibility_km: Option<f32>,
     pub pressure_hpa: Option<f32>,
     pub temperature_c: Option<f32>,
 }
@@ -306,17 +306,17 @@ pub fn atmosphere_from_args(
     }
 
     let mut atmosphere = Atmosphere::from_preset(AtmospherePreset::from(preset));
-    if let Some(turbidity) = overrides.turbidity {
-        atmosphere.turbidity = turbidity;
+    if let Some(beta) = overrides.aerosol_beta {
+        atmosphere.aerosol_beta = beta;
+    }
+    if let Some(alpha) = overrides.aerosol_alpha {
+        atmosphere.aerosol_alpha = alpha;
     }
     if let Some(observer_altitude_m) = overrides.observer_altitude_m {
         atmosphere.observer_altitude_m = observer_altitude_m;
     }
     if let Some(ozone_du) = overrides.ozone_du {
         atmosphere.ozone_du = ozone_du;
-    }
-    if let Some(visibility_km) = overrides.visibility_km {
-        atmosphere.visibility_km = visibility_km;
     }
     if let Some(pressure_hpa) = overrides.pressure_hpa {
         atmosphere.pressure_hpa = pressure_hpa;
@@ -541,22 +541,19 @@ mod tests {
             false,
             AtmospherePresetArg::HazyUrban,
             AtmosphereOverrides {
-                turbidity: Some(4.0),
+                aerosol_beta: Some(0.25),
+                aerosol_alpha: Some(0.9),
                 observer_altitude_m: Some(1234.0),
                 ozone_du: Some(280.0),
-                visibility_km: Some(20.0),
                 pressure_hpa: Some(900.0),
                 temperature_c: Some(5.0),
             },
         );
-        assert_eq!(
-            atmosphere.extinction_k_rgb,
-            Atmosphere::HAZY_URBAN.extinction_k_rgb
-        );
-        assert_eq!(atmosphere.turbidity, 4.0);
+        // Overrides take precedence over the preset's (β, α, DU) values.
+        assert_eq!(atmosphere.aerosol_beta, 0.25);
+        assert_eq!(atmosphere.aerosol_alpha, 0.9);
         assert_eq!(atmosphere.observer_altitude_m, 1234.0);
         assert_eq!(atmosphere.ozone_du, 280.0);
-        assert_eq!(atmosphere.visibility_km, 20.0);
         assert_eq!(atmosphere.pressure_hpa, 900.0);
         assert_eq!(atmosphere.temperature_c, 5.0);
 
@@ -564,15 +561,15 @@ mod tests {
             true,
             AtmospherePresetArg::ClearRural,
             AtmosphereOverrides {
-                turbidity: Some(4.0),
+                aerosol_beta: Some(0.25),
+                aerosol_alpha: Some(0.9),
                 observer_altitude_m: Some(1234.0),
                 ozone_du: Some(280.0),
-                visibility_km: Some(20.0),
                 pressure_hpa: Some(900.0),
                 temperature_c: Some(5.0),
             },
         );
-        assert_eq!(off.extinction_k_rgb, Atmosphere::OFF.extinction_k_rgb);
+        assert_eq!(off.extinction_k_rgb(), [0.0; 3]);
         assert!(!off.sunlit_scattering);
     }
 

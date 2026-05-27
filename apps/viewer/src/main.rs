@@ -140,9 +140,14 @@ struct Args {
     #[arg(long, default_value_t = AtmospherePresetArg::ClearRural)]
     atmosphere_preset: AtmospherePresetArg,
 
-    /// Override aerosol / haze turbidity for sunlit sky scattering.
+    /// Ångström aerosol optical depth at 550 nm (β). Drives both stellar
+    /// k(λ) and daylight Mie scattering through the unified V-37 state.
     #[arg(long)]
-    turbidity: Option<f32>,
+    aerosol_beta: Option<f32>,
+
+    /// Ångström wavelength exponent (α). Continental aerosols ≈ 1.3.
+    #[arg(long)]
+    aerosol_alpha: Option<f32>,
 
     /// Override observer altitude above sea level in metres.
     #[arg(long)]
@@ -151,10 +156,6 @@ struct Args {
     /// Override total ozone column in Dobson units for sunset/twilight colour.
     #[arg(long)]
     ozone_du: Option<f32>,
-
-    /// Override meteorological visibility in kilometres for aerosol haze.
-    #[arg(long)]
-    visibility_km: Option<f32>,
 
     /// Override surface pressure in hPa for atmospheric refraction.
     #[arg(long)]
@@ -220,10 +221,10 @@ fn main() -> Result<()> {
             args.no_extinction,
             args.atmosphere_preset,
             AtmosphereOverrides {
-                turbidity: args.turbidity,
+                aerosol_beta: args.aerosol_beta,
+                aerosol_alpha: args.aerosol_alpha,
                 observer_altitude_m: args.observer_altitude_m,
                 ozone_du: args.ozone_du,
-                visibility_km: args.visibility_km,
                 pressure_hpa: args.pressure_hpa,
                 temperature_c: args.temperature_c,
             },

@@ -59,10 +59,13 @@ export type AtmospherePreset = (typeof ATMOSPHERE_PRESETS)[number];
 export type AtmosphereConfig = {
   enabled: boolean;
   preset: AtmospherePreset;
-  turbidity: number;
+  /** Ångström aerosol optical depth at 550 nm. Drives both stellar k(λ) and
+   *  daylight Mie scattering through the unified V-37 state. */
+  aerosolBeta: number;
+  /** Ångström wavelength exponent. Continental aerosols ≈ 1.3. */
+  aerosolAlpha: number;
   observerAltitudeM: number;
   ozoneDu: number;
-  visibilityKm: number;
   pressureHpa: number;
   temperatureC: number;
 };
@@ -153,18 +156,18 @@ export type PlanningTable = {
 export const DEFAULT_ATMOSPHERE_CONFIG: AtmosphereConfig = {
   enabled: true,
   preset: "clear-rural",
-  turbidity: 2.5,
+  aerosolBeta: 0.10,
+  aerosolAlpha: 1.30,
   observerAltitudeM: 0,
   ozoneDu: 300,
-  visibilityKm: 50,
   pressureHpa: 1010,
   temperatureC: 10,
 };
 
-export const ATMOSPHERE_PRESET_DEFAULTS: Record<AtmospherePreset, Pick<AtmosphereConfig, "turbidity" | "observerAltitudeM" | "ozoneDu" | "visibilityKm" | "pressureHpa" | "temperatureC">> = {
-  "clear-rural": { turbidity: 2.5, observerAltitudeM: 0, ozoneDu: 300, visibilityKm: 50, pressureHpa: 1010, temperatureC: 10 },
-  "hazy-urban": { turbidity: 5.0, observerAltitudeM: 0, ozoneDu: 325, visibilityKm: 12, pressureHpa: 1010, temperatureC: 15 },
-  "high-altitude": { turbidity: 2.0, observerAltitudeM: 2500, ozoneDu: 275, visibilityKm: 80, pressureHpa: 750, temperatureC: 0 },
+export const ATMOSPHERE_PRESET_DEFAULTS: Record<AtmospherePreset, Pick<AtmosphereConfig, "aerosolBeta" | "aerosolAlpha" | "observerAltitudeM" | "ozoneDu" | "pressureHpa" | "temperatureC">> = {
+  "clear-rural":   { aerosolBeta: 0.10, aerosolAlpha: 1.30, observerAltitudeM: 0,    ozoneDu: 300, pressureHpa: 1010, temperatureC: 10 },
+  "hazy-urban":    { aerosolBeta: 0.35, aerosolAlpha: 1.10, observerAltitudeM: 0,    ozoneDu: 325, pressureHpa: 1010, temperatureC: 15 },
+  "high-altitude": { aerosolBeta: 0.04, aerosolAlpha: 1.30, observerAltitudeM: 2500, ozoneDu: 275, pressureHpa:  750, temperatureC:  0 },
 };
 
 export const isAtmospherePreset = (s: unknown): s is AtmospherePreset =>

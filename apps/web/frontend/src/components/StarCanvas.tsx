@@ -121,10 +121,10 @@ export function StarCanvas({
     handleRef.current?.set_atmosphere_config(
       atmosphere.enabled,
       atmosphere.preset,
-      atmosphere.turbidity,
+      atmosphere.aerosolBeta,
+      atmosphere.aerosolAlpha,
       atmosphere.observerAltitudeM,
       atmosphere.ozoneDu,
-      atmosphere.visibilityKm,
       atmosphere.pressureHpa,
       atmosphere.temperatureC,
     );
@@ -149,10 +149,10 @@ export function StarCanvas({
       handle.set_atmosphere_config(
         at.enabled,
         at.preset,
-        at.turbidity,
+        at.aerosolBeta,
+        at.aerosolAlpha,
         at.observerAltitudeM,
         at.ozoneDu,
-        at.visibilityKm,
         at.pressureHpa,
         at.temperatureC,
       );

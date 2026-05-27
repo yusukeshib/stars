@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "appVersion": "0.1.0",
   "createdBy": "stars-cli",
   "observer": {
@@ -55,10 +55,10 @@
   "atmosphere": {
     "enabled": true,
     "preset": "clear-rural",
-    "turbidity": 2.5,
+    "aerosolBeta": 0.1,
+    "aerosolAlpha": 1.3,
     "observerAltitudeM": 0.0,
     "ozoneDu": 300.0,
-    "visibilityKm": 50.0,
     "pressureHpa": 1010.0,
     "temperatureC": 10.0
   },

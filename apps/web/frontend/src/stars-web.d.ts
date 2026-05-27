@@ -37,10 +37,10 @@ declare module "stars-web" {
     set_atmosphere_config(
       enabled: boolean,
       preset: string,
-      turbidity: number,
+      aerosolBeta: number,
+      aerosolAlpha: number,
       observerAltitudeM: number,
       ozoneDu: number,
-      visibilityKm: number,
       pressureHpa: number,
       temperatureC: number,
     ): void;

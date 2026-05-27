@@ -86,10 +86,10 @@ function loadAtmosphereFromUrl(params?: URLSearchParams): AtmosphereConfig | nul
   if (
     !params.has("atmosphere") &&
     !params.has("atmospherePreset") &&
-    !params.has("turbidity") &&
+    !params.has("aerosolBeta") &&
+    !params.has("aerosolAlpha") &&
     !params.has("observerAltitudeM") &&
     !params.has("ozoneDu") &&
-    !params.has("visibilityKm") &&
     !params.has("pressureHpa") &&
     !params.has("temperatureC")
   ) {
@@ -102,7 +102,8 @@ function loadAtmosphereFromUrl(params?: URLSearchParams): AtmosphereConfig | nul
     ...DEFAULT_ATMOSPHERE_CONFIG,
     enabled,
     preset: isAtmospherePreset(presetParam) ? presetParam : DEFAULT_ATMOSPHERE_CONFIG.preset,
-    turbidity: numberParam(params, "turbidity", DEFAULT_ATMOSPHERE_CONFIG.turbidity, 1.7, 10),
+    aerosolBeta: numberParam(params, "aerosolBeta", DEFAULT_ATMOSPHERE_CONFIG.aerosolBeta, 0, 2),
+    aerosolAlpha: numberParam(params, "aerosolAlpha", DEFAULT_ATMOSPHERE_CONFIG.aerosolAlpha, 0, 4),
     observerAltitudeM: numberParam(
       params,
       "observerAltitudeM",
@@ -111,13 +112,6 @@ function loadAtmosphereFromUrl(params?: URLSearchParams): AtmosphereConfig | nul
       9000,
     ),
     ozoneDu: numberParam(params, "ozoneDu", DEFAULT_ATMOSPHERE_CONFIG.ozoneDu, 0, 600),
-    visibilityKm: numberParam(
-      params,
-      "visibilityKm",
-      DEFAULT_ATMOSPHERE_CONFIG.visibilityKm,
-      1,
-      200,
-    ),
     pressureHpa: numberParam(params, "pressureHpa", DEFAULT_ATMOSPHERE_CONFIG.pressureHpa, 0, 1100),
     temperatureC: numberParam(
       params,
@@ -151,10 +145,10 @@ function loadSessionFromUrl(): UrlSession | null {
     "up",
     "atmosphere",
     "atmospherePreset",
-    "turbidity",
+    "aerosolBeta",
+    "aerosolAlpha",
     "observerAltitudeM",
     "ozoneDu",
-    "visibilityKm",
     "pressureHpa",
     "temperatureC",
     "eyepiece",
@@ -268,10 +262,10 @@ function sessionUrl({ observer, view, overlays, atmosphere, planets, projection,
   url.searchParams.set("up", vec3SearchParam(projection.external.up));
   url.searchParams.set("atmosphere", atmosphere.enabled ? "on" : "off");
   url.searchParams.set("atmospherePreset", atmosphere.preset);
-  url.searchParams.set("turbidity", atmosphere.turbidity.toFixed(1));
+  url.searchParams.set("aerosolBeta", atmosphere.aerosolBeta.toFixed(3));
+  url.searchParams.set("aerosolAlpha", atmosphere.aerosolAlpha.toFixed(2));
   url.searchParams.set("observerAltitudeM", String(Math.round(atmosphere.observerAltitudeM)));
   url.searchParams.set("ozoneDu", String(Math.round(atmosphere.ozoneDu)));
-  url.searchParams.set("visibilityKm", atmosphere.visibilityKm.toFixed(0));
   url.searchParams.set("pressureHpa", String(Math.round(atmosphere.pressureHpa)));
   url.searchParams.set("temperatureC", atmosphere.temperatureC.toFixed(0));
   url.searchParams.set("eyepiece", eyepiece.enabled ? "on" : "off");

@@ -243,7 +243,13 @@ The exact pass layout can change, but responsibilities should stay separated:
 - **Camera/uniform preparation**: CPU-side apparent-date, observer-dependent,
   eyepiece true-field, and projection data that the GPU needs for a frame.
 - **Skyglow / atmosphere**: diffuse night sky, zodiacal light, airglow, dust,
-  sunlit scattering, twilight, moonlit sky, and solar-system disks. Perspective
+  sunlit scattering, twilight, moonlit sky, and solar-system disks. Stellar
+  extinction and daylight scattering both read the same canonical
+  (β, α, DU, observer altitude) optical-depth state through
+  `astronomy::atmosphere::extinction_coefficients` (V-37); the renderer
+  derives a Preetham-effective turbidity from β at uniform-build time so
+  the daylight Mie term and the stellar k(λ) reddening can't disagree.
+  Perspective
   reconstructs rays through the inverse view-projection matrix; all-sky modes
   invert the selected Mollweide / Aitoff / Hammer map before rotating the ray
   back to equatorial coordinates. In external viewpoints, this pass instead

@@ -162,10 +162,11 @@ const en: Dictionary = {
     "Model sky colour, haze, refraction, and local air conditions.",
   "card.atmosphere.enable": "Atmosphere / extinction",
   "card.atmosphere.preset": "Preset",
-  "card.atmosphere.turbidity": "Turbidity",
+  "card.atmosphere.aerosolBeta": "Aerosol β (550 nm AOD)",
+  "card.atmosphere.aerosolAlpha": "Aerosol α (Ångström exponent)",
   "card.atmosphere.altitude": "Observer altitude (m)",
   "card.atmosphere.ozone": "Ozone column (DU)",
-  "card.atmosphere.visibility": "Visibility (km)",
+
   "card.atmosphere.pressure": "Pressure (hPa)",
   "card.atmosphere.temperature": "Temperature (°C)",
 
@@ -346,10 +347,11 @@ const ja: Dictionary = {
   "card.atmosphere.description": "空の色、もや、大気差、現地の大気条件をモデル化します。",
   "card.atmosphere.enable": "大気 / 減光",
   "card.atmosphere.preset": "プリセット",
-  "card.atmosphere.turbidity": "混濁度",
+  "card.atmosphere.aerosolBeta": "エアロゾル β (550 nm AOD)",
+  "card.atmosphere.aerosolAlpha": "エアロゾル α (オングストローム指数)",
   "card.atmosphere.altitude": "観測地点標高 (m)",
   "card.atmosphere.ozone": "オゾン量 (DU)",
-  "card.atmosphere.visibility": "視程 (km)",
+
   "card.atmosphere.pressure": "気圧 (hPa)",
   "card.atmosphere.temperature": "気温 (°C)",
 

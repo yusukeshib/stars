@@ -21,7 +21,7 @@ use crate::{AtmospherePresetArg, OverlayArg, ProjectionArg, ViewpointArg};
 
 /// Current JSON session schema. Increment when a breaking semantic change is
 /// made to any serialized field.
-pub const SESSION_SCHEMA_VERSION: u32 = 1;
+pub const SESSION_SCHEMA_VERSION: u32 = 2;
 
 /// Complete scene/session file. Unknown future fields are ignored by serde, but
 /// the top-level schema version must match before a host uses the data.
@@ -131,10 +131,13 @@ pub struct SessionVec3 {
 pub struct SessionAtmosphere {
     pub enabled: bool,
     pub preset: AtmospherePresetArg,
-    pub turbidity: f32,
+    /// Ångström aerosol optical depth at 550 nm. Drives both stellar k(λ)
+    /// and the daylight Mie aerosol term (V-37).
+    pub aerosol_beta: f32,
+    /// Ångström wavelength exponent (continental aerosols ≈ 1.3).
+    pub aerosol_alpha: f32,
     pub observer_altitude_m: f32,
     pub ozone_du: f32,
-    pub visibility_km: f32,
     pub pressure_hpa: f32,
     pub temperature_c: f32,
 }
@@ -360,10 +363,10 @@ impl SessionAtmosphere {
         Self {
             enabled: atmosphere.sunlit_scattering,
             preset: AtmospherePresetArg::from(preset),
-            turbidity: atmosphere.turbidity,
+            aerosol_beta: atmosphere.aerosol_beta,
+            aerosol_alpha: atmosphere.aerosol_alpha,
             observer_altitude_m: atmosphere.observer_altitude_m,
             ozone_du: atmosphere.ozone_du,
-            visibility_km: atmosphere.visibility_km,
             pressure_hpa: atmosphere.pressure_hpa,
             temperature_c: atmosphere.temperature_c,
         }
@@ -374,8 +377,14 @@ impl SessionAtmosphere {
             return Ok(Atmosphere::OFF);
         }
         let mut atmosphere = Atmosphere::from_preset(self.preset.into());
-        atmosphere.turbidity =
-            finite_in_range(self.turbidity as f64, 1.7, 10.0, "atmosphere.turbidity")? as f32;
+        atmosphere.aerosol_beta =
+            finite_in_range(self.aerosol_beta as f64, 0.0, 2.0, "atmosphere.aerosolBeta")? as f32;
+        atmosphere.aerosol_alpha = finite_in_range(
+            self.aerosol_alpha as f64,
+            0.0,
+            4.0,
+            "atmosphere.aerosolAlpha",
+        )? as f32;
         atmosphere.observer_altitude_m = finite_in_range(
             self.observer_altitude_m as f64,
             0.0,
@@ -384,12 +393,6 @@ impl SessionAtmosphere {
         )? as f32;
         atmosphere.ozone_du =
             finite_in_range(self.ozone_du as f64, 0.0, 600.0, "atmosphere.ozoneDu")? as f32;
-        atmosphere.visibility_km = finite_in_range(
-            self.visibility_km as f64,
-            1.0,
-            200.0,
-            "atmosphere.visibilityKm",
-        )? as f32;
         atmosphere.pressure_hpa = finite_in_range(
             self.pressure_hpa as f64,
             0.0,
@@ -667,7 +670,7 @@ mod tests {
         let scene = sample_scene();
         let session = StarSession::from_scene("0.1.0", "test", &scene);
         let json = serde_json::to_string(&session).unwrap();
-        assert!(json.contains("\"schemaVersion\":1"));
+        assert!(json.contains("\"schemaVersion\":2"));
         assert!(json.contains("\"cardinal-labels\""));
         let parsed: StarSession = serde_json::from_str(&json).unwrap();
         let restored = parsed.to_scene().unwrap();
@@ -690,7 +693,7 @@ mod tests {
     #[test]
     fn rejects_out_of_range_session_controls() {
         let mut session = StarSession::from_scene("0.1.0", "test", &sample_scene());
-        session.atmosphere.turbidity = 100.0;
+        session.atmosphere.aerosol_beta = 100.0;
         assert!(session.to_scene().is_err());
 
         let mut session = StarSession::from_scene("0.1.0", "test", &sample_scene());

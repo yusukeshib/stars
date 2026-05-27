@@ -839,16 +839,29 @@ function SettingsPanel({
 
         <div style={advancedControlGridStyle}>
           <SliderNumberRow
-            id="atmosphere-turbidity"
-            label={t("card.atmosphere.turbidity")}
-            value={atmosphere.turbidity}
-            min={1.7}
-            max={10}
-            step={0.1}
-            decimals={1}
+            id="atmosphere-aerosol-beta"
+            label={t("card.atmosphere.aerosolBeta")}
+            value={atmosphere.aerosolBeta}
+            min={0}
+            max={1}
+            step={0.01}
+            decimals={2}
             disabled={!atmosphere.enabled}
-            onChange={(turbidity) =>
-              onSetAtmosphere({ ...atmosphere, turbidity: clamp(turbidity, 1.7, 10) })
+            onChange={(aerosolBeta) =>
+              onSetAtmosphere({ ...atmosphere, aerosolBeta: clamp(aerosolBeta, 0, 1) })
+            }
+          />
+          <SliderNumberRow
+            id="atmosphere-aerosol-alpha"
+            label={t("card.atmosphere.aerosolAlpha")}
+            value={atmosphere.aerosolAlpha}
+            min={0}
+            max={4}
+            step={0.05}
+            decimals={2}
+            disabled={!atmosphere.enabled}
+            onChange={(aerosolAlpha) =>
+              onSetAtmosphere({ ...atmosphere, aerosolAlpha: clamp(aerosolAlpha, 0, 4) })
             }
           />
           <SliderNumberRow
@@ -878,19 +891,6 @@ function SettingsPanel({
             disabled={!atmosphere.enabled}
             onChange={(ozoneDu) =>
               onSetAtmosphere({ ...atmosphere, ozoneDu: clamp(ozoneDu, 0, 600) })
-            }
-          />
-          <SliderNumberRow
-            id="atmosphere-visibility"
-            label={t("card.atmosphere.visibility")}
-            value={atmosphere.visibilityKm}
-            min={1}
-            max={200}
-            step={1}
-            decimals={0}
-            disabled={!atmosphere.enabled}
-            onChange={(visibilityKm) =>
-              onSetAtmosphere({ ...atmosphere, visibilityKm: clamp(visibilityKm, 1, 200) })
             }
           />
           <SliderNumberRow

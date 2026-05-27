@@ -361,11 +361,11 @@ impl StarView {
 
     /// Update atmosphere controls from the web UI. `enabled=false` matches the
     /// native `--no-extinction` flag and disables both extinction and sunlit
-    /// scattering.
-    pub fn set_atmosphere(&self, enabled: bool, turbidity: f32, observer_altitude_m: f32) {
+    /// scattering. `aerosol_beta` is the Ångström optical depth at 550 nm.
+    pub fn set_atmosphere(&self, enabled: bool, aerosol_beta: f32, observer_altitude_m: f32) {
         self.state.borrow_mut().camera.atmosphere = if enabled {
             Atmosphere {
-                turbidity,
+                aerosol_beta,
                 observer_altitude_m,
                 ..Atmosphere::default()
             }
@@ -386,16 +386,17 @@ impl StarView {
         };
     }
 
-    /// Update the complete atmosphere state from the web UI: preset controls
-    /// extinction coefficients, while turbidity / altitude remain user-tunable.
+    /// Update the complete atmosphere state from the web UI. The preset only
+    /// picks defaults; the canonical (β, α, DU, h) state drives both stellar
+    /// k(λ) and the daylight scattering shader (V-37).
     pub fn set_atmosphere_config(
         &self,
         enabled: bool,
         preset: String,
-        turbidity: f32,
+        aerosol_beta: f32,
+        aerosol_alpha: f32,
         observer_altitude_m: f32,
         ozone_du: f32,
-        visibility_km: f32,
         pressure_hpa: f32,
         temperature_c: f32,
     ) {
@@ -403,10 +404,10 @@ impl StarView {
             let mut atmosphere = AtmospherePreset::from_kebab_str(&preset)
                 .map(Atmosphere::from_preset)
                 .unwrap_or_default();
-            atmosphere.turbidity = turbidity;
+            atmosphere.aerosol_beta = aerosol_beta;
+            atmosphere.aerosol_alpha = aerosol_alpha;
             atmosphere.observer_altitude_m = observer_altitude_m;
             atmosphere.ozone_du = ozone_du;
-            atmosphere.visibility_km = visibility_km;
             atmosphere.pressure_hpa = pressure_hpa;
             atmosphere.temperature_c = temperature_c;
             atmosphere
