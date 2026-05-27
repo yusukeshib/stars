@@ -38,9 +38,17 @@ type DragState<Base> = {
   /// Last seen `clientX`; used to compute per-event deltas before pointer
   /// lock kicks in. After lock, `event.movementX` is used directly.
   lastClientX: number;
+  /// Where the pointer was when the drag started. While Pointer Lock hides
+  /// the OS cursor, we paint a small ew-resize indicator at this position
+  /// so the user keeps a visual anchor.
+  startClientX: number;
+  startClientY: number;
   /// True when this drag may upgrade to Pointer Lock (mouse pointer + API
   /// present). Touch / pen keep the cursor-follows-finger model.
   wantsLock: boolean;
+  /// Floating cursor indicator element (created lazily once lock is
+  /// acquired). Null otherwise.
+  indicator: HTMLElement | null;
   base: Base;
   lastStep: number;
   moved: boolean;
@@ -59,6 +67,38 @@ export type StepDrag = {
 /// scrubbing maps 1:1 to physical mouse motion. Not in older lib.dom typings.
 type LockOptions = { unadjustedMovement?: boolean };
 
+/// Inline SVG for the floating ew-resize indicator. White fill + dark
+/// stroke so it stays visible against any sky colour.
+const CURSOR_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="14" viewBox="0 0 24 14">' +
+  '<path d="M 1 7 L 6 3 L 6 6 L 18 6 L 18 3 L 23 7 L 18 11 L 18 8 L 6 8 L 6 11 Z" ' +
+  'fill="#f5f7fb" stroke="#0a0c16" stroke-width="1" stroke-linejoin="round"/></svg>';
+
+function createCursorIndicator(clientX: number, clientY: number): HTMLElement {
+  const el = document.createElement("div");
+  el.setAttribute("aria-hidden", "true");
+  el.style.cssText = [
+    "position: fixed",
+    `left: ${clientX - 12}px`,
+    `top: ${clientY - 7}px`,
+    "width: 24px",
+    "height: 14px",
+    "pointer-events: none",
+    "z-index: 2147483647",
+    "filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55))",
+  ].join("; ");
+  el.innerHTML = CURSOR_SVG;
+  document.body.appendChild(el);
+  return el;
+}
+
+function removeCursorIndicator(drag: { indicator: HTMLElement | null }) {
+  if (drag.indicator) {
+    drag.indicator.remove();
+    drag.indicator = null;
+  }
+}
+
 export function useStepDrag<Base>(opts: {
   pxPerStep: number;
   clickSlopPx?: number;
@@ -72,16 +112,22 @@ export function useStepDrag<Base>(opts: {
   const suppressClickRef = useRef(false);
   const slop = opts.clickSlopPx ?? DEFAULT_CLICK_SLOP_PX;
 
-  // If the user hits Esc (or the browser drops the lock for any other
-  // reason) mid-drag, treat it as a drag cancel: clear our state and let
-  // pointerup arrive with nothing to do. Without this, a subsequent
-  // pointermove would keep accumulating motion the user did not intend.
+  // Sync the floating cursor indicator with lock state:
+  //   - lock acquired → paint indicator at the original pointer position;
+  //   - lock dropped (Esc, tab blur, etc.) mid-drag → remove indicator and
+  //     cancel the drag, otherwise a subsequent pointermove would keep
+  //     accumulating motion the user did not intend.
   useEffect(() => {
     if (typeof document === "undefined") return;
     const onLockChange = () => {
       const drag = stateRef.current;
       if (!drag || !drag.wantsLock) return;
-      if (document.pointerLockElement !== drag.element) {
+      if (document.pointerLockElement === drag.element) {
+        if (!drag.indicator) {
+          drag.indicator = createCursorIndicator(drag.startClientX, drag.startClientY);
+        }
+      } else {
+        removeCursorIndicator(drag);
         if (drag.moved) suppressClickRef.current = true;
         stateRef.current = null;
       }
@@ -103,6 +149,7 @@ export function useStepDrag<Base>(opts: {
     if (drag.element.hasPointerCapture(event.pointerId)) {
       drag.element.releasePointerCapture(event.pointerId);
     }
+    removeCursorIndicator(drag);
     releaseLockIfHeld(drag.element);
     stateRef.current = null;
   };
@@ -123,7 +170,10 @@ export function useStepDrag<Base>(opts: {
         pointerId: event.pointerId,
         totalDx: 0,
         lastClientX: event.clientX,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
         wantsLock,
+        indicator: null,
         base: opts.onStart(),
         lastStep: 0,
         moved: false,
