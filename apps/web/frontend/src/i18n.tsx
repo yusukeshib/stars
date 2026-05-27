@@ -171,7 +171,6 @@ const en: Dictionary = {
   "card.session.title": "Session",
   "card.session.description":
     "Share this exact location, time, projection, and display setup. JSON sessions are schema-versioned and preserve time scales plus catalog/correction metadata.",
-  "card.session.copyUrl": "Copy session URL",
   "card.session.copyJson": "Copy JSON",
   "card.session.loadJson": "Load JSON",
   "card.session.helper": "Drag the sky to look around · scroll to zoom",
@@ -365,7 +364,6 @@ const ja: Dictionary = {
   "card.session.title": "セッション",
   "card.session.description":
     "現在の位置、時刻、投影、表示設定をそのまま共有します。JSON セッションは schema-versioned で、時刻系・カタログ・補正のメタデータも保持します。",
-  "card.session.copyUrl": "セッション URL をコピー",
   "card.session.copyJson": "JSON をコピー",
   "card.session.loadJson": "JSON を読み込み",
   "card.session.helper": "空をドラッグで視点移動 · スクロールでズーム",

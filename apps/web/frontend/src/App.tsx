@@ -326,6 +326,24 @@ export function App() {
     return () => clearTimeout(handle);
   }, [observer, view, overlays, atmosphere, planets, projection, eyepiece]);
 
+  // Mirror the current session into the address bar so the user can copy the
+  // URL at any time without going through the explicit "Copy URL" action.
+  // Debounced for the same reason as the persistence effect (scrubber drags
+  // hit ~60 Hz). `timeMs` is intentionally absent from the dependency list:
+  // including it would re-trigger this effect every animation frame as the
+  // clock ticks, churning the address bar. The closure still reads the live
+  // `timeMs` when the debounce fires, so the URL captures the moment at
+  // which the user last touched any parameter.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handle = setTimeout(() => {
+      const url = sessionUrl({ observer, view, overlays, atmosphere, planets, projection, eyepiece, timeMs });
+      window.history.replaceState(null, "", url);
+    }, 250);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- timeMs deliberately excluded; see comment above.
+  }, [observer, view, overlays, atmosphere, planets, projection, eyepiece]);
+
   // Clock always ticks. When the user picks a custom moment via the quick time
   // popup we simply rebase `timeMs`; the same loop keeps advancing from there.
   useEffect(() => {
@@ -417,15 +435,6 @@ export function App() {
         onSetProjection={setProjection}
         onSetEyepiece={setEyepiece}
         onSetView={setView}
-        onCopySessionUrl={async () => {
-          const url = sessionUrl({ observer, view, overlays, atmosphere, planets, projection, eyepiece, timeMs });
-          try {
-            if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(url);
-          } catch {
-            // Clipboard permission is best-effort; updating the address bar still shares the session.
-          }
-          window.history.replaceState(null, "", url);
-        }}
         onCopySessionJson={async () => {
           const json = starSessionJson(currentSessionState());
           let copied = false;

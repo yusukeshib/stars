@@ -52,7 +52,6 @@ type Props = {
   onSetProjection: (next: ProjectionConfig) => void;
   onSetEyepiece: (next: EyepieceConfig) => void;
   onSetView: (next: View) => void;
-  onCopySessionUrl: () => void | Promise<void>;
   onCopySessionJson: () => void | Promise<void>;
   onImportSessionJson: (raw: string) => void;
   onUseGeolocation: () => void;
@@ -154,7 +153,6 @@ export function StatusBar({
   onSetProjection,
   onSetEyepiece,
   onSetView,
-  onCopySessionUrl,
   onCopySessionJson,
   onImportSessionJson,
   onUseGeolocation,
@@ -447,7 +445,6 @@ export function StatusBar({
             onSetPlanets={onSetPlanets}
             onSetProjection={onSetProjection}
             onSetEyepiece={onSetEyepiece}
-            onCopySessionUrl={onCopySessionUrl}
             onCopySessionJson={onCopySessionJson}
             onImportSessionJson={onImportSessionJson}
           />
@@ -626,7 +623,6 @@ type SettingsPanelProps = Pick<
   | "onSetPlanets"
   | "onSetProjection"
   | "onSetEyepiece"
-  | "onCopySessionUrl"
   | "onCopySessionJson"
   | "onImportSessionJson"
 >;
@@ -646,7 +642,6 @@ function SettingsPanel({
   onSetPlanets,
   onSetProjection,
   onSetEyepiece,
-  onCopySessionUrl,
   onCopySessionJson,
   onImportSessionJson,
 }: SettingsPanelProps) {
@@ -988,9 +983,6 @@ function SettingsPanel({
           description={t("card.session.description")}
         >
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" onClick={onCopySessionUrl} style={buttonStyle}>
-              {t("card.session.copyUrl")}
-            </button>
             <button type="button" onClick={onCopySessionJson} style={buttonStyle}>
               {t("card.session.copyJson")}
             </button>
