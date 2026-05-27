@@ -1,7 +1,8 @@
 use astronomy::{
-    apparent_planets_topocentric, earth_velocity_over_c_j2000, equation_of_equinoxes,
-    equatorial_to_horizontal_matrix, illuminants, lmst_radians, precession_nutation_matrix,
-    solar_eclipse_state, years_since_j2000, Observer, Planet, SolarEclipseKind, SunMoonApparent,
+    active_occluders, apparent_planets_topocentric, earth_velocity_over_c_j2000,
+    equation_of_equinoxes, equatorial_to_horizontal_matrix, illuminants, lmst_radians,
+    precession_nutation_matrix, solar_eclipse_state, years_since_j2000, Observer, Planet,
+    SolarEclipseKind, SunMoonApparent, MAX_OCCLUDERS,
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -269,6 +270,24 @@ pub(crate) struct CameraUniform {
     ///   partial / annular phase, so the daylight Koomen falloff fades
     ///   in continuously around C2 / C3 instead of stepping.
     pub solar_eclipse_state: [f32; 4],
+    /// V-51b analytic-mask occluder array. Each active occluder occupies
+    /// two consecutive `vec4` rows (`MAX_OCCLUDERS * 2` slots):
+    ///
+    /// * row `2i`   `front_dir_radius`: xyz = front-disk equatorial
+    ///   direction (unit), w = angular radius in radians.
+    /// * row `2i+1` `target_kind`: x = [`OccluderTarget::shader_code`]
+    ///   (Sun = 0, Moon = 1, Planet(`k`) = 2+`k`, Stars = -1),
+    ///   y = [`OccultationKind::shader_code`], z = obscuration fraction,
+    ///   w = reserved (0).
+    ///
+    /// The shader iterates `0..occluder_count.x` and applies one
+    /// `disk_mask` subtract per entry whose target matches the back disk
+    /// being shaded. Padded entries stay zero; the iteration bound
+    /// guarantees they are never sampled.
+    pub occluders: [[f32; 4]; MAX_OCCLUDERS * 2],
+    /// V-51b active-occluder header: `x` = count
+    /// (`<= MAX_OCCLUDERS` as an `f32`), `yzw` reserved.
+    pub occluder_params: [f32; 4],
 }
 
 pub(crate) const HW_COEFFS_PER_CHANNEL: usize = 9;
@@ -1330,6 +1349,56 @@ impl Camera {
         // and on `Atmosphere::OFF` (which already turns daylight off, so
         // there is nothing to darken). The Koomen 1952 daylight falloff is
         // applied later inside the skyglow shader via this uniform.
+        // V-51b analytic-mask occluder uniform. Populated alongside the
+        // V-51c Sun-specific photometric falloff so the two paths cannot
+        // drift: the same predicate (`sunlit_scattering && !external`)
+        // gates both. Off-eclipse and on external viewpoints the list is
+        // empty and the shader short-circuits on `count == 0`.
+        //
+        // `active_occluders` returns date-of-epoch equatorial directions
+        // without atmospheric refraction; the renderer's star, Sun, and
+        // Moon disks live in J2000 equatorial after a Saemundsson
+        // refraction pass, so we map each front-disk direction through
+        // the same `apparent_disk_direction_j2000` pipeline. Skipping
+        // this step misaligns the analytic mask by the refraction lift
+        // (~0.5° near the horizon, ~tens of arcsec near zenith) and
+        // breaks bit-parity with the V-51c golden frame.
+        let mut occluders_uniform = [[0.0_f32; 4]; MAX_OCCLUDERS * 2];
+        let mut occluder_count: u32 = 0;
+        if self.atmosphere.sunlit_scattering && !self.viewpoint.is_external() {
+            let list = active_occluders(self.observer);
+            for (i, occ) in list.as_slice().iter().enumerate() {
+                let dir_date = Vec3::new(
+                    occ.front_dir_eq[0] as f32,
+                    occ.front_dir_eq[1] as f32,
+                    occ.front_dir_eq[2] as f32,
+                );
+                let dir_j2000 = apparent_disk_direction_j2000(
+                    dir_date,
+                    self.atmosphere.sunlit_scattering,
+                    pressure_hpa,
+                    temperature_c,
+                    date_to_local,
+                    local_to_date,
+                    date_to_j2000,
+                );
+                occluders_uniform[2 * i] = [
+                    dir_j2000.x,
+                    dir_j2000.y,
+                    dir_j2000.z,
+                    occ.front_radius_rad as f32,
+                ];
+                occluders_uniform[2 * i + 1] = [
+                    occ.target.shader_code() as f32,
+                    occ.kind.shader_code(),
+                    occ.obscuration as f32,
+                    0.0,
+                ];
+            }
+            occluder_count = list.len() as u32;
+        }
+        let occluder_params_uniform = [occluder_count as f32, 0.0, 0.0, 0.0];
+
         let solar_eclipse_state_uniform =
             if self.atmosphere.sunlit_scattering && !self.viewpoint.is_external() {
                 let state = solar_eclipse_state(self.observer);
@@ -1413,6 +1482,8 @@ impl Camera {
             hw_radiance,
             scintillation_params,
             solar_eclipse_state: solar_eclipse_state_uniform,
+            occluders: occluders_uniform,
+            occluder_params: occluder_params_uniform,
         }
     }
 
@@ -1689,6 +1760,83 @@ mod tests {
         cam.scintillation = Scintillation::OFF;
         let off = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
         assert_eq!(off.scintillation_params[0], 0.0);
+    }
+
+    /// V-51b: the analytic-mask uniform must contain exactly one Sun-
+    /// targeted occluder during the Mazatlán 2024-04-08 totality
+    /// preset, its direction must equal `moon_eq_illuminance.xyz`
+    /// (bit-identical J2000-and-refracted), and its radius must equal
+    /// `moon_disk.x`. Anything else would let the analytic mask drift
+    /// away from the V-51c photometric falloff and break the golden
+    /// frame committed in `docs/assets/validation/solar-eclipse.png`.
+    #[test]
+    fn occluder_uniform_matches_moon_state_at_mazatlan_peak() {
+        // 2024-04-08T18:13:00Z, the SolarEclipse scene-preset epoch.
+        let jd_utc = astronomy::julian_date_from_unix_seconds(1_712_599_980.0);
+        let observer = Observer::from_degrees(23.219, -106.420, jd_utc);
+        let cam = Camera::new(observer, LocalView::default(), 1.0);
+        let uniform = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
+
+        assert_eq!(
+            uniform.occluder_params[0], 1.0,
+            "exactly one Moon-on-Sun occluder must be active at greatest eclipse"
+        );
+        // First entry: front-disk direction (xyz) + radius (w).
+        let dir = &uniform.occluders[0];
+        let target_kind = &uniform.occluders[1];
+        let moon_dir = &uniform.moon_eq_illuminance;
+        let moon_radius = uniform.moon_disk[0];
+        // Bit-identical to the J2000-and-refracted Moon direction stored
+        // in `moon_eq_illuminance.xyz`. Any per-pixel f32 drift here would
+        // misalign the analytic mask against the Moon disk source term.
+        assert_eq!(dir[0], moon_dir[0]);
+        assert_eq!(dir[1], moon_dir[1]);
+        assert_eq!(dir[2], moon_dir[2]);
+        assert_eq!(dir[3], moon_radius);
+        // target = Sun (0), kind = Partial (1) at this epoch — deep but
+        // not geometrically Total (the classifier needs r_moon ≥ r_sun).
+        assert_eq!(target_kind[0], 0.0);
+        assert_eq!(target_kind[1], 1.0);
+        // Obscuration must mirror `solar_eclipse_state.y` exactly.
+        assert!((target_kind[2] - uniform.solar_eclipse_state[1]).abs() < 1e-6);
+        // Padded entries stay zero so the shader's loop never reads junk.
+        for i in 1..MAX_OCCLUDERS {
+            assert_eq!(uniform.occluders[i * 2], [0.0; 4]);
+            assert_eq!(uniform.occluders[i * 2 + 1], [0.0; 4]);
+        }
+    }
+
+    /// V-51b: external galactic viewpoints and `Atmosphere::OFF` zero the
+    /// occluder list, mirroring the same gating the V-51c
+    /// `solar_eclipse_state` uniform uses. Without this, the analytic
+    /// mask would still try to subtract a (now meaningless) front disk
+    /// from a Sun source term that the renderer is no longer drawing.
+    #[test]
+    fn occluder_uniform_zeros_on_external_or_atmosphere_off() {
+        let jd_utc = astronomy::julian_date_from_unix_seconds(1_712_599_980.0);
+        let observer = Observer::from_degrees(23.219, -106.420, jd_utc);
+
+        let mut cam = Camera::new(observer, LocalView::default(), 1.0);
+        cam.atmosphere = Atmosphere::OFF;
+        let off = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
+        assert_eq!(off.occluder_params[0], 0.0);
+
+        let mut cam = Camera::new(observer, LocalView::default(), 1.0);
+        cam.viewpoint = SkyViewpoint::GalacticNorth;
+        let external = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
+        assert_eq!(external.occluder_params[0], 0.0);
+    }
+
+    /// V-51b: at an off-eclipse epoch the list must be empty so the
+    /// shader short-circuits on `count == 0`. Mirrors
+    /// `astronomy::planning::active_occluders_is_empty_off_eclipse`.
+    #[test]
+    fn occluder_uniform_empty_off_eclipse() {
+        let jd_utc = astronomy::julian_date_from_unix_seconds(1_751_328_000.0); // 2025-07-01T00:00Z
+        let observer = Observer::from_degrees(35.68, 139.69, jd_utc);
+        let cam = Camera::new(observer, LocalView::default(), 1.0);
+        let uniform = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
+        assert_eq!(uniform.occluder_params[0], 0.0);
     }
 
     #[test]

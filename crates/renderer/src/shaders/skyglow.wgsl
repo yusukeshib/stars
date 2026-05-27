@@ -74,11 +74,25 @@ struct CameraUniform {
     // V-51c solar-eclipse state: [kind_code, obscuration, totality_weight,
     // partial_weight]. kind_code mirrors `SolarEclipseKind::shader_code`:
     // 0=none, 1=partial, 2=annular, 3=total. The renderer reads it to
-    // subtract the Sun source term inside the lunar disk (analytic mask),
-    // apply the Koomen 1952 daylight falloff during obscuration, and gate
-    // the Baumbach 1937 corona term during totality.
+    // apply the Koomen 1952 daylight falloff during obscuration and gate
+    // the Baumbach 1937 corona term during totality. The analytic subtract
+    // mask itself lives in the occluder array below (V-51b).
     solar_eclipse_state: vec4<f32>,
+    // V-51b analytic-mask occluder array. Two vec4 rows per entry: row
+    // (2i)   = (front_dir.xyz, front_radius_rad), row (2i+1) =
+    // (target_code, kind_code, obscuration, 0). Target codes mirror
+    // `OccluderTarget::shader_code`: 0 = Sun, 1 = Moon, 2..=8 =
+    // planet[0..=6], -1 = stars (CPU-only). Iteration is gated by
+    // `occluder_params.x` so the WGSL loop never reads padded rows.
+    occluders: array<vec4<f32>, 32>,
+    // V-51b active-occluder header: x = count, yzw reserved.
+    occluder_params: vec4<f32>,
 };
+
+// Stable shader codes for `OccluderTarget` (mirrors Rust).
+const OCCLUDER_TARGET_SUN: i32 = 0;
+const OCCLUDER_TARGET_MOON: i32 = 1;
+const MAX_OCCLUDERS: u32 = 16u;
 
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
@@ -315,6 +329,37 @@ fn disk_mask(ray_dir: vec3<f32>, center_dir: vec3<f32>, radius_rad: f32, pixel_s
     return 1.0 - smoothstep01(radius_rad - aa, radius_rad + aa, delta);
 }
 
+// V-51b: union mask of every active occluder whose target matches
+// `target_code`. Returns 0 outside any front disk, ramping to 1 inside
+// (with `disk_mask`'s pixel-scaled antialias band). Used by the Sun and
+// Moon disk source terms to subtract the front-disk silhouettes; pixel-
+// local with no depth / stencil pass.
+fn occluder_subtract_mask(
+    ray_dir: vec3<f32>,
+    target_code: i32,
+    pixel_sr: f32,
+) -> f32 {
+    let count = u32(max(camera.occluder_params.x, 0.0));
+    var mask: f32 = 0.0;
+    for (var i: u32 = 0u; i < MAX_OCCLUDERS; i = i + 1u) {
+        if i >= count {
+            break;
+        }
+        let dr = camera.occluders[i * 2u];
+        let tk = camera.occluders[i * 2u + 1u];
+        if i32(tk.x) != target_code {
+            continue;
+        }
+        // Renormalise: the host-side `front_dir_eq` is the f32 Vec3 returned
+        // by `direction_equatorial()` and may be slightly non-unit after the
+        // f32 → f64 → f32 uniform round-trip. The V-51c path also calls
+        // `normalize()` on the Moon direction; matching that here keeps the
+        // analytic mask bit-identical to the V-51c golden frame.
+        mask = max(mask, disk_mask(ray_dir, normalize(dr.xyz), max(dr.w, 1e-6), pixel_sr));
+    }
+    return mask;
+}
+
 // CPU twin: `crates/renderer/src/lunar_phase.rs::lunar_phase_lambert`.
 // Keep the two in sync; the Rust copy has unit tests pinning the
 // near-hemisphere sign convention (a previous bug flipped it and rendered
@@ -373,19 +418,17 @@ fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixe
     let sun_radius = max(camera.sun_eq_radius.w, 1e-6);
     let moon_radius = max(camera.moon_disk.x, 1e-6);
 
-    // V-51c analytic Moon-on-Sun mask. The Moon mask multiplies the Sun's
-    // source term by `(1 - moon_mask)` so the lunar disk subtracts the
-    // Sun radiance pixel-locally; no depth or stencil pass is needed. The
-    // mask is reused below for the corona scissor and totality gate.
-    let kind_code = camera.solar_eclipse_state.x;
+    // V-51b: union mask of every active occluder whose back disk is the
+    // Sun. With V-51c this is exactly the Moon-on-Sun pair, so the
+    // V-51c golden frames remain bit-identical; V-51e (planetary
+    // transits) and V-51f (planet-on-planet) will plug additional
+    // entries into the same shader path without further churn.
     let totality_weight = clamp(camera.solar_eclipse_state.z, 0.0, 1.0);
-    let moon_in_front_of_sun = kind_code > 0.5;
+    // `sun_moon_sep` is reused by the V-51c corona scissor below to mute
+    // the Baumbach term inside the lunar disk during totality.
     let sun_moon_sep = acos(clamp(dot(sun_dir, moon_dir), -1.0, 1.0));
-    let moon_mask = select(
-        0.0,
-        disk_mask(ray_dir, moon_dir, moon_radius, pixel_sr),
-        moon_in_front_of_sun,
-    );
+    let sun_subtract = occluder_subtract_mask(ray_dir, OCCLUDER_TARGET_SUN, pixel_sr);
+    let moon_subtract = occluder_subtract_mask(ray_dir, OCCLUDER_TARGET_MOON, pixel_sr);
 
     var rgb = vec3<f32>(0.0);
     if dot(sun_dir, camera.zenith_eq.xyz) > 0.0 {
@@ -393,7 +436,7 @@ fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixe
         let sun_luminance = max(camera.atmosphere_params.z, 0.0) / max(sun_solid_angle, 1e-8);
         let sun_disk_term = hdr_flux_from_cd_m2(camera.solar_rgb.xyz * sun_luminance, zeropoint)
             * disk_mask(ray_dir, sun_dir, sun_radius, pixel_sr);
-        rgb += sun_disk_term * (1.0 - moon_mask);
+        rgb += sun_disk_term * (1.0 - sun_subtract);
 
         // V-51c Baumbach corona: evaluate only during totality, inside a
         // ~2° scissor centred on the Sun. The corona radiance scales with
@@ -421,8 +464,13 @@ fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixe
         let moon_luminance = max(camera.moon_eq_illuminance.w, 0.0) / max(moon_solid_angle, 1e-8);
         let phase = lunar_phase_lambert(ray_dir, moon_dir, sun_dir, moon_radius);
         let earth_shadow = clamp(camera.moon_disk.w, 0.0, 1.0);
+        // V-51b: subtract any front disks targeting the Moon (reserved
+        // for V-51d/f planet-behind-Moon edge cases; empty in V-51b so
+        // the multiplicand is 1.0 and the V-51c golden frame stays
+        // bit-identical).
         rgb += hdr_flux_from_cd_m2(vec3<f32>(1.01, 1.0, 0.82) * moon_luminance * phase * (1.0 - 0.88 * earth_shadow), zeropoint)
-            * disk_mask(ray_dir, moon_dir, moon_radius, pixel_sr);
+            * disk_mask(ray_dir, moon_dir, moon_radius, pixel_sr)
+            * (1.0 - moon_subtract);
     }
 
     return rgb;
