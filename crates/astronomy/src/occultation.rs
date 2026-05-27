@@ -428,7 +428,10 @@ where
         prev_v = v;
         t += step;
     }
-    let (mut lo, mut hi, mut vlo, mut vhi) = found?;
+    // Only the sign on the `lo` side is needed for bisection — the `hi`
+    // side's value is consumed by the equality test against `vmid` and
+    // then discarded.
+    let (mut lo, mut hi, mut vlo, _vhi) = found?;
     for _ in 0..30 {
         let mid = 0.5 * (lo + hi);
         let vmid = f(mid);
@@ -440,14 +443,12 @@ where
             vlo = vmid;
         } else {
             hi = mid;
-            vhi = vmid;
         }
         if (hi - lo) * 86_400.0 < 0.05 {
             // Sub-50-ms precision is well below the 30 s validation contract.
             break;
         }
     }
-    let _ = (vhi, vlo); // silence unused warnings on tight convergence.
     Some(0.5 * (lo + hi))
 }
 
