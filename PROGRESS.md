@@ -332,6 +332,14 @@ Primary implementation areas:
 
 - `crates/astronomy/src/ephemeris.rs`
 - `crates/renderer/src/skyglow.rs`
+- `crates/renderer/src/shaders/skyglow.wgsl` (`lunar_phase_lambert`)
+
+The lunar disk shader reconstructs the surface normal on the *near* (visible)
+hemisphere of the Moon. Earlier the radial component used `+moon_dir`, which
+models the far hemisphere and renders the complementary phase (a 76 % waxing
+gibbous appears as a ~24 % waning crescent). The sign is now `-moon_dir`,
+matching the geometric convention that `moon_dir` points from the observer to
+the Moon.
 
 ### Solar / lunar illuminants and physical sky colour
 

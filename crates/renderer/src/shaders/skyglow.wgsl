@@ -278,6 +278,10 @@ fn disk_mask(ray_dir: vec3<f32>, center_dir: vec3<f32>, radius_rad: f32, pixel_s
     return 1.0 - smoothstep01(radius_rad - aa, radius_rad + aa, delta);
 }
 
+// CPU twin: `crates/renderer/src/lunar_phase.rs::lunar_phase_lambert`.
+// Keep the two in sync; the Rust copy has unit tests pinning the
+// near-hemisphere sign convention (a previous bug flipped it and rendered
+// the complementary phase, e.g. waxing gibbous as waning crescent).
 fn lunar_phase_lambert(ray_dir: vec3<f32>, moon_dir: vec3<f32>, sun_dir: vec3<f32>, radius_rad: f32) -> f32 {
     let cos_delta = clamp(dot(ray_dir, moon_dir), -1.0, 1.0);
     let delta = acos(cos_delta);
@@ -296,7 +300,12 @@ fn lunar_phase_lambert(ray_dir: vec3<f32>, moon_dir: vec3<f32>, sun_dir: vec3<f3
         tangent = normalize(tangent);
     }
 
-    let normal = normalize(moon_dir * sqrt(max(1.0 - r * r, 0.0)) + tangent * r);
+    // The visible (near) hemisphere of the Moon has surface normals pointing
+    // back toward the observer, i.e. opposite to `moon_dir` (which is the
+    // observer->Moon direction). Reconstructing with +moon_dir would model the
+    // far hemisphere and produce a phase complementary to the true one
+    // (e.g. a waxing gibbous would render as a thin waning crescent).
+    let normal = normalize(-moon_dir * sqrt(max(1.0 - r * r, 0.0)) + tangent * r);
     return clamp(dot(normal, sun_dir), 0.0, 1.0);
 }
 

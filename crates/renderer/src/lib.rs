@@ -1,5 +1,7 @@
 mod camera;
 mod constellations;
+#[cfg(test)]
+mod lunar_phase;
 mod overlay;
 mod pipeline;
 mod renderer;
