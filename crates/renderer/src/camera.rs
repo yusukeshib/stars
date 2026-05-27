@@ -1610,8 +1610,14 @@ mod tests {
             a.scintillation_params, b.scintillation_params,
             "same (observer, time, seed) must produce identical scintillation params"
         );
-        assert!(a.scintillation_params[0] > 0.0, "σ²_zenith must be positive when enabled");
-        assert!(a.scintillation_params[1] > 0.0, "corner_hz must be positive when enabled");
+        assert!(
+            a.scintillation_params[0] > 0.0,
+            "σ²_zenith must be positive when enabled"
+        );
+        assert!(
+            a.scintillation_params[1] > 0.0,
+            "corner_hz must be positive when enabled"
+        );
         // Seed round-trip: shader recovers the host's u32 via bitcast.
         assert_eq!(a.scintillation_params[2].to_bits(), 0xDEAD_BEEF);
         // t_seconds is in the wrapped [0, 86400) window so f32 keeps subsecond precision.
