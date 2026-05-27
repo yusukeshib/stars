@@ -1,4 +1,3 @@
-use astronomy::photometry::DEFAULT_EXTINCTION_K_RGB;
 use astronomy::{
     apparent_planets_topocentric, earth_velocity_over_c_j2000, equation_of_equinoxes,
     equatorial_to_horizontal_matrix, illuminants, lmst_radians, precession_nutation_matrix,
@@ -207,13 +206,16 @@ pub(crate) struct CameraUniform {
     /// solar angular radius in radians.
     pub sun_eq_radius: [f32; 4],
     /// Atmosphere controls for the sunlit-scattering shader:
-    /// `[turbidity, observer_altitude_m, solar_illuminance_lux, enabled]`.
+    /// `[preetham_turbidity_eff, observer_altitude_m, solar_illuminance_lux,
+    /// scattering_enabled]`. `preetham_turbidity_eff` is derived from
+    /// `(β, α)` per V-37 so the daylight model and the stellar extinction
+    /// path share one (β, α, DU) state.
     pub atmosphere_params: [f32; 4],
     /// Top-of-atmosphere solar RGB illuminant, normalised around D65. `w` is
     /// currently unused.
     pub solar_rgb: [f32; 4],
-    /// Additional atmospheric optics controls: `[ozone_du, visibility_km,
-    /// unused, unused]`.
+    /// Unified spectral-extinction state shared by the stellar and daylight
+    /// paths: `[ozone_du, aerosol_beta, aerosol_alpha, unused]` (V-37).
     pub atmosphere_optics: [f32; 4],
     /// Apparent Moon direction in equatorial coordinates. `w` is approximate
     /// moonlight illuminance in lux before local horizon/airmass attenuation.
@@ -294,28 +296,30 @@ impl AtmospherePreset {
 
 /// Observer-local atmosphere state that the renderer applies to the star and
 /// sky-background pipelines.
+///
+/// The canonical optical state is `(aerosol_beta, aerosol_alpha, ozone_du,
+/// observer_altitude_m)` per V-37: Ångström aerosol turbidity (β = AOD at
+/// 550 nm, α = wavelength exponent), total ozone column in Dobson units, and
+/// observer elevation above sea level. Stellar atmospheric extinction and
+/// daylight scattering both read this state through
+/// [`astronomy::atmosphere`], so the two paths cannot disagree about how
+/// reddened a given sky should be.
 #[derive(Debug, Clone, Copy)]
 pub struct Atmosphere {
-    /// Per-channel extinction coefficients `[k_R, k_G, k_B]` in magnitudes
-    /// per unit airmass. The shader applies
-    /// `extinction_factor = 10^(-0.4 · k · X)` independently to each RGB
-    /// channel, where `X` is the Kasten-Young 1989 airmass at the star's
-    /// altitude.
-    pub extinction_k_rgb: [f32; 3],
-    /// Aerosol / haze control for sunlit sky colour. Values around 2–3 are
-    /// clear rural skies; larger values whiten and brighten the horizon via
-    /// the Mie component.
-    pub turbidity: f32,
-    /// Observer altitude above sea level in metres. The first-order shader
-    /// uses this to thin the optical depth exponentially with scale height.
+    /// Ångström aerosol optical depth at 550 nm. Clean continental sites are
+    /// ≈ 0.05; mid-quality observatories ≈ 0.10; hazy urban skies ≥ 0.30.
+    /// This drives both stellar k(λ) and the daylight Mie aerosol term.
+    pub aerosol_beta: f32,
+    /// Ångström wavelength exponent. Continental aerosols sit near 1.3;
+    /// coarser maritime / dust aerosols are around 0.8–1.0.
+    pub aerosol_alpha: f32,
+    /// Observer altitude above sea level in metres. Rayleigh and aerosol
+    /// terms thin exponentially with the standard 8 km scale height.
     pub observer_altitude_m: f32,
     /// Total ozone column in Dobson units. Around 300 DU is a mid-latitude
-    /// clear-sky default; larger values suppress orange/red sunset light more
-    /// strongly through a Chappuis-band approximation in the shader.
+    /// clear-sky default; larger values deepen blue zeniths and red sunsets
+    /// through the Chappuis band.
     pub ozone_du: f32,
-    /// Meteorological visibility in kilometres. This controls Mie/aerosol haze
-    /// independently from the named turbidity presets.
-    pub visibility_km: f32,
     /// Surface pressure in hPa for apparent-altitude refraction. Standard
     /// atmosphere is 1010 hPa; lower pressure reduces the horizon lift.
     pub pressure_hpa: f32,
@@ -329,39 +333,35 @@ pub struct Atmosphere {
 
 impl Atmosphere {
     /// Clean sea-level dark site — the default model.
-    /// See [`astronomy::photometry::DEFAULT_EXTINCTION_K_RGB`].
+    ///
+    /// `β = 0.10` matches Hardie 1962's mid-quality observatory V-band
+    /// extinction within 0.03 mag/airmass; `α = 1.30` is the AERONET
+    /// continental-aerosol mean.
     pub const CLEAR_RURAL: Self = Self {
-        extinction_k_rgb: [
-            DEFAULT_EXTINCTION_K_RGB[0] as f32,
-            DEFAULT_EXTINCTION_K_RGB[1] as f32,
-            DEFAULT_EXTINCTION_K_RGB[2] as f32,
-        ],
-        turbidity: 2.5,
+        aerosol_beta: 0.10,
+        aerosol_alpha: 1.30,
         observer_altitude_m: 0.0,
         ozone_du: 300.0,
-        visibility_km: 50.0,
         pressure_hpa: 1010.0,
         temperature_c: 10.0,
         sunlit_scattering: true,
     };
 
     pub const HAZY_URBAN: Self = Self {
-        extinction_k_rgb: [0.18, 0.28, 0.45],
-        turbidity: 5.0,
+        aerosol_beta: 0.35,
+        aerosol_alpha: 1.10,
         observer_altitude_m: 0.0,
         ozone_du: 325.0,
-        visibility_km: 12.0,
         pressure_hpa: 1010.0,
         temperature_c: 15.0,
         sunlit_scattering: true,
     };
 
     pub const HIGH_ALTITUDE: Self = Self {
-        extinction_k_rgb: [0.06, 0.10, 0.18],
-        turbidity: 2.0,
+        aerosol_beta: 0.04,
+        aerosol_alpha: 1.30,
         observer_altitude_m: 2500.0,
         ozone_du: 275.0,
-        visibility_km: 80.0,
         pressure_hpa: 750.0,
         temperature_c: 0.0,
         sunlit_scattering: true,
@@ -381,15 +381,34 @@ impl Atmosphere {
     /// regardless of altitude, and no daylight/twilight scattering is added.
     /// Useful for debugging or for views from outside the Earth's atmosphere.
     pub const OFF: Self = Self {
-        extinction_k_rgb: [0.0, 0.0, 0.0],
-        turbidity: 0.0,
+        aerosol_beta: 0.0,
+        aerosol_alpha: 1.30,
         observer_altitude_m: 0.0,
         ozone_du: 0.0,
-        visibility_km: 0.0,
         pressure_hpa: 0.0,
         temperature_c: 10.0,
         sunlit_scattering: false,
     };
+
+    /// Broadband R/G/B extinction coefficients (mag per airmass) derived
+    /// from the canonical (β, α, DU, h) state.
+    ///
+    /// Returns `[0; 3]` when the atmosphere is disabled so the renderer
+    /// passes through unattenuated star fluxes.
+    pub fn extinction_k_rgb(&self) -> [f32; 3] {
+        if !self.sunlit_scattering {
+            return [0.0; 3];
+        }
+        // Fully qualified to avoid the inherent-method name shadowing the
+        // free function in bare-name lookup.
+        let k = astronomy::atmosphere::extinction_k_rgb(
+            self.observer_altitude_m as f64,
+            self.aerosol_beta as f64,
+            self.aerosol_alpha as f64,
+            self.ozone_du as f64,
+        );
+        [k[0] as f32, k[1] as f32, k[2] as f32]
+    }
 }
 
 impl Default for Atmosphere {
@@ -1030,29 +1049,41 @@ impl Camera {
         planet_uniforms: &PlanetUniforms,
     ) -> CameraUniform {
         let zenith = self.zenith_in_equatorial();
-        let k = self
-            .atmosphere
-            .extinction_k_rgb
-            .map(|k| if k.is_finite() { k.max(0.0) } else { 0.0 });
-        let turbidity = if self.atmosphere.turbidity.is_finite() {
-            self.atmosphere.turbidity.max(0.0)
-        } else {
-            Atmosphere::DEFAULT.turbidity
-        };
         let observer_altitude_m = if self.atmosphere.observer_altitude_m.is_finite() {
             self.atmosphere.observer_altitude_m.max(0.0)
         } else {
             Atmosphere::DEFAULT.observer_altitude_m
+        };
+        let aerosol_beta = if self.atmosphere.aerosol_beta.is_finite() {
+            self.atmosphere.aerosol_beta.clamp(0.0, 2.0)
+        } else {
+            Atmosphere::DEFAULT.aerosol_beta
+        };
+        let aerosol_alpha = if self.atmosphere.aerosol_alpha.is_finite() {
+            self.atmosphere.aerosol_alpha.clamp(0.0, 4.0)
+        } else {
+            Atmosphere::DEFAULT.aerosol_alpha
         };
         let ozone_du = if self.atmosphere.ozone_du.is_finite() {
             self.atmosphere.ozone_du.clamp(0.0, 600.0)
         } else {
             Atmosphere::DEFAULT.ozone_du
         };
-        let visibility_km = if self.atmosphere.visibility_km.is_finite() {
-            self.atmosphere.visibility_km.clamp(1.0, 200.0)
+        let k = if self.atmosphere.sunlit_scattering {
+            let k64 = astronomy::atmosphere::extinction_k_rgb(
+                observer_altitude_m as f64,
+                aerosol_beta as f64,
+                aerosol_alpha as f64,
+                ozone_du as f64,
+            );
+            [k64[0] as f32, k64[1] as f32, k64[2] as f32]
         } else {
-            Atmosphere::DEFAULT.visibility_km
+            [0.0; 3]
+        };
+        let turbidity_eff = if self.atmosphere.sunlit_scattering {
+            astronomy::atmosphere::preetham_turbidity_from_aerosol(aerosol_beta as f64) as f32
+        } else {
+            0.0
         };
         let pressure_hpa = if self.atmosphere.pressure_hpa.is_finite() {
             self.atmosphere.pressure_hpa.clamp(0.0, 1100.0)
@@ -1136,7 +1167,7 @@ impl Camera {
                 sun.angular_radius_rad as f32,
             ],
             atmosphere_params: [
-                turbidity,
+                turbidity_eff,
                 observer_altitude_m,
                 solar_lux,
                 scattering_enabled,
@@ -1147,7 +1178,7 @@ impl Camera {
                 solar_rgb[2] as f32,
                 0.0,
             ],
-            atmosphere_optics: [ozone_du, visibility_km, 0.0, 0.0],
+            atmosphere_optics: [ozone_du, aerosol_beta, aerosol_alpha, 0.0],
             moon_eq_illuminance: [moon_dir.x, moon_dir.y, moon_dir.z, moon_lux],
             moon_disk: [
                 moon.angular_radius_rad as f32,
@@ -1325,34 +1356,47 @@ mod tests {
         );
     }
 
-    /// Default `Atmosphere` carries the Hardie 1962 sea-level coefficients;
-    /// `Atmosphere::OFF` zeros them out. Pin both so changes in defaults are
-    /// loud.
+    /// Default `Atmosphere` carries the Hardie 1962 mid-quality (β, α, DU)
+    /// state; `Atmosphere::OFF` zeros the aerosol/ozone budget. Pin both so
+    /// drift in defaults is loud.
     #[test]
     fn atmosphere_defaults_and_off_are_pinned() {
         let d = Atmosphere::default();
-        assert_eq!(d.extinction_k_rgb, [0.10, 0.16, 0.30]);
+        assert_eq!(d.aerosol_beta, 0.10);
+        assert_eq!(d.aerosol_alpha, 1.30);
+        assert_eq!(d.ozone_du, 300.0);
         assert_eq!(d.pressure_hpa, 1010.0);
         assert_eq!(d.temperature_c, 10.0);
-        assert!(d.extinction_k_rgb[0] < d.extinction_k_rgb[2]);
+        let k = d.extinction_k_rgb();
+        assert!(
+            k[0] < k[1] && k[1] < k[2],
+            "derived k_RGB must be monotone red→blue: {k:?}"
+        );
         let off = Atmosphere::OFF;
-        assert_eq!(off.extinction_k_rgb, [0.0, 0.0, 0.0]);
+        assert_eq!(off.extinction_k_rgb(), [0.0; 3]);
     }
 
     #[test]
     fn atmosphere_uniform_rejects_non_finite_host_values() {
         let mut cam = Camera::new(observer_at(35.0), LocalView::default(), 1.0);
-        cam.atmosphere.extinction_k_rgb = [f32::NAN, -1.0, 0.3];
-        cam.atmosphere.turbidity = f32::NAN;
+        cam.atmosphere.aerosol_beta = f32::NAN;
+        cam.atmosphere.aerosol_alpha = f32::NAN;
         cam.atmosphere.observer_altitude_m = f32::NAN;
         cam.atmosphere.ozone_du = f32::NAN;
-        cam.atmosphere.visibility_km = f32::NAN;
         cam.atmosphere.pressure_hpa = f32::NAN;
         cam.atmosphere.temperature_c = f32::NAN;
         let planet_uniforms = cam.planet_uniforms();
         let uniform = cam.uniform_with_planets(800, 600, &planet_uniforms);
-        assert_eq!(uniform.extinction_k_rgb, [0.0, 0.0, 0.3, 0.0]);
-        assert_eq!(uniform.atmosphere_params[0], Atmosphere::DEFAULT.turbidity);
+        // k_RGB falls back to the DEFAULT (β, α, DU, h) state, not zero,
+        // because the per-field guards substitute DEFAULT values.
+        let expected_k = Atmosphere::DEFAULT.extinction_k_rgb();
+        assert!((uniform.extinction_k_rgb[0] - expected_k[0]).abs() < 1e-6);
+        assert!((uniform.extinction_k_rgb[1] - expected_k[1]).abs() < 1e-6);
+        assert!((uniform.extinction_k_rgb[2] - expected_k[2]).abs() < 1e-6);
+        let expected_t = astronomy::atmosphere::preetham_turbidity_from_aerosol(
+            Atmosphere::DEFAULT.aerosol_beta as f64,
+        ) as f32;
+        assert!((uniform.atmosphere_params[0] - expected_t).abs() < 1e-6);
         assert_eq!(
             uniform.atmosphere_params[1],
             Atmosphere::DEFAULT.observer_altitude_m
@@ -1360,7 +1404,11 @@ mod tests {
         assert_eq!(uniform.atmosphere_optics[0], Atmosphere::DEFAULT.ozone_du);
         assert_eq!(
             uniform.atmosphere_optics[1],
-            Atmosphere::DEFAULT.visibility_km
+            Atmosphere::DEFAULT.aerosol_beta
+        );
+        assert_eq!(
+            uniform.atmosphere_optics[2],
+            Atmosphere::DEFAULT.aerosol_alpha
         );
         assert_eq!(
             uniform.refraction_params[0],

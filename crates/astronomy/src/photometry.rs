@@ -302,26 +302,15 @@ pub fn airmass_kasten_young(altitude_rad: f64) -> f64 {
     1.0 / (sin_alt + 0.50572 * (alt_deg + 6.07995).powf(-1.6364))
 }
 
-/// Default V-band-broken-into-RGB extinction coefficients for a clean
-/// sea-level observatory site, in magnitudes per unit airmass.
-///
-/// Rayleigh scattering scales as λ⁻⁴, so the blue channel is dimmed and
-/// reddened by an order of magnitude more than the red channel. The values
-/// here are the standard atmospheric extinction at a mid-quality dark site
-/// (cf. Hardie 1962 Table I; Schaefer 1993 §3 for the dependence on
-/// wavelength, altitude above sea level, and seasonal aerosol load).
-///
-/// Tuple order is `[R, G, B]`. To disable extinction, pass `[0.0; 3]`.
-///
-/// # References
-///
-/// * Hardie, R. H. 1962, *Photoelectric Reductions*, in *Astronomical
-///   Techniques* (ed. W. A. Hiltner), University of Chicago Press, ch. 8.
-/// * Schaefer, B. E. 1993, *Astronomy and the limits of vision*, Vistas in
-///   Astronomy 36, 311. §3 (atmospheric extinction breakdown).
-pub const DEFAULT_EXTINCTION_K_RGB: [f64; 3] = [0.10, 0.16, 0.30];
-
 /// Extinction magnitudes at a given airmass, per RGB channel.
+///
+/// Per-wavelength `k(λ)` is now produced by
+/// [`crate::atmosphere::extinction_k_rgb`] from the canonical (β, α, DU, h)
+/// state shared with the daylight scattering shader (`V-37`). The historical
+/// `DEFAULT_EXTINCTION_K_RGB` constant was removed; callers that want a
+/// quick literature anchor should call
+/// `extinction_k_rgb(0.0, 0.10, 1.3, 300.0)` (Hardie 1962 mid-quality site).
+///
 ///
 /// Implements Schaefer 1993's atmospheric-extinction term:
 ///
@@ -545,31 +534,15 @@ mod tests {
         assert_eq!(airmass_kasten_young(-10.0_f64.to_radians()), f64::INFINITY);
     }
 
-    /// Default extinction coefficients must be in the canonical order
-    /// `k_R < k_G < k_B` (Rayleigh scattering scales as λ⁻⁴), and within
-    /// the literature-typical bracket for a clean sea-level dark site.
-    /// The exact triple is pinned to catch accidental refactors.
-    #[test]
-    fn default_extinction_is_blue_heaviest() {
-        let [r, g, b] = DEFAULT_EXTINCTION_K_RGB;
-        assert!(
-            r < g && g < b,
-            "k_RGB must be monotone red→blue: {r}, {g}, {b}"
-        );
-        assert!((0.05..=0.20).contains(&r), "k_R out of typical range: {r}");
-        assert!((0.10..=0.25).contains(&g), "k_G out of typical range: {g}");
-        assert!((0.20..=0.45).contains(&b), "k_B out of typical range: {b}");
-        // Pin the exact published triple so a refactor can't drift it.
-        assert_eq!(DEFAULT_EXTINCTION_K_RGB, [0.10, 0.16, 0.30]);
-    }
-
     /// At zenith the extinction is just `k(λ)` per channel (X = 1). This
-    /// is the basic sanity check on the multiplication.
+    /// is the basic sanity check on the multiplication, using the unified
+    /// (β, α, DU) coefficients from `crate::atmosphere`.
     #[test]
     fn extinction_at_zenith_is_k() {
-        let dm = extinction_magnitudes_rgb(1.0, DEFAULT_EXTINCTION_K_RGB);
-        for (i, &k) in DEFAULT_EXTINCTION_K_RGB.iter().enumerate() {
-            assert!((dm[i] - k).abs() < 1e-9);
+        let k = crate::atmosphere::extinction_k_rgb(0.0, 0.10, 1.3, 300.0);
+        let dm = extinction_magnitudes_rgb(1.0, k);
+        for (i, &ki) in k.iter().enumerate() {
+            assert!((dm[i] - ki).abs() < 1e-9);
         }
     }
 
@@ -661,17 +634,19 @@ mod tests {
         );
     }
 
-    /// At airmass 2 (altitude ≈30°) the blue channel must dim by 0.6 mag
-    /// and the red channel by only 0.2 mag with the default coefficients
-    /// — a clear reddening signature even at high altitude.
+    /// At airmass 2 (altitude ≈30°) the unified Hardie-anchored model must
+    /// produce a clear reddening signature: the blue channel attenuates by
+    /// noticeably more than the red, with each channel within the
+    /// literature-typical bracket for a mid-quality site.
     #[test]
     fn extinction_reddens_at_airmass_two() {
-        let [dm_r, _dm_g, dm_b] = extinction_magnitudes_rgb(2.0, DEFAULT_EXTINCTION_K_RGB);
-        assert!((dm_r - 0.20).abs() < 1e-9);
-        assert!((dm_b - 0.60).abs() < 1e-9);
+        let k = crate::atmosphere::extinction_k_rgb(0.0, 0.10, 1.3, 300.0);
+        let [dm_r, _dm_g, dm_b] = extinction_magnitudes_rgb(2.0, k);
+        assert!((0.20..=0.40).contains(&dm_r), "Δm_R = {dm_r}");
+        assert!((0.50..=0.75).contains(&dm_b), "Δm_B = {dm_b}");
         assert!(
-            dm_b > dm_r + 0.3,
-            "airmass 2 should redden by at least 0.3 mag, got Δm_B - Δm_R = {}",
+            dm_b > dm_r + 0.25,
+            "airmass 2 should redden by at least 0.25 mag, got Δm_B - Δm_R = {}",
             dm_b - dm_r
         );
     }

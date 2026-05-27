@@ -236,10 +236,10 @@ function parseAtmosphere(value: unknown): AtmosphereConfig {
   return {
     enabled: v.enabled,
     preset: v.preset,
-    turbidity: inRange(v.turbidity, 1.7, 10) ? v.turbidity : DEFAULT_ATMOSPHERE_CONFIG.turbidity,
+    aerosolBeta: inRange(v.aerosolBeta, 0, 2) ? v.aerosolBeta : DEFAULT_ATMOSPHERE_CONFIG.aerosolBeta,
+    aerosolAlpha: inRange(v.aerosolAlpha, 0, 4) ? v.aerosolAlpha : DEFAULT_ATMOSPHERE_CONFIG.aerosolAlpha,
     observerAltitudeM: inRange(v.observerAltitudeM, 0, 9000) ? v.observerAltitudeM : DEFAULT_ATMOSPHERE_CONFIG.observerAltitudeM,
     ozoneDu: inRange(v.ozoneDu, 0, 600) ? v.ozoneDu : DEFAULT_ATMOSPHERE_CONFIG.ozoneDu,
-    visibilityKm: inRange(v.visibilityKm, 1, 200) ? v.visibilityKm : DEFAULT_ATMOSPHERE_CONFIG.visibilityKm,
     pressureHpa: inRange(v.pressureHpa, 0, 1100) ? v.pressureHpa : DEFAULT_ATMOSPHERE_CONFIG.pressureHpa,
     temperatureC: inRange(v.temperatureC, -80, 60) ? v.temperatureC : DEFAULT_ATMOSPHERE_CONFIG.temperatureC,
   };

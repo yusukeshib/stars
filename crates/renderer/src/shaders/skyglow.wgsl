@@ -33,11 +33,14 @@ struct CameraUniform {
     extinction_k_rgb: vec4<f32>,
     // Apparent Sun direction in equatorial coordinates. `w` is angular radius.
     sun_eq_radius: vec4<f32>,
-    // [turbidity, observer_altitude_m, solar_illuminance_lux, scattering_enabled].
+    // [preetham_turbidity_eff, observer_altitude_m, solar_illuminance_lux,
+    // scattering_enabled]. Effective turbidity is derived from Ångström β (V-37)
+    // so the daylight and stellar paths share one (β, α, DU) state.
     atmosphere_params: vec4<f32>,
     // D65-like top-of-atmosphere solar RGB; `w` currently unused.
     solar_rgb: vec4<f32>,
-    // [ozone_du, visibility_km, unused, unused].
+    // Unified spectral-extinction state shared with the star pass (V-37):
+    // [ozone_du, aerosol_beta, aerosol_alpha, unused].
     atmosphere_optics: vec4<f32>,
     // Apparent Moon direction in equatorial coordinates. `w` is approximate
     // moonlight illuminance in lux before local horizon/airmass attenuation.
@@ -222,8 +225,11 @@ fn preetham_sky_luminance_rgb(ray_dir: vec3<f32>, sin_alt: f32) -> vec3<f32> {
     // Earth-Sun distance modulation from the ephemeris/illuminant pipeline.
     let solar_scale = max(camera.atmosphere_params.z, 0.0) / 127000.0;
     let altitude_scale = exp(-max(camera.atmosphere_params.y, 0.0) / 8000.0);
-    let visibility_km = clamp(camera.atmosphere_optics.y, 1.0, 200.0);
-    let haze = clamp(50.0 / visibility_km, 0.25, 4.0);
+    // V-37: derive Preetham's "haze whitening" from Ångström β directly,
+    // anchored so β=0.10 (Hardie mid-quality site) reproduces the historical
+    // visibility_km ≈ 50 km behaviour (haze ≈ 1.0).
+    let beta = clamp(camera.atmosphere_optics.y, 0.0, 2.0);
+    let haze = clamp(beta / 0.10, 0.25, 4.0);
     let ozone = clamp(camera.atmosphere_optics.x, 0.0, 600.0) / 300.0;
     // Compact Chappuis-band approximation: ozone absorbs broad green/orange
     // light on long slant paths, deepening blue zeniths and red sunsets.
@@ -391,16 +397,19 @@ fn twilight_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> ve
     // Single-scattering twilight approximation: direct solar irradiance is
     // exponentially attenuated along the tangent path through Earth's shadow;
     // the remaining light is Rayleigh + forward Mie scattered into the view.
-    // The extinction scale is tied to the same turbidity/visibility controls as
-    // daylight, so civil/nautical/astronomical twilight are continuous radiance
-    // states rather than UI fade bands.
+    // The extinction scale is tied to the same (β, α) aerosol controls as
+    // daylight via the unified V-37 state, so civil/nautical/astronomical
+    // twilight are continuous radiance states rather than UI fade bands.
     let sun_dir = normalize(camera.sun_eq_radius.xyz);
     let cos_gamma = clamp(dot(ray_dir, sun_dir), -1.0, 1.0);
     let gamma = acos(cos_gamma);
     let depression = -sun_alt;
     let T = clamp(camera.atmosphere_params.x, 1.7, 10.0);
-    let visibility_km = clamp(camera.atmosphere_optics.y, 1.0, 200.0);
-    let aerosol = clamp(50.0 / visibility_km, 0.25, 5.0) * (T / 2.5);
+    // V-37: twilight aerosol load tracks Ångström β in lock-step with the
+    // stellar k(λ) extinction path. β = 0.10 reproduces the previous
+    // visibility ≈ 50 km behaviour at the rural default.
+    let beta = clamp(camera.atmosphere_optics.y, 0.0, 2.0);
+    let aerosol = clamp(beta / 0.10, 0.25, 5.0) * (T / 2.5);
     let shadow_tau = (0.72 + 0.18 * aerosol) * pow(depression / DEG_TO_RAD, 1.18);
     let shadow_transmission = exp(-shadow_tau);
     let view_airmass = 1.0 / max(sin_alt + 0.06, 0.06);

@@ -76,7 +76,7 @@ is split into independently shippable rungs:
 5. **Validation** — noon, sunset, civil / nautical / astronomical twilight,
    and moonlit-night reference scenes pinned by tests / screenshots. ✅
 6. **Unified extinction** — one (β, α, DU) optical-depth state shared by the
-   star-extinction path and the daylight scattering shader. ⬜ (`V-37`).
+   star-extinction path and the daylight scattering shader. ✅ (`V-37`).
 7. **Site-specific brightness** — observer-side light-pollution selector
    (Bortle / SQM / Falchi atlas). ⬜ (`V-39`).
 
@@ -110,8 +110,9 @@ side-effect, not the motivation.
 ## Current focus
 
 The Visual track is at "naked-eye physical realism is mostly there" — the
-remaining items are realism polish (`V-24`–`V-28`), the day/night
-optical-depth merge (`V-37`–`V-39`), niche visual features
+remaining items are realism polish (`V-24`–`V-28`), the daylight model upgrade
+and site-specific brightness (`V-38`–`V-39`; the unified (β, α, DU) state
+those depend on is now in place via `V-37`), niche visual features
 (`V-45`–`V-50`), and rare phenomena (`V-47`–`V-49`).
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
@@ -168,7 +169,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-34` | Atmosphere controls in CLI / viewer / web | ✅ |
 | `V-35` | Planets (Mercury → Neptune) | ✅ |
 | `V-36` | Moon phase + Earth-shadow aid | ✅ |
-| `V-37` | **Unified spectral extinction (β / α / DU)** | ⬜ |
+| `V-37` | Unified spectral extinction (β / α / DU) | ✅ |
 | `V-38` | **Hošek-Wilkie daylight sky model** | ⬜ |
 | `V-39` | **Light pollution / Bortle map** | ⬜ |
 | `V-40` | Full-sky projections (Mollweide / Aitoff / Hammer) | ✅ |
@@ -1011,9 +1012,9 @@ penumbra geometry verified against documented eclipse circumstances.
 
 ---
 
-### `V-37` Unified spectral extinction model — ⬜
+### `V-37` Unified spectral extinction model — ✅ done
 
-**Item.** Replace the current per-channel Hardie / Schaefer extinction
+**Item.** Replaced the per-channel Hardie / Schaefer extinction
 coefficients (three loose constants) and the independent Preetham
 turbidity input with one extinction model
 
@@ -1040,28 +1041,40 @@ global variability.
   extinction with k_Rayleigh + k_a + k_O3 separation).
 - Iqbal, M. 1983, *An Introduction to Solar Radiation*, §6.5.
 
-**Implementation scope.**
+**Implementation.**
 - `crates/astronomy/src/atmosphere.rs`:
   `extinction_coefficients(wavelength_nm, h_obs_m, beta, alpha, ozone_du)
-  -> ExtinctionTerms { rayleigh, aerosol, ozone }`.
-- `crates/astronomy/src/photometry.rs`: rewire `K-S extinction` to call
-  the new function with R / G / B representative wavelengths.
-- `crates/renderer/src/shaders/skyglow.wgsl`: the daylight model consumes
-  the same (β, α, DU) so daylight reddening and stellar low-altitude
-  reddening move in lock-step.
-- `crates/common`: atmosphere config exposes (β, α, DU) plus presets
-  (clear rural, urban, marine, dusty); session schema bumped with
-  backward-compat fallback from old turbidity-only sessions.
+  -> ExtinctionTerms { rayleigh, aerosol, ozone }` plus `extinction_k_rgb`
+  evaluated at the same R / G / B representative wavelengths the catalogue
+  blackbody pipeline uses, and `preetham_turbidity_from_aerosol(β)` as the
+  bridge to the daylight shader.
+- `crates/astronomy/src/photometry.rs`: removed the legacy
+  `DEFAULT_EXTINCTION_K_RGB` constant; `extinction_magnitudes_rgb` now
+  consumes the unified-model coefficients.
+- `crates/renderer/src/camera.rs`: `Atmosphere` keeps only the canonical
+  `(aerosol_beta, aerosol_alpha, observer_altitude_m, ozone_du, pressure,
+  temperature)` state. `extinction_k_rgb()` and the daylight uniform's
+  effective turbidity are derived on the fly so the two paths cannot drift.
+- `crates/renderer/src/shaders/skyglow.wgsl`: daylight haze whitening and
+  twilight aerosol load both read `β` from the shared uniform; the legacy
+  `visibility_km` input is gone.
+- `crates/common`: `Atmosphere`, `AtmosphereOverrides`, `SessionAtmosphere`,
+  and the CLI / viewer / web hosts all expose `(β, α, DU)` directly.
+  Session schema bumped to v2; the legacy `turbidity` / `visibilityKm`
+  fields are removed.
 
 **Tests / validation.**
-- Unit: at sea level with (β=0.05, α=1.3, DU=300), `k_V` matches Hardie
-  1962 sea-level standard within 0.03 mag/airmass.
-- Cross-consistency: at the same atmosphere config, daylight zenith
-  chromaticity and stellar low-altitude reddening shift in the same
-  direction with β.
+- Unit: at sea level with (β=0.10, α=1.3, DU=300), `k_V` matches Hardie
+  1962 mid-quality site within 0.03 mag/airmass; monotonicity in β / α /
+  DU; Rayleigh and aerosol thin together with the 8 km scale height while
+  ozone (stratospheric) is untouched.
+- Renderer uniform regression: NaN host values fall back to the DEFAULT
+  (β, α, DU, h) state and produce the same derived `k_RGB` and
+  Preetham-effective turbidity as the default scene.
 
 **Dependencies.** Replaces the loose coupling between `V-18` (extinction)
-and `V-32` / `V-38` (daylight scattering).
+and `V-32` (daylight scattering). The `V-38` Hošek-Wilkie upgrade will
+reuse the same `(β, α, DU)` state without further schema churn.
 
 **Hosts wired.** CLI / viewer / web.
 

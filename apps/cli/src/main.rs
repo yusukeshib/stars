@@ -159,23 +159,27 @@ struct Args {
     #[arg(long, default_value_t = AtmospherePresetArg::ClearRural)]
     atmosphere_preset: AtmospherePresetArg,
 
-    /// Override aerosol / haze turbidity for sunlit sky scattering. Around
-    /// 2–3 is a clear rural sky; larger values whiten and brighten the horizon.
+    /// Ångström aerosol optical depth at 550 nm (β). Drives both stellar
+    /// k(λ) and the daylight Mie aerosol term through the unified V-37 state.
+    /// Clean continental sites ≈ 0.05; mid-quality observatories ≈ 0.10;
+    /// hazy urban skies ≥ 0.30.
     #[arg(long)]
-    turbidity: Option<f32>,
+    aerosol_beta: Option<f32>,
 
-    /// Override observer altitude above sea level in metres for the sunlit
-    /// scattering optical-depth approximation.
+    /// Ångström wavelength exponent (α). Continental aerosols ≈ 1.3; coarser
+    /// maritime / dust aerosols 0.8–1.0.
+    #[arg(long)]
+    aerosol_alpha: Option<f32>,
+
+    /// Override observer altitude above sea level in metres. Rayleigh and
+    /// aerosol extinction thin exponentially with the standard 8 km scale
+    /// height.
     #[arg(long)]
     observer_altitude_m: Option<f32>,
 
     /// Override total ozone column in Dobson units for sunset/twilight colour.
     #[arg(long)]
     ozone_du: Option<f32>,
-
-    /// Override meteorological visibility in kilometres for aerosol haze.
-    #[arg(long)]
-    visibility_km: Option<f32>,
 
     /// Override surface pressure in hPa for atmospheric refraction.
     #[arg(long)]
@@ -254,10 +258,10 @@ fn main() -> Result<()> {
             args.no_extinction,
             args.atmosphere_preset,
             AtmosphereOverrides {
-                turbidity: args.turbidity,
+                aerosol_beta: args.aerosol_beta,
+                aerosol_alpha: args.aerosol_alpha,
                 observer_altitude_m: args.observer_altitude_m,
                 ozone_du: args.ozone_du,
-                visibility_km: args.visibility_km,
                 pressure_hpa: args.pressure_hpa,
                 temperature_c: args.temperature_c,
             },

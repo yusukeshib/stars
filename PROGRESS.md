@@ -17,10 +17,12 @@ Shipped:
 
 - **Visual track** — identification overlays and text labels (`V-01`–`V-12`),
   physical dark-sky visual pipeline (`V-13`–`V-23`), atmospheric refraction
-  and Sun / Moon / planet rendering (`V-29`–`V-36`), full-sky projections
-  (`V-40`), out-of-Earth galactic and custom external viewpoints (`V-41`,
-  `V-44`), telescope eyepiece simulation (`V-43`), and the deep-sky overlay
-  with Messier objects plus the bright NGC / IC subset (`V-42`).
+  and Sun / Moon / planet rendering (`V-29`–`V-36`), unified spectral
+  extinction — one (β, α, DU) state shared by the stellar and daylight
+  paths (`V-37`), full-sky projections (`V-40`), out-of-Earth galactic and
+  custom external viewpoints (`V-41`, `V-44`), telescope eyepiece simulation
+  (`V-43`), and the deep-sky overlay with Messier objects plus the bright
+  NGC / IC subset (`V-42`).
 - **Library track** — IAU-grade time / precession / nutation / aberration /
   proper motion (`L-01`–`L-05`), planning helpers (`L-07`, `L-08`),
   schema-versioned JSON sessions (`L-10`, `L-11`), deterministic scene
@@ -31,9 +33,9 @@ Shipped:
 
 Still open:
 
-- **Visual track** — dark-sky realism gaps (`V-24`–`V-28`), atmospheric
-  self-consistency (`V-37`–`V-39`), niche visual features (`V-45`–`V-50`),
-  rare phenomena (`V-47`–`V-49`). A follow-up PR will add a runtime
+- **Visual track** — dark-sky realism gaps (`V-24`–`V-28`), daylight model
+  upgrade and site-specific brightness (`V-38`–`V-39`), niche visual
+  features (`V-45`–`V-50`), rare phenomena (`V-47`–`V-49`). A follow-up PR will add a runtime
   streaming backend for the full ~14,000-entry OpenNGC catalogue on top of
   the embedded `V-42` subset shipped here.
 - **Library track** — DE440 ephemerides (`L-06`), large catalog ingest
@@ -164,7 +166,16 @@ Primary implementation areas:
 Implemented:
 
 - Kasten-Young airmass;
-- per-channel extinction coefficients;
+- per-channel extinction coefficients, now derived from the **unified
+  spectral extinction model** (`V-37`): one canonical (β, α, DU,
+  observer altitude) state evaluates Schaefer 1993's
+  Rayleigh + Ångström aerosol + Chappuis ozone decomposition at R / G / B
+  representative wavelengths, and the same `β` feeds the daylight
+  scattering shader's Mie term and the twilight aerosol load — so the
+  stellar and daylight paths cannot disagree about how reddened a given
+  sky should be. Hardie 1962 mid-quality site is reproduced within 0.03
+  mag/airmass at (β=0.10, α=1.3, DU=300); the session schema bumped to
+  v2 with the legacy `turbidity` / `visibilityKm` fields removed.
 - diffuse sky background fit;
 - Milky Way / integrated starlight style contribution;
 - zodiacal light;

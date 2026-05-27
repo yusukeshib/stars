@@ -114,10 +114,10 @@ function isView(v: unknown): v is View {
 const GRID_STEP_RANGE: [number, number] = [1, 90];
 const OPACITY_RANGE: [number, number] = [0, 1];
 const DEEP_SKY_MAG_RANGE: [number, number] = [-5, 99];
-const TURBIDITY_RANGE: [number, number] = [1.7, 10];
+const AEROSOL_BETA_RANGE: [number, number] = [0, 2];
+const AEROSOL_ALPHA_RANGE: [number, number] = [0, 4];
 const OBSERVER_ALTITUDE_RANGE: [number, number] = [0, 9000];
 const OZONE_RANGE: [number, number] = [0, 600];
-const VISIBILITY_RANGE: [number, number] = [1, 200];
 const PRESSURE_RANGE: [number, number] = [0, 1100];
 const TEMPERATURE_RANGE: [number, number] = [-80, 60];
 const EXTERNAL_PC_RANGE: [number, number] = [-1_000_000, 1_000_000];
@@ -204,20 +204,20 @@ function parseAtmosphereConfig(v: unknown): AtmosphereConfig | null {
   if (
     typeof o.enabled !== "boolean" ||
     !isAtmospherePreset(o.preset) ||
-    !inRange(o.turbidity, TURBIDITY_RANGE) ||
+    !inRange(o.aerosolBeta, AEROSOL_BETA_RANGE) ||
+    !inRange(o.aerosolAlpha, AEROSOL_ALPHA_RANGE) ||
     !inRange(o.observerAltitudeM, OBSERVER_ALTITUDE_RANGE) ||
-    !inRange(o.ozoneDu, OZONE_RANGE) ||
-    !inRange(o.visibilityKm, VISIBILITY_RANGE)
+    !inRange(o.ozoneDu, OZONE_RANGE)
   ) {
     return null;
   }
   return {
     enabled: o.enabled,
     preset: o.preset,
-    turbidity: o.turbidity,
+    aerosolBeta: o.aerosolBeta,
+    aerosolAlpha: o.aerosolAlpha,
     observerAltitudeM: o.observerAltitudeM,
     ozoneDu: o.ozoneDu,
-    visibilityKm: o.visibilityKm,
     pressureHpa: inRange(o.pressureHpa, PRESSURE_RANGE)
       ? o.pressureHpa
       : DEFAULT_ATMOSPHERE_CONFIG.pressureHpa,

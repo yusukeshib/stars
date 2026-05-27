@@ -23,11 +23,14 @@ struct CameraUniform {
     extinction_k_rgb: vec4<f32>,
     // Apparent Sun direction in equatorial coordinates. `w` is angular radius.
     sun_eq_radius: vec4<f32>,
-    // [turbidity, observer_altitude_m, solar_illuminance_lux, scattering_enabled].
+    // [preetham_turbidity_eff, observer_altitude_m, solar_illuminance_lux,
+    // scattering_enabled]. Effective turbidity is derived from Ångström β (V-37)
+    // so the daylight and stellar paths share one (β, α, DU) state.
     atmosphere_params: vec4<f32>,
     // D65-like top-of-atmosphere solar RGB; `w` currently unused.
     solar_rgb: vec4<f32>,
-    // [ozone_du, visibility_km, unused, unused].
+    // Unified spectral-extinction state shared with the daylight pass (V-37):
+    // [ozone_du, aerosol_beta, aerosol_alpha, unused].
     atmosphere_optics: vec4<f32>,
     // Apparent Moon direction in equatorial coordinates. `w` is approximate
     // moonlight illuminance in lux before local horizon/airmass attenuation.
