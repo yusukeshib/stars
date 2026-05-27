@@ -12,9 +12,9 @@ use renderer::{
 use stars_host_common::{
     atmosphere_from_args, eyepiece_from_args, load_session, load_star_instances_from_file,
     overlay_config_from_args, parse_time_to_time_scales, scene_from_preset, scene_preset_infos,
-    viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg, CatalogSnapshot,
-    CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides, OverlayArg, ProjectionArg,
-    ScenePresetArg, SessionScene, ViewpointArg,
+    scintillation_from_args, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
+    CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides, OverlayArg,
+    ProjectionArg, ScenePresetArg, ScintillationOverrides, SessionScene, ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -197,6 +197,18 @@ struct Args {
     /// Eyepiece field-stop diameter in millimetres. Set 0 to derive true FOV from AFOV.
     #[arg(long)]
     eyepiece_field_stop_mm: Option<f32>,
+
+    /// Disable atmospheric scintillation (V-24).
+    #[arg(long)]
+    no_scintillation: bool,
+
+    /// Override the dimensionless Cn² column scale for scintillation.
+    #[arg(long)]
+    scintillation_scale: Option<f32>,
+
+    /// Override the scintillation noise seed for deterministic replays.
+    #[arg(long)]
+    scintillation_seed: Option<u32>,
 }
 
 fn main() -> Result<()> {
@@ -242,6 +254,13 @@ fn main() -> Result<()> {
                 up: vec3_arg(&args.external_up),
             },
         );
+        let scintillation = scintillation_from_args(
+            args.no_scintillation || args.no_extinction,
+            ScintillationOverrides {
+                c_n2_scale: args.scintillation_scale,
+                seed: args.scintillation_seed,
+            },
+        );
         SessionScene {
             latitude_deg: args.lat,
             longitude_deg: args.lng,
@@ -254,6 +273,7 @@ fn main() -> Result<()> {
             overlays,
             atmosphere_preset: args.atmosphere_preset.into(),
             atmosphere,
+            scintillation,
             planets_enabled: !args.no_planets,
             projection: args.projection.into(),
             viewpoint,
@@ -302,6 +322,7 @@ fn main() -> Result<()> {
         scene.overlays,
         scene.catalog.limiting_magnitude,
         scene.atmosphere,
+        scene.scintillation,
         scene.planets_enabled,
         scene.projection,
         scene.viewpoint,
@@ -361,6 +382,7 @@ struct App {
     overlays: OverlayConfig,
     limiting_magnitude: f32,
     atmosphere: Atmosphere,
+    scintillation: renderer::Scintillation,
     planets_enabled: bool,
     projection: renderer::SkyProjection,
     viewpoint: renderer::SkyViewpoint,
@@ -430,6 +452,7 @@ impl App {
         overlays: OverlayConfig,
         limiting_magnitude: f32,
         atmosphere: Atmosphere,
+        scintillation: renderer::Scintillation,
         planets_enabled: bool,
         projection: renderer::SkyProjection,
         viewpoint: renderer::SkyViewpoint,
@@ -446,6 +469,7 @@ impl App {
             overlays,
             limiting_magnitude,
             atmosphere,
+            scintillation,
             planets_enabled,
             projection,
             viewpoint,
@@ -546,6 +570,7 @@ impl ApplicationHandler for App {
         );
         camera.limiting_magnitude = self.limiting_magnitude;
         camera.atmosphere = self.atmosphere;
+        camera.scintillation = self.scintillation;
         camera.planets_enabled = self.planets_enabled;
         camera.projection = self.projection;
         camera.viewpoint = self.viewpoint;

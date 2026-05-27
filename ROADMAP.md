@@ -111,7 +111,8 @@ side-effect, not the motivation.
 ## Current focus
 
 The Visual track is at "naked-eye physical realism is mostly there" — the
-remaining items are realism polish (`V-24`–`V-28`), site-specific brightness
+remaining items are realism polish (`V-25`–`V-28`; `V-24` scintillation has
+shipped), site-specific brightness
 (`V-39`; the unified (β, α, DU) state it depends on is in place via
 `V-37`, and the daylight model upgrade `V-38` has shipped), niche visual
 features (`V-45`–`V-50`), and rare phenomena (`V-47`–`V-49`).
@@ -162,7 +163,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-21` | Zodiacal light + airglow + interstellar dust | ✅ |
 | `V-22` | Per-fragment rod/cone tonemap | ✅ |
 | `V-23` | Catalogue colour pipeline (B−V → T → blackbody → sRGB) | ✅ |
-| `V-24` | **Atmospheric scintillation** | ⬜ |
+| `V-24` | Atmospheric scintillation | ✅ |
 | `V-25` | **Differential atmospheric dispersion** | ⬜ |
 | `V-26` | **Lunar earthshine** | ⬜ |
 | `V-27` | **Belt of Venus + Earth-shadow band** | ⬜ |
@@ -636,7 +637,7 @@ blend is physically calibrated.
 
 ---
 
-### `V-24` Atmospheric scintillation — ⬜
+### `V-24` Atmospheric scintillation — ✅ done
 
 **Item.** Time-varying intensity (and, secondarily, colour) modulation on
 each star, with variance growing toward the horizon and damping at high
@@ -669,25 +670,45 @@ the chromatic amplitude factor of Dravins 1998.
 - Dravins, D. et al. 1998, PASP 110, 610 (Part III — colour scintillation).
 - Roddier, F. 1981, *Progress in Optics* 19, 281.
 
-**Implementation scope.**
+**Implementation.**
 - `crates/astronomy/src/scintillation.rs`:
-  `intensity_variance(altitude_rad, h_obs_m, pupil_mm, c_n2_column) ->
-  (sigma_sq, corner_hz)`.
-- `crates/renderer/src/shaders/star.wgsl`: a `time_seconds` uniform feeds
-  a deterministic per-star low-pass noise; the linear flux is multiplied
-  by `1 + σ · clamped_noise`. Per-RGB-channel phase offset gives the
-  colour shimmer.
-- `crates/common`: `ScintillationConfig { enabled, c_n2_scale }` exposed
-  in session JSON; default-on for ground-level observers, default-off in
-  the external galactic viewpoint.
-- The noise seed is part of the session schema so deterministic renders
-  are still reproducible.
+  `intensity_variance(altitude_rad, h_obs_m, pupil_mm, c_n2_scale) ->
+  (sigma_sq, corner_hz)`. The Young 1967 prefactor (10.66) is bundled
+  with a `CALIBRATION` constant chosen so the default `c_n2_scale = 1.0`
+  reproduces Dravins 1997 amateur-site σ ≈ 4 % at the zenith for a 7 mm
+  pupil at sea level. The Hufnagel-Valley boundary-layer-dominated Cn²
+  scale height (`H_turb = 4000 m`) is used instead of the 8 km pressure
+  scale height because the bulk of scintillation-relevant turbulence
+  sits in the surface layer + lower troposphere; 8 km would underpredict
+  the observed factor-of-5–10 drop between sea-level and ~4 km
+  observatories.
+- `crates/renderer/src/shaders/star.wgsl`: a `scintillation_params: vec4`
+  uniform carries `(σ²_zenith, f_corner_zenith, seed, t_seconds_mod_day)`.
+  A PCG-hashed per-star, time-bin-interpolated noise field (corner =
+  `f_corner_zenith / √sec z`) modulates the post-extinction RGB flux by
+  `(1 + σ · n)`. Three samples at slightly offset times give the Dravins
+  1998 colour-shimmer.
+- `crates/renderer/src/camera.rs`: new `Scintillation { enabled,
+  c_n2_scale, seed }` field on `Camera`. Zeroed automatically when the
+  external galactic viewpoint is active or when `Atmosphere::OFF` is set.
+- Time source: `t = fract(jd_ut1) × 86400` so two renders of the same
+  session at the same simulated UT1 produce bit-identical pixels.
+- `crates/common`: `ScintillationConfig` + `scintillation_from_args`
+  helper; session schema bumped to v4 with the new `scintillation` block.
+  CLI / viewer flags: `--no-scintillation`, `--scintillation-scale`,
+  `--scintillation-seed`. The web frontend mirrors the same state in
+  `observer.ts` / `session.ts` / `storage.ts`, with the WASM binding
+  exposed as `StarView.set_scintillation`.
 
 **Tests / validation.**
-- Unit: σ²(airmass=5) > σ²(airmass=1) by >10×; σ²(observer at 4 km) <
-  σ²(observer at sea level) by >5×.
-- Visual: snapshot scenes at airmass 1, 3, 5 with the same RNG seed;
-  diff against a pinned reference; deterministic across hosts.
+- `astronomy::scintillation` unit tests pin: default scale matches
+  amateur-site σ ≈ 4 %; σ²(airmass = 5) > 10× σ²(airmass = 1);
+  σ²(4 km observer) < σ²(sea level) by > 5×; larger pupils crush σ² via
+  the D⁻⁷ᐟ³ aperture-averaging exponent; corner frequency follows
+  `1/√sec z`; disabled scale and NaN inputs return zero variance safely.
+- Session round-trip: `SessionScintillation` (de)serialises to v4 JSON
+  and round-trips back to the `Scintillation` engine struct; existing
+  exported preset sessions regenerated under v4.
 
 **Hosts wired.** CLI / viewer / web.
 

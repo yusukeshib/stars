@@ -43,6 +43,19 @@ struct CameraUniform {
     // [viewpoint_mode, external_eye_x_pc, external_eye_y_pc, external_eye_z_pc].
     // mode: 0=Earth-centred sky dome, 1=external IAU-galactic parsec-scale map.
     viewpoint_params: vec4<f32>,
+    // Planet uniform block. The star shader does not consume these; they are
+    // declared here only because WGSL uniform blocks must mirror the host
+    // struct in order to read fields past them (V-24 scintillation_params).
+    planet_eq_radius_pad: array<vec4<f32>, 7>,
+    planet_rgb_magnitude_pad: array<vec4<f32>, 7>,
+    planet_params_pad: vec4<f32>,
+    // Hošek-Wilkie coefficient block (V-38). Same reason as the planet pad.
+    hw_coeffs_pad: array<vec4<f32>, 9>,
+    hw_radiance_pad: vec4<f32>,
+    // V-24 scintillation: [sigma_sq_zenith, corner_hz_zenith,
+    // seed_as_f32, time_seconds_mod_day]. `sigma_sq_zenith == 0` disables
+    // the per-star modulation in the vertex shader.
+    scintillation_params: vec4<f32>,
 };
 
 fn viewport_size() -> vec2<f32> {
@@ -188,6 +201,7 @@ fn refract_equatorial_direction(eq_date_dir: vec3<f32>) -> vec3<f32> {
 }
 
 struct VertexInput {
+    @builtin(instance_index) instance_idx: u32,
     @location(0) quad_pos: vec2<f32>,    // per-vertex quad corner
     @location(1) star_pos: vec3<f32>,    // per-instance world position
     @location(2) star_size: f32,         // per-instance pixel half-width of the sprite quad
@@ -196,6 +210,75 @@ struct VertexInput {
     @location(5) proper_motion: vec3<f32>, // per-instance Cartesian radians/year tangent
     @location(6) distance_pc: f32,         // per-instance heliocentric distance in parsecs
 };
+
+// =============================================================================
+// V-24 atmospheric scintillation.
+// =============================================================================
+//
+// Per-star band-limited noise field. Three independent samplings (sampled at
+// slightly offset times for the RGB phase shift of Dravins 1998 §3) modulate
+// the post-extinction linear flux by `(1 + σ · n)`. The noise itself is a
+// 1-D smoothed-hash field driven by `time_seconds_mod_day` from the host so
+// that two renders of the same session at the same simulated UT1 produce
+// identical pixels (the seed travels in the session schema).
+
+fn pcg_hash(s: u32) -> u32 {
+    var state = s * 747796405u + 2891336453u;
+    let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+fn unit_signed(s: u32) -> f32 {
+    // Map a 32-bit hash uniformly into [-1, 1).
+    return f32(s) * (2.0 / 4294967296.0) - 1.0;
+}
+
+// Smoothed-hash noise: piecewise-cubic interpolation between per-bin uniform
+// samples. Bin width is `1 / freq_hz`, so the returned signal is band-limited
+// to roughly that corner.
+fn scint_noise(star_id: u32, seed: u32, t_seconds: f32, freq_hz: f32) -> f32 {
+    let t = t_seconds * max(freq_hz, 0.1);
+    let bin = floor(t);
+    let frac = t - bin;
+    let s = frac * frac * (3.0 - 2.0 * frac);
+    let bin_u = bitcast<u32>(bin);
+    let key0 = pcg_hash(star_id ^ seed ^ bin_u);
+    let key1 = pcg_hash(star_id ^ seed ^ (bin_u + 1u));
+    let a = unit_signed(key0);
+    let b = unit_signed(key1);
+    return mix(a, b, s);
+}
+
+fn scintillation_modulation(star_id: u32, altitude_rad: f32) -> vec3<f32> {
+    let sigma_sq_zenith = camera.scintillation_params.x;
+    if sigma_sq_zenith <= 0.0 || altitude_rad <= 0.0 {
+        return vec3<f32>(1.0);
+    }
+    let corner_hz = camera.scintillation_params.y;
+    let seed = bitcast<u32>(camera.scintillation_params.z);
+    let t_seconds = camera.scintillation_params.w;
+
+    // Airmass scaling from σ² ∝ sec(z)^3 (Young 1967). The Kasten-Young
+    // airmass helper above is the renderer's canonical sec(z) curve; using
+    // it here keeps the scintillation gating consistent with extinction.
+    let x = airmass_kasten_young(altitude_rad);
+    let sigma_sq = sigma_sq_zenith * x * x * x;
+    // Clamp to a sane range — the weak-turbulence model itself breaks down
+    // for σ ≳ 1 anyway, so saturating here is more defensible than
+    // letting the multiplier go negative on a very low-altitude star.
+    let sigma = sqrt(min(sigma_sq, 0.81));
+
+    // Per-channel time offset gives the Dravins 1998 colour scintillation:
+    // the RGB samples share most of the noise field but differ by a fraction
+    // of the bin width, producing a faint flicker in chromaticity on top of
+    // the dominant common-mode intensity variation.
+    let dt_chrom = 0.10 / max(corner_hz, 1.0);
+    let n_r = scint_noise(star_id, seed, t_seconds - dt_chrom, corner_hz);
+    let n_g = scint_noise(star_id, seed, t_seconds,           corner_hz);
+    let n_b = scint_noise(star_id, seed, t_seconds + dt_chrom, corner_hz);
+    // Clamp the multiplier so it never goes negative even when σ → 0.9.
+    return max(vec3<f32>(0.0), vec3<f32>(1.0) + sigma * vec3<f32>(n_r, n_g, n_b));
+}
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -242,6 +325,11 @@ fn vs_main(input: VertexInput) -> VertexOutput {
         let sin_alt = clamp(dot(corrected_j2000, camera.zenith_eq.xyz), -1.0, 1.0);
         let alt_rad = asin(sin_alt);
         attenuated_color = input.star_color * atmospheric_attenuation(alt_rad, k_rgb);
+        // V-24: modulate the post-extinction colour by a per-star
+        // band-limited noise. The Earth-frame altitude derived above is
+        // exactly the airmass input scintillation needs, so we reuse it.
+        attenuated_color = attenuated_color
+            * scintillation_modulation(input.instance_idx, alt_rad);
     }
 
     out.uv = input.quad_pos;

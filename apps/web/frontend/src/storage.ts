@@ -8,12 +8,14 @@ import {
   DEFAULT_ATMOSPHERE_CONFIG,
   DEFAULT_EYEPIECE_CONFIG,
   DEFAULT_PROJECTION_CONFIG,
+  DEFAULT_SCINTILLATION_CONFIG,
   type AtmosphereConfig,
   type ExternalViewpointConfig,
   type Observer,
   type OverlayConfig,
   type PlanetsConfig,
   type ProjectionConfig,
+  type ScintillationConfig,
   type View,
   type EyepieceConfig,
 } from "./observer";
@@ -28,6 +30,7 @@ export type PersistedConfig = {
   view: View;
   overlays?: OverlayConfig;
   atmosphere?: AtmosphereConfig;
+  scintillation?: ScintillationConfig;
   planets?: PlanetsConfig;
   projection?: ProjectionConfig;
   eyepiece?: EyepieceConfig;
@@ -50,6 +53,7 @@ export function loadConfig(): PartialPersistedConfig | null {
       view?: unknown;
       overlays?: unknown;
       atmosphere?: unknown;
+      scintillation?: unknown;
       planets?: unknown;
       projection?: unknown;
       eyepiece?: unknown;
@@ -60,6 +64,8 @@ export function loadConfig(): PartialPersistedConfig | null {
     if (isOverlayConfig(obj.overlays)) out.overlays = obj.overlays;
     const atmosphere = parseAtmosphereConfig(obj.atmosphere);
     if (atmosphere) out.atmosphere = atmosphere;
+    const scintillation = parseScintillationConfig(obj.scintillation);
+    if (scintillation) out.scintillation = scintillation;
     const planets = parsePlanetsConfig(obj.planets);
     if (planets) out.planets = planets;
     const projection = parseProjectionConfig(obj.projection);
@@ -138,6 +144,19 @@ function isOverlayConfig(v: unknown): v is OverlayConfig {
     inRange(o.opacity, OPACITY_RANGE) &&
     inRange(o.deepSkyMagnitudeLimit, DEEP_SKY_MAG_RANGE)
   );
+}
+
+function parseScintillationConfig(v: unknown): ScintillationConfig | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Partial<ScintillationConfig>;
+  if (typeof o.enabled !== "boolean") return null;
+  return {
+    enabled: o.enabled,
+    cN2Scale: inRange(o.cN2Scale, [0, 10]) ? o.cN2Scale : DEFAULT_SCINTILLATION_CONFIG.cN2Scale,
+    seed: typeof o.seed === "number" && Number.isFinite(o.seed)
+      ? o.seed >>> 0
+      : DEFAULT_SCINTILLATION_CONFIG.seed,
+  };
 }
 
 function parsePlanetsConfig(v: unknown): PlanetsConfig | null {

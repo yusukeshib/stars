@@ -21,6 +21,8 @@ Shipped:
   extinction — one (β, α, DU) state shared by the stellar and daylight
   paths (`V-37`), the Hošek-Wilkie 2012 daylight sky-dome model as the
   daylight scattering source (`V-38`, replacing the legacy Preetham 1999
+  path outright), naked-eye atmospheric scintillation (`V-24`,
+  Young 1967 / Dravins 1997-98 with a deterministic UT1-keyed noise
   path outright), full-sky projections (`V-40`), out-of-Earth galactic
   and custom external viewpoints (`V-41`, `V-44`),
   telescope eyepiece simulation (`V-43`), and the deep-sky overlay with
@@ -35,7 +37,7 @@ Shipped:
 
 Still open:
 
-- **Visual track** — dark-sky realism gaps (`V-24`–`V-28`), site-specific
+- **Visual track** — dark-sky realism gaps (`V-25`–`V-28`), site-specific
   brightness (`V-39`), niche visual features (`V-45`–`V-50`), rare
   phenomena (`V-47`–`V-49`). A follow-up PR will add a runtime streaming
   backend for the full ~14,000-entry OpenNGC catalogue on top of the
@@ -257,6 +259,77 @@ Primary implementation areas:
 - `crates/renderer/src/camera.rs`
 - `crates/renderer/src/shaders/skyglow.wgsl`
 - `apps/{cli,viewer,web}` host wiring + web UI controls.
+
+### Atmospheric scintillation (`V-24`)
+
+Added a Young 1967 / Dravins 1997-98 weak-turbulence intensity-variance
+model for an unaided 7 mm pupil and wired it into the renderer as a
+per-star, time-varying flux modulation. The previous pipeline rendered
+every star as a perfectly steady point source; now bright low-altitude
+stars visibly twinkle, faint stars near the zenith stay almost steady,
+and high-altitude observatories see the expected damping.
+
+Shipped:
+
+- `crates/astronomy/src/scintillation.rs`:
+  `intensity_variance(altitude_rad, h_obs_m, pupil_mm, c_n2_scale) ->
+  (sigma_sq, corner_hz)` with the Young 1967 10.66 · sec(z)³ · D⁻⁷ˣ³
+  closed form plus an exponential observer-altitude damping term using a
+  Hufnagel-Valley effective Cn² scale height of 4 km (the surface-layer +
+  lower-troposphere turbulence that drives naked-eye twinkle is
+  concentrated well below the 8 km pressure scale height used by V-37 /
+  V-38). The calibration constant is pinned so that the default
+  `c_n2_scale = 1.0` reproduces the Dravins 1997 amateur-site median
+  σ ≈ 4 % at the zenith. `temporal_corner_hz(altitude_rad)` returns the
+  low-pass corner of the temporal spectrum, scaling as `1 / √sec z`
+  (Fresnel scale).
+- `crates/renderer/src/camera.rs`: new `Scintillation { enabled,
+  c_n2_scale, seed }` field on `Camera` (default-on, default-seeded), a
+  `scintillation_params: [f32; 4]` vec on `CameraUniform`, and per-frame
+  derivation of `(σ²_zenith, f_corner_zenith, seed_bits, t_seconds)`
+  from the canonical (β, α, DU, h) atmosphere state and the observer's
+  `jd_ut1`. The external galactic viewpoint and `Atmosphere::OFF`
+  automatically zero the variance so off-Earth scenes stay deterministic.
+- `crates/renderer/src/shaders/star.wgsl`: per-instance PCG-hashed,
+  time-bin-interpolated noise field samples at three slightly offset
+  times to produce the Dravins 1998 colour scintillation. The
+  modulation multiplies the post-extinction RGB flux by `(1 + σ · n)`,
+  clamped non-negative so the divergent very-low-altitude regime cannot
+  invert the multiplier.
+- Time source: `t = fract(jd_ut1) × 86400` keeps the f32 phase in a
+  precision-safe window and makes two renders of the same session at
+  the same simulated UT1 bit-identical.
+- `crates/common`: `ScintillationConfig` + `scintillation_from_args`
+  helper; `SessionScintillation` block in the JSON session schema,
+  which bumps to v4. CLI / viewer flags: `--no-scintillation`,
+  `--scintillation-scale`, `--scintillation-seed`. The web frontend
+  mirrors the same state in `observer.ts`, `session.ts`, `storage.ts`,
+  with `StarView.set_scintillation` exposed from WASM.
+- All `docs/presets/sessions/*.json` regenerated under v4 (the
+  scintillation block defaults to enabled with the calibrated scale);
+  `data/manifest.toml` re-hashed by `make manifest-check`.
+
+Tests pinned:
+
+- Default `c_n2_scale = 1.0` returns σ_zenith within 5×10⁻⁴ of the
+  Dravins amateur-site target.
+- σ²(airmass = 5) > 10 × σ²(airmass = 1) and σ²(4 km observer) < σ²(sea
+  level) by > 5 × (the two spec-required monotonicities).
+- Larger telescope pupils crush σ² via the D⁻⁷ˣ³ aperture-averaging
+  exponent.
+- Corner frequency falls as `1/√sec z` exactly (relative tolerance
+  10⁻⁶).
+- `Scintillation::OFF`, `c_n2_scale = 0`, and NaN inputs all return
+  zero variance safely.
+- `SessionScintillation` round-trips through v4 JSON and back.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/scintillation.rs`
+- `crates/renderer/src/camera.rs`
+- `crates/renderer/src/shaders/star.wgsl`
+- `crates/common/src/{lib,session,presets}.rs`
+- `apps/{cli,viewer,web}` host wiring + web frontend types.
 
 ## Observation planning and positional trust (legacy `Phase 2`)
 

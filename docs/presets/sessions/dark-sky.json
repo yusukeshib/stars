@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "appVersion": "0.1.0",
   "createdBy": "stars-cli",
   "observer": {
@@ -62,6 +62,11 @@
     "pressureHpa": 750.0,
     "temperatureC": 0.0,
     "surfaceAlbedo": 0.3
+  },
+  "scintillation": {
+    "enabled": true,
+    "cN2Scale": 1.0,
+    "seed": 1544909063
   },
   "planets": {
     "enabled": true

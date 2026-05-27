@@ -4,6 +4,7 @@ import {
   DEFAULT_OVERLAY_CONFIG,
   DEFAULT_PLANETS_CONFIG,
   DEFAULT_PROJECTION_CONFIG,
+  DEFAULT_SCINTILLATION_CONFIG,
   MAX_FOV_DEG,
   MIN_FOV_DEG,
   isAtmospherePreset,
@@ -17,16 +18,18 @@ import {
   type OverlayConfig,
   type PlanetsConfig,
   type ProjectionConfig,
+  type ScintillationConfig,
   type Vec3,
   type View,
 } from "./observer";
 
 // Must track `SESSION_SCHEMA_VERSION` in `crates/common/src/session.rs`.
 // v2 unified spectral extinction (V-37); v3 added `surfaceAlbedo` for the
-// Hošek-Wilkie daylight model (V-38). The Rust hosts and `docs/presets/
-// sessions/*.json` all emit v3, so the web UI must accept and emit v3 too
-// or cross-host session import/export is broken.
-export const SESSION_SCHEMA_VERSION = 3;
+// Hošek-Wilkie daylight model (V-38); v4 added the `scintillation` block
+// for V-24. The Rust hosts and `docs/presets/sessions/*.json` all emit v4,
+// so the web UI must accept and emit v4 too or cross-host session
+// import/export is broken.
+export const SESSION_SCHEMA_VERSION = 4;
 const APP_VERSION = "0.1.0";
 const UNIX_EPOCH_JD = 2440587.5;
 const SECONDS_PER_DAY = 86400;
@@ -52,6 +55,7 @@ export type StarSession = {
   overlays: OverlayConfig;
   projection: ProjectionConfig;
   atmosphere: AtmosphereConfig;
+  scintillation: ScintillationConfig;
   planets: PlanetsConfig;
   eyepiece: EyepieceConfig;
   catalog: {
@@ -78,6 +82,7 @@ export type SessionState = {
   view: View;
   overlays: OverlayConfig;
   atmosphere: AtmosphereConfig;
+  scintillation: ScintillationConfig;
   planets: PlanetsConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
@@ -151,6 +156,7 @@ export function buildStarSession(state: SessionState): StarSession {
     overlays: state.overlays,
     projection: state.projection,
     atmosphere: state.atmosphere,
+    scintillation: state.scintillation,
     planets: state.planets,
     eyepiece: state.eyepiece,
     catalog: {
@@ -188,11 +194,12 @@ export function parseStarSessionJson(raw: string): SessionState {
   const view = parseView(s.view);
   const overlays = parseOverlays(s.overlays);
   const atmosphere = parseAtmosphere(s.atmosphere);
+  const scintillation = parseScintillation(s.scintillation);
   const planets = parsePlanets(s.planets);
   const projection = parseProjection(s.projection);
   const eyepiece = parseEyepiece(s.eyepiece);
   const timeMs = parseTimeMs(s.time);
-  return { observer, view, overlays, atmosphere, planets, projection, eyepiece, timeMs };
+  return { observer, view, overlays, atmosphere, scintillation, planets, projection, eyepiece, timeMs };
 }
 
 function parseObserver(value: unknown): Observer {
@@ -248,6 +255,16 @@ function parseAtmosphere(value: unknown): AtmosphereConfig {
     pressureHpa: inRange(v.pressureHpa, 0, 1100) ? v.pressureHpa : DEFAULT_ATMOSPHERE_CONFIG.pressureHpa,
     temperatureC: inRange(v.temperatureC, -80, 60) ? v.temperatureC : DEFAULT_ATMOSPHERE_CONFIG.temperatureC,
     surfaceAlbedo: inRange(v.surfaceAlbedo, 0, 1) ? v.surfaceAlbedo : DEFAULT_ATMOSPHERE_CONFIG.surfaceAlbedo,
+  };
+}
+
+function parseScintillation(value: unknown): ScintillationConfig {
+  if (!value || typeof value !== "object") return DEFAULT_SCINTILLATION_CONFIG;
+  const v = value as Partial<ScintillationConfig>;
+  return {
+    enabled: typeof v.enabled === "boolean" ? v.enabled : DEFAULT_SCINTILLATION_CONFIG.enabled,
+    cN2Scale: inRange(v.cN2Scale, 0, 10) ? v.cN2Scale : DEFAULT_SCINTILLATION_CONFIG.cN2Scale,
+    seed: Number.isFinite(v.seed) ? (v.seed as number) >>> 0 : DEFAULT_SCINTILLATION_CONFIG.seed,
   };
 }
 

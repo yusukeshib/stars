@@ -45,6 +45,7 @@ declare module "stars-web" {
       temperatureC: number,
       surfaceAlbedo: number,
     ): void;
+    set_scintillation(enabled: boolean, cN2Scale: number, seed: number): void;
     resize(width: number, height: number): void;
     sun_altitude_deg(): number;
     render_frame(): void;

@@ -150,12 +150,13 @@ sessions, scene presets, the validation / demo gallery, citation metadata,
 the standards-compliance page, and the data provenance manifest. The next
 best work is:
 
-1. dark-sky realism gaps the eye still sees through:
-   scintillation (`V-24`), atmospheric dispersion (`V-25`), lunar earthshine
-   (`V-26`), Belt of Venus / Earth-shadow band (`V-27`), spectral airglow
-   (`V-28`);
-2. atmospheric self-consistency: unified spectral extinction (`V-37`),
-   Hošek-Wilkie daylight (`V-38`), light-pollution / Bortle (`V-39`);
+1. dark-sky realism gaps the eye still sees through: atmospheric
+   dispersion (`V-25`), lunar earthshine (`V-26`), Belt of Venus /
+   Earth-shadow band (`V-27`), spectral airglow (`V-28`)
+   — naked-eye scintillation (`V-24`) has shipped;
+2. atmospheric self-consistency: unified spectral extinction (`V-37`)
+   and Hošek-Wilkie daylight (`V-38`) have shipped; light-pollution /
+   Bortle (`V-39`) is next;
 3. accessibility (`L-24`), observation-planning polish (`L-09`), the
    runtime full-OpenNGC streaming backend that follows the embedded
    `V-42` bright subset, and variable-star light curves (`L-20`);

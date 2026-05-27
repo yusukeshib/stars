@@ -12,7 +12,7 @@ use anyhow::Result;
 use clap::ValueEnum;
 use renderer::{
     Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation, LocalView, OverlayConfig,
-    OverlayKind, SkyProjection, SkyViewpoint,
+    OverlayKind, Scintillation, SkyProjection, SkyViewpoint,
 };
 use serde::{Deserialize, Serialize};
 
@@ -394,6 +394,7 @@ fn earth_scene(
         overlays,
         atmosphere_preset,
         atmosphere,
+        scintillation: Scintillation::default(),
         planets_enabled: true,
         projection: SkyProjection::Perspective,
         viewpoint: SkyViewpoint::Earth,
@@ -453,6 +454,7 @@ fn external_scene(
         },
         atmosphere_preset: AtmospherePreset::ClearRural,
         atmosphere: Atmosphere::OFF,
+        scintillation: Scintillation::OFF,
         planets_enabled: false,
         projection,
         viewpoint,
@@ -509,7 +511,7 @@ mod tests {
             )
             .unwrap_or_else(|error| panic!("{preset} failed: {error:#}"));
             let json = serde_json::to_string(&session).unwrap();
-            assert!(json.contains("\"schemaVersion\":3"));
+            assert!(json.contains("\"schemaVersion\":4"));
             let parsed: StarSession = serde_json::from_str(&json).unwrap();
             let restored = parsed
                 .to_scene()

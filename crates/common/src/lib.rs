@@ -20,7 +20,7 @@ mod session;
 pub use presets::*;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation,
-    OverlayConfig, OverlayKind, SkyProjection, SkyViewpoint, StarInstance,
+    OverlayConfig, OverlayKind, Scintillation, SkyProjection, SkyViewpoint, StarInstance,
 };
 pub use session::*;
 
@@ -330,6 +330,32 @@ pub fn atmosphere_from_args(
         atmosphere.surface_albedo = surface_albedo;
     }
     atmosphere
+}
+
+/// Optional scintillation overrides parsed by native hosts (V-24).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ScintillationOverrides {
+    pub c_n2_scale: Option<f32>,
+    pub seed: Option<u32>,
+}
+
+/// Build a renderer scintillation config from native-host CLI values.
+///
+/// `disabled` forces [`Scintillation::OFF`] regardless of overrides, matching
+/// `--no-extinction` semantics on the atmosphere side. Otherwise the
+/// default-on [`Scintillation::DEFAULT`] is patched with any overrides.
+pub fn scintillation_from_args(disabled: bool, overrides: ScintillationOverrides) -> Scintillation {
+    if disabled {
+        return Scintillation::OFF;
+    }
+    let mut scintillation = Scintillation::DEFAULT;
+    if let Some(c_n2_scale) = overrides.c_n2_scale {
+        scintillation.c_n2_scale = c_n2_scale;
+    }
+    if let Some(seed) = overrides.seed {
+        scintillation.seed = seed;
+    }
+    scintillation
 }
 
 /// Load a filesystem-backed star catalog and convert it into renderer-ready
