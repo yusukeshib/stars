@@ -39,6 +39,7 @@ When generated, PNGs live under `docs/assets/validation/`.
 | `moonlit-night` | ![Moonlit night](assets/validation/moonlit-night.png) | Moon disk, lunar illuminance, and moonlit sky term. |
 | `eclipse-aid` | ![Lunar eclipse aid](assets/validation/eclipse-aid.png) | Moon phase and Earth-shadow aid path. |
 | `solar-eclipse` | ![Total solar eclipse](assets/validation/solar-eclipse.png) | V-51c solar-eclipse pipeline: analytic Moon-on-Sun mask, Koomen 1952 daylight darkening, Baumbach 1937 corona. |
+| `venus-transit` | ![Venus transit of the Sun](assets/validation/venus-transit.png) | V-51e planet-on-Sun pipeline: planet apparent disk as analytic mask inside the solar disk, daylight-band sky unchanged outside the disk. |
 | `all-sky-hammer` | ![Hammer all-sky map](assets/validation/all-sky-hammer.png) | Hammer projection and full-sky overlay clipping. |
 | `all-sky-mollweide` | ![Mollweide all-sky map](assets/validation/all-sky-mollweide.png) | Equal-area map and Milky Way / coordinate-grid continuity. |
 | `galactic-north` | ![Galactic-north viewpoint](assets/validation/galactic-north.png) | External viewpoint, HYG distances, analytic Milky Way disk. |

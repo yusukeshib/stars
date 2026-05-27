@@ -35,6 +35,7 @@ pub enum ScenePresetArg {
     MoonlitNight,
     EclipseAid,
     SolarEclipse,
+    VenusTransit,
     AllSkyHammer,
     AllSkyMollweide,
     GalacticNorth,
@@ -53,6 +54,7 @@ impl ScenePresetArg {
         Self::MoonlitNight,
         Self::EclipseAid,
         Self::SolarEclipse,
+        Self::VenusTransit,
         Self::AllSkyHammer,
         Self::AllSkyMollweide,
         Self::GalacticNorth,
@@ -71,6 +73,7 @@ impl ScenePresetArg {
             Self::MoonlitNight => "moonlit-night",
             Self::EclipseAid => "eclipse-aid",
             Self::SolarEclipse => "solar-eclipse",
+            Self::VenusTransit => "venus-transit",
             Self::AllSkyHammer => "all-sky-hammer",
             Self::AllSkyMollweide => "all-sky-mollweide",
             Self::GalacticNorth => "galactic-north",
@@ -154,6 +157,12 @@ pub const SCENE_PRESET_INFOS: &[ScenePresetInfo] = &[
         title: "Total solar eclipse",
         description: "2024-04-08 total solar eclipse from Mazatl\u{00e1}n at greatest eclipse. Wires V-51 occultation primitives (analytic Moon-on-Sun mask, Koomen 1952 daylight falloff, Baumbach 1937 corona) to a real validated event.",
         validation_focus: "V-51c solar-eclipse pipeline: analytic-mask Sun subtract, daylight darkening, corona during totality",
+    },
+    ScenePresetInfo {
+        id: ScenePresetArg::VenusTransit,
+        title: "Venus transit of the Sun",
+        description: "2012-06-06 Venus transit observed from Tokyo near greatest transit. Wires V-51e planet-on-Sun analytic-mask occluder against the only Venus transit in the validation canon until 2117.",
+        validation_focus: "V-51e planet-on-Sun pipeline: planet apparent disk as analytic mask inside the solar disk, daylight-band sky unchanged outside the disk",
     },
     ScenePresetInfo {
         id: ScenePresetArg::AllSkyHammer,
@@ -352,6 +361,28 @@ pub fn scene_from_preset(
             138.0,
             70.0,
             5.0,
+            overlay_config(&[
+                OverlayKind::Horizon,
+                OverlayKind::CardinalLabels,
+                OverlayKind::DegreeLabels,
+            ]),
+            AtmospherePreset::ClearRural,
+            catalog,
+        )?,
+        // V-51e validation scene: 2012-06-06 Venus transit, observed
+        // from Tokyo near greatest transit (≈01:29 UT / 10:29 JST).
+        // The apparent Sun at the pinned epoch sits at az ≈ 125.4°,
+        // alt ≈ 69.8°; a 2° field frames the solar disk so Venus'
+        // ~1′ silhouette is resolvable against the photosphere via
+        // the V-51b analytic-mask subtract path with the V-51e
+        // planet-on-Sun occluder.
+        ScenePresetArg::VenusTransit => earth_scene(
+            35.68,
+            139.69,
+            "2012-06-06T01:29:00Z",
+            125.4,
+            69.8,
+            2.0,
             overlay_config(&[
                 OverlayKind::Horizon,
                 OverlayKind::CardinalLabels,

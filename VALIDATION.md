@@ -131,19 +131,28 @@ Current implementation:
   renderer and planning UI read.
 - `planning::active_occluders` is the V-51b producer that builds the
   bounded analytic-mask list (`MAX_OCCLUDERS = 16`) consumed by the
-  renderer's `CameraUniform::occluders` array. With V-51c + V-51d
-  shipped it emits up to nine entries per frame: a Sun-targeted entry
-  (Moon → Sun) when an eclipse is in contact, an always-on
-  Stars-targeted entry (Moon → catalog stars; the star vertex shader
-  culls sprites whose direction falls inside the front disk), and one
-  Planet-targeted entry per Moon ↔ planet pair currently in contact.
-  V-51e/f extend the producer without touching the shader contract.
+  renderer's `CameraUniform::occluders` array. With V-51c + V-51d +
+  V-51e shipped it emits up to eleven entries per frame: a
+  Sun-targeted entry (Moon → Sun) when a solar eclipse is in contact,
+  an always-on Stars-targeted entry (Moon → catalog stars; the star
+  vertex shader culls sprites whose direction falls inside the front
+  disk), one Planet-targeted entry per Moon ↔ planet pair currently
+  in contact, and a Sun-targeted entry per inner planet (Mercury,
+  Venus) currently transiting the solar disk. V-51f extends the
+  producer without touching the shader contract.
 - `planning::find_lunar_occultation(observer, body, start, end)` is
   the planning-side entry point for `V-51d` lunar occultations of
   stars and planets. `body` is
   `LunarOccultedBody::{Star { dir_date_eq }, Planet(p)}`; the helper
   drives a 1-minute scan to locate the closest approach and refines
   P1–P4 via the shared `contact_times` bisection.
+- `planning::find_planet_transit(observer, planet, start, end)` is
+  the planning-side entry point for `V-51e` Mercury / Venus transits
+  across the Sun. The helper rejects outer planets up front, gates
+  the peak scan on `planet.distance_au < sun.distance_au` (so the
+  pure-geometry classifier never confuses a superior-conjunction
+  near-alignment with a true transit), and refines P1–P4 via the
+  shared `contact_times` bisection.
 
 Validation expectation:
 
@@ -160,6 +169,19 @@ Validation expectation:
     (`planning::tests::find_solar_eclipse_finds_2012_tokyo_annular`).
   - Non-eclipse dates must return `None`
     (`planning::tests::find_solar_eclipse_returns_none_on_non_eclipse_day`).
+- Real historical transits must keep producing the correct kind and a
+  plausible peak obscuration / total duration:
+  - 2012-06-06 Venus transit from Tokyo: `AnnularOrTransit` interior
+    phase (P2/P3 present), peak obscuration in the area-ratio band
+    `[5e-4, 2e-3]` (Venus apparent diameter \u224858\u2033, Sun \u22481890\u2033), total
+    duration P1\u2192P4 in `[5, 8]` h
+    (`planning::tests::find_planet_transit_finds_2012_venus_transit`).
+  - Non-transit dates must return `None` for both Mercury and Venus
+    (`planning::tests::find_planet_transit_returns_none_off_transit_day`).
+  - Outer planets must be rejected up front
+    (`planning::tests::find_planet_transit_rejects_outer_planets`).
+  - Superior-conjunction near-alignments must not emit a Sun-targeted
+    occluder (`planning::tests::active_occluders_skip_planet_on_sun_at_superior_conjunction`).
 
 Current limitation:
 
@@ -167,11 +189,11 @@ Current limitation:
   gated on the DE440 upgrade tracked as `L-06`; the current VSOP87 /
   ELP2000 stack reproduces classification and peak obscuration but
   contact times agree only to within a few minutes.
-- V-51 currently ships the Moon-on-Sun pair (`V-51c`) and lunar
+- V-51 currently ships the Moon-on-Sun pair (`V-51c`), lunar
   occultation of catalog stars + the seven rendered planets
-  (`V-51d`). Mercury / Venus transits across the Sun and mutual
-  planetary occultation (`V-51e` / `V-51f`) reuse the same primitives
-  but are not yet validated against the transit canon. The V-51b/d
+  (`V-51d`), and Mercury / Venus transits across the Sun (`V-51e`).
+  Mutual planetary occultation (`V-51f`) reuses the same primitives
+  but is not yet validated against the historical canon. The V-51b/d
   analytic-mask uniform path is pinned by
   `camera::tests::occluder_uniform_matches_moon_state_at_mazatlan_peak`
   (Sun-targeted entry in slot 0 + Stars-targeted entry in slot 1, both
