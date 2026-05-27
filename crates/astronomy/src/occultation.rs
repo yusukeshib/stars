@@ -107,6 +107,139 @@ impl OccultationKind {
             Self::Total => "total",
         }
     }
+
+    /// Numeric label the renderer uniform uses to signal the geometry
+    /// without a branch table. Stable across hosts so deterministic
+    /// re-renders stay bit-identical.
+    pub const fn shader_code(self) -> f32 {
+        match self {
+            Self::None => 0.0,
+            Self::Partial => 1.0,
+            Self::AnnularOrTransit => 2.0,
+            Self::Total => 3.0,
+        }
+    }
+}
+
+/// Maximum number of analytic occluders the renderer carries per frame
+/// (V-51b). The shader uniform is a fixed-size array, so the upper
+/// bound has to be a compile-time constant; 16 fits every realistic
+/// configuration (Moon-on-Sun + a transiting planet + a handful of
+/// star/planet occultations) with room to spare.
+pub const MAX_OCCLUDERS: usize = 16;
+
+/// Which back-disk an [`Occluder`] is masking.
+///
+/// The renderer routes the subtract mask to the matching source term
+/// (Sun disk, Moon disk, or one of the seven planet disks). The
+/// [`OccluderTarget::Stars`] variant flags the V-51d star-sprite CPU
+/// cull and is not consumed by the analytic-mask shader path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OccluderTarget {
+    Sun,
+    Moon,
+    /// `Planet(i)` masks `planet_eq_radius[i]` (Mercury = 0 .. Neptune = 6).
+    Planet(u8),
+    /// V-51d: occlude HYG / catalog star sprites whose direction falls
+    /// inside the front disk. CPU-side cull only; the shader does not
+    /// observe this variant.
+    Stars,
+}
+
+impl OccluderTarget {
+    /// Numeric label the renderer uniform uses; mirrored in
+    /// `shaders/skyglow.wgsl` as `OCCLUDER_TARGET_*`. The `Stars`
+    /// variant returns `-1` because the shader iterates only the
+    /// non-negative subset.
+    pub const fn shader_code(self) -> i32 {
+        match self {
+            Self::Sun => 0,
+            Self::Moon => 1,
+            Self::Planet(i) => 2 + i as i32,
+            Self::Stars => -1,
+        }
+    }
+}
+
+/// One front/back analytic-mask pair for the renderer (V-51b).
+///
+/// `front_dir_eq` is the equatorial direction of the front disk's centre
+/// (unit vector, same frame as `apparent_*_topocentric().direction_equatorial()`);
+/// `front_radius_rad` is its apparent angular radius. The shader
+/// subtracts `disk_mask(ray, front_dir_eq, front_radius_rad)` from the
+/// source term of the body identified by `target`.
+#[derive(Debug, Clone, Copy)]
+pub struct Occluder {
+    pub front_dir_eq: [f64; 3],
+    pub front_radius_rad: f64,
+    pub target: OccluderTarget,
+    pub kind: OccultationKind,
+    pub obscuration: f64,
+}
+
+impl Occluder {
+    /// Inert placeholder used to pad the fixed-size [`ActiveOccluders`]
+    /// array. `len` gates iteration so the renderer never reads padded
+    /// entries.
+    pub const PLACEHOLDER: Self = Self {
+        front_dir_eq: [0.0; 3],
+        front_radius_rad: 0.0,
+        target: OccluderTarget::Sun,
+        kind: OccultationKind::None,
+        obscuration: 0.0,
+    };
+}
+
+/// Bounded list of active occluders for one observer at one instant.
+///
+/// Backed by a fixed-size array (`MAX_OCCLUDERS`) so the renderer can
+/// memcpy it straight into a uniform without an intermediate allocation.
+/// Iterate via [`ActiveOccluders::as_slice`].
+#[derive(Debug, Clone, Copy)]
+pub struct ActiveOccluders {
+    entries: [Occluder; MAX_OCCLUDERS],
+    len: u8,
+}
+
+impl ActiveOccluders {
+    pub const EMPTY: Self = Self {
+        entries: [Occluder::PLACEHOLDER; MAX_OCCLUDERS],
+        len: 0,
+    };
+
+    #[inline]
+    pub const fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    #[inline]
+    pub fn as_slice(&self) -> &[Occluder] {
+        &self.entries[..self.len as usize]
+    }
+
+    /// Append `occ`. Returns `false` (and leaves the list unchanged) if
+    /// the list is already at capacity — callers should drop occluders
+    /// beyond `MAX_OCCLUDERS` rather than spill into the heap.
+    pub fn push(&mut self, occ: Occluder) -> bool {
+        let i = self.len as usize;
+        if i >= MAX_OCCLUDERS {
+            return false;
+        }
+        self.entries[i] = occ;
+        self.len += 1;
+        true
+    }
+}
+
+impl Default for ActiveOccluders {
+    fn default() -> Self {
+        Self::EMPTY
+    }
 }
 
 /// Classify the apparent-disk geometry of one observer-centric pair.
@@ -435,6 +568,38 @@ mod tests {
         let far = ApparentDisk::new(Vec3::new(0.0, 1.0, 0.0), r);
         let contacts = contact_times(0.0, 1.0, |_| (near, far));
         assert!(!contacts.is_event());
+    }
+
+    #[test]
+    fn active_occluders_push_and_capacity() {
+        let mut list = ActiveOccluders::EMPTY;
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+        for _ in 0..MAX_OCCLUDERS {
+            assert!(list.push(Occluder::PLACEHOLDER));
+        }
+        assert_eq!(list.len(), MAX_OCCLUDERS);
+        // Push past capacity must reject without panicking.
+        assert!(!list.push(Occluder::PLACEHOLDER));
+        assert_eq!(list.len(), MAX_OCCLUDERS);
+        assert_eq!(list.as_slice().len(), MAX_OCCLUDERS);
+    }
+
+    #[test]
+    fn occluder_target_shader_codes_are_stable() {
+        assert_eq!(OccluderTarget::Sun.shader_code(), 0);
+        assert_eq!(OccluderTarget::Moon.shader_code(), 1);
+        assert_eq!(OccluderTarget::Planet(0).shader_code(), 2);
+        assert_eq!(OccluderTarget::Planet(6).shader_code(), 8);
+        assert_eq!(OccluderTarget::Stars.shader_code(), -1);
+    }
+
+    #[test]
+    fn occultation_kind_shader_codes_are_stable() {
+        assert_eq!(OccultationKind::None.shader_code(), 0.0);
+        assert_eq!(OccultationKind::Partial.shader_code(), 1.0);
+        assert_eq!(OccultationKind::AnnularOrTransit.shader_code(), 2.0);
+        assert_eq!(OccultationKind::Total.shader_code(), 3.0);
     }
 
     #[test]

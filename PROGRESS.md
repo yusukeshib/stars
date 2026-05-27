@@ -414,13 +414,15 @@ gibbous appears as a ~24 % waning crescent). The sign is now `-moon_dir`,
 matching the geometric convention that `moon_dir` points from the observer to
 the Moon.
 
-### Unified eclipse / occultation pass (`V-51a` + `V-51c`)
+### Unified eclipse / occultation pass (`V-51a` + `V-51b` + `V-51c`)
 
-First slice of `V-51` (unified eclipse / occultation pass): common
-occultation primitives plus the solar-eclipse renderer wiring
-(Moon → Sun pair). Lunar occultation, planetary transit, and mutual
-planetary occultation slices (`V-51d`/`e`/`f`) build on the same
-primitives and ship in a follow-up PR.
+First three slices of `V-51` (unified eclipse / occultation pass):
+common occultation primitives (`V-51a`), the general `MAX_OCCLUDERS
+= 16` analytic-mask uniform array (`V-51b`), and the solar-eclipse
+renderer wiring (Moon → Sun pair, `V-51c`). Lunar occultation,
+planetary transit, and mutual planetary occultation slices
+(`V-51d`/`e`/`f`) plug their own front-disk producers into the same
+`active_occluders` list and ship in follow-up PRs.
 
 Primary implementation areas:
 
@@ -493,12 +495,50 @@ Validation (pinned in `VALIDATION.md`):
   gallery as the visual contract for the analytic-mask + Koomen +
   corona pipeline.
 
+Shipped capabilities (`V-51b`):
+
+- `astronomy::active_occluders(observer) -> ActiveOccluders` is the
+  producer the renderer reads each frame to populate its bounded
+  analytic-mask uniform. The list is a fixed-size, alloc-free
+  container (`MAX_OCCLUDERS = 16`) so embedders can memcpy it into
+  the uniform without an intermediate heap step. V-51b emits one
+  entry (Moon → Sun) when `solar_eclipse_state` reports an event;
+  V-51d/e/f extend the producer with their own front-disk pairs
+  without further shader changes.
+- `OccluderTarget { Sun, Moon, Planet(i), Stars }` routes the
+  subtract mask to the correct back-disk source term (planet index
+  matches `planet_eq_radius[i]`); the `Stars` variant flags the
+  dormant CPU star-sprite cull tracked for V-51d.
+- `CameraUniform::occluders: [[f32; 4]; 32]` + `occluder_params: [f32; 4]`
+  carry the active list to the shader as two `vec4` rows per entry
+  (`front_dir_radius` + `target_kind_obscuration`) plus a count
+  header. Front-disk directions go through the same
+  `apparent_disk_direction_j2000` pipeline as the Sun and Moon
+  uniforms so the analytic mask stays bit-identical to V-51c.
+- `shaders/skyglow.wgsl::occluder_subtract_mask(ray_dir, target_code,
+  pixel_sr)` is the shared union-of-disks helper consumed by both
+  the Sun and Moon disk source terms inside
+  `sun_moon_disk_radiance`. The WGSL loop is bounded by
+  `occluder_params.x` so padded rows are never sampled; outside an
+  eclipse the count is zero and the shader short-circuits.
+- Renderer parity tests
+  (`camera::tests::occluder_uniform_matches_moon_state_at_mazatlan_peak`,
+  `occluder_uniform_zeros_on_external_or_atmosphere_off`,
+  `occluder_uniform_empty_off_eclipse`) pin the contract that V-51c
+  golden frames remain bit-identical and that the list is gated by
+  the same predicate as `solar_eclipse_state`. The committed
+  `docs/assets/validation/solar-eclipse.png` (rendered through the
+  array path) is the visual contract.
+- `astronomy::planning::active_occluders_match_solar_eclipse_state_at_mazatlan_peak`
+  pins the producer side: at greatest eclipse the list contains
+  exactly one Sun-targeted occluder whose obscuration agrees with
+  `solar_eclipse_state` to within 1e-6.
+
 Deliberately out of scope for this slice (deferred to `V-51d`/`e`/`f`):
 lunar occultation of stars and planets, Mercury / Venus transit of
-the Sun, mutual planetary occultation, and the general `MAX_OCCLUDERS
-= 16` uniform array. The current single-pair Moon-on-Sun path uses
-the same `ApparentDisk` contract, so the array generalisation is
-additive rather than a rewrite.
+the Sun, and mutual planetary occultation. The `MAX_OCCLUDERS = 16`
+rails and the `OccluderTarget` enum are in place, so each follow-up
+item only needs to add its producer.
 
 Documented limit. With the current VSOP87 / ELP2000 + WGS84
 parallax ephemeris stack the apparent Moon and Sun radii at the

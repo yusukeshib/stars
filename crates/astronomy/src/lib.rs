@@ -32,14 +32,14 @@ pub use ephemeris::{
 pub use horizontal::{equatorial_to_horizontal, equatorial_to_horizontal_matrix, AltAz};
 pub use observer::Observer;
 pub use occultation::{
-    classify_disks, contact_times, obscuration_fraction, ApparentDisk, ContactTimes,
-    OccultationKind,
+    classify_disks, contact_times, obscuration_fraction, ActiveOccluders, ApparentDisk,
+    ContactTimes, Occluder, OccluderTarget, OccultationKind, MAX_OCCLUDERS,
 };
 pub use planning::{
-    body_altitude_rad, body_equatorial, evening_plan, evening_window_jd_utc, find_solar_eclipse,
-    jd_utc_to_unix_ms, rise_transit_set, solar_eclipse_state, twilight_band, twilight_indicators,
-    EveningPlan, PlanningBody, RiseTransitSet, SolarEclipseEvent, SolarEclipseKind,
-    SolarEclipseState, TwilightBand, TwilightIndicator, DEFAULT_PLANNING_BODIES,
+    active_occluders, body_altitude_rad, body_equatorial, evening_plan, evening_window_jd_utc,
+    find_solar_eclipse, jd_utc_to_unix_ms, rise_transit_set, solar_eclipse_state, twilight_band,
+    twilight_indicators, EveningPlan, PlanningBody, RiseTransitSet, SolarEclipseEvent,
+    SolarEclipseKind, SolarEclipseState, TwilightBand, TwilightIndicator, DEFAULT_PLANNING_BODIES,
 };
 pub use time::{
     approximate_tdb_from_tt, gmst_radians, julian_date_from_unix_seconds, lmst_radians,

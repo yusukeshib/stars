@@ -245,7 +245,14 @@ The exact pass layout can change, but responsibilities should stay separated:
 - **Camera/uniform preparation**: CPU-side apparent-date, observer-dependent,
   eyepiece true-field, and projection data that the GPU needs for a frame.
 - **Skyglow / atmosphere**: diffuse night sky, zodiacal light, airglow, dust,
-  sunlit scattering, twilight, moonlit sky, and solar-system disks. Stellar
+  sunlit scattering, twilight, moonlit sky, and solar-system disks. Sun and
+  Moon (and, via V-51b, planet) disks share a single analytic-mask occluder
+  array (`CameraUniform::occluders`, `MAX_OCCLUDERS = 16`) populated each
+  frame from `astronomy::active_occluders(observer)` and mapped through the
+  same `apparent_disk_direction_j2000` pipeline as the bare Sun and Moon
+  directions — so any front-disk on back-disk pair (solar eclipse, planetary
+  transit, mutual planetary occultation) is one shader uniform write away
+  with no depth or stencil attachments. Stellar
   extinction and daylight scattering both read the same canonical
   (β, α, DU, observer altitude) optical-depth state through
   `astronomy::atmosphere::extinction_coefficients` (V-37); the renderer

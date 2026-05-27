@@ -1,8 +1,8 @@
 //! Observation-planning helpers: twilight states and rise/transit/set tables.
 
 use crate::occultation::{
-    classify_disks, contact_times, obscuration_fraction, ApparentDisk, ContactTimes,
-    OccultationKind,
+    classify_disks, contact_times, obscuration_fraction, ActiveOccluders, ApparentDisk,
+    ContactTimes, Occluder, OccluderTarget, OccultationKind,
 };
 use crate::{
     apparent_moon_topocentric, apparent_planet_topocentric, apparent_sun_topocentric,
@@ -426,6 +426,54 @@ pub fn solar_eclipse_state(observer: Observer) -> SolarEclipseState {
     SolarEclipseState { kind, obscuration }
 }
 
+/// Build the list of analytic occluders active for `observer` at the
+/// current instant (V-51b).
+///
+/// This is the producer the renderer reads each frame to populate its
+/// `MAX_OCCLUDERS` uniform array. The shader runs one analytic subtract
+/// mask per entry, so the function only emits *visible* occluders
+/// (apparent disks currently in contact); off-eclipse observers get an
+/// empty list and the shader short-circuits on `count == 0`.
+///
+/// V-51b populates a single producer: the Moon-occults-Sun pair (the
+/// same geometry that drives [`solar_eclipse_state`]). Subsequent items
+/// extend the list:
+///
+/// * `V-51d` — lunar occultations of stars / planets
+///   ([`OccluderTarget::Stars`] + [`OccluderTarget::Planet`] backed by
+///   the Moon).
+/// * `V-51e` — Mercury / Venus transits across the Sun
+///   ([`OccluderTarget::Sun`] backed by a planet disk).
+/// * `V-51f` — mutual planetary occultation
+///   ([`OccluderTarget::Planet`] backed by another planet disk).
+///
+/// The list is bounded by [`crate::occultation::MAX_OCCLUDERS`]; pushes
+/// past capacity are silently dropped rather than allocated.
+pub fn active_occluders(observer: Observer) -> ActiveOccluders {
+    let mut out = ActiveOccluders::EMPTY;
+
+    // V-51c Moon-on-Sun. Mirrors `solar_eclipse_state` so the analytic-
+    // mask path and the Sun-specific photometric falloff cannot drift.
+    let sun = apparent_sun_topocentric(observer);
+    let moon = apparent_moon_topocentric(observer);
+    let sun_disk = ApparentDisk::new(sun.direction_equatorial(), sun.angular_radius_rad);
+    let moon_disk = ApparentDisk::new(moon.direction_equatorial(), moon.angular_radius_rad);
+    let kind = classify_disks(moon_disk, sun_disk);
+    if !matches!(kind, OccultationKind::None) {
+        let obscuration = obscuration_fraction(moon_disk, sun_disk) as f64;
+        let moon_dir = moon.direction_equatorial();
+        let _ = out.push(Occluder {
+            front_dir_eq: [moon_dir.x as f64, moon_dir.y as f64, moon_dir.z as f64],
+            front_radius_rad: moon.angular_radius_rad,
+            target: OccluderTarget::Sun,
+            kind,
+            obscuration,
+        });
+    }
+
+    out
+}
+
 /// One solar-eclipse event located inside a planning window.
 #[derive(Debug, Clone, Copy)]
 pub struct SolarEclipseEvent {
@@ -621,6 +669,71 @@ mod tests {
         let p1 = event.contacts.p1.expect("P1 must exist");
         let p4 = event.contacts.p4.expect("P4 must exist");
         assert!(p1 <= event.peak_jd_utc && event.peak_jd_utc <= p4);
+    }
+
+    #[test]
+    fn active_occluders_is_empty_off_eclipse() {
+        // Same observer + epoch as the non-eclipse test below.
+        let start = jd_utc_from_iso_hours(2025, 7, 1, 0.0);
+        let end = jd_utc_from_iso_hours(2025, 7, 1, 24.0);
+        let observer = Observer::from_degrees(35.68, 139.69, 0.5 * (start + end));
+        let list = active_occluders(observer);
+        assert!(
+            list.is_empty(),
+            "expected no occluders off-eclipse, got {} (first kind = {:?})",
+            list.len(),
+            list.as_slice().first().map(|o| o.kind)
+        );
+    }
+
+    #[test]
+    fn active_occluders_match_solar_eclipse_state_at_mazatlan_peak() {
+        // V-51b parity contract: when only the Moon-on-Sun pair is active,
+        // `active_occluders` must agree with `solar_eclipse_state` on the
+        // kind + obscuration. Anything else would let the analytic-mask
+        // path drift away from the Sun-specific photometric falloff.
+        let start = jd_utc_from_iso_hours(2024, 4, 8, 15.0);
+        let end = jd_utc_from_iso_hours(2024, 4, 8, 21.0);
+        let event = find_solar_eclipse(
+            Observer::from_degrees(23.219, -106.420, 0.5 * (start + end)),
+            start,
+            end,
+        )
+        .expect("Mazatl\u{00e1}n totality must be detected");
+        let peak_observer = Observer::from_degrees(23.219, -106.420, event.peak_jd_utc);
+
+        let state = solar_eclipse_state(peak_observer);
+        let list = active_occluders(peak_observer);
+
+        assert_eq!(list.len(), 1, "only one Moon-on-Sun occluder is expected");
+        let occ = list.as_slice()[0];
+        assert_eq!(occ.target, OccluderTarget::Sun);
+        // Both producers must classify the deepest geometry the same way.
+        // `solar_eclipse_state` collapses `Total`/`AnnularOrTransit` based
+        // on relative radii; `Occluder::kind` is the raw pair-wise label.
+        match state.kind {
+            SolarEclipseKind::Total => assert_eq!(occ.kind, OccultationKind::Total),
+            SolarEclipseKind::Annular => {
+                assert_eq!(occ.kind, OccultationKind::AnnularOrTransit)
+            }
+            SolarEclipseKind::Partial => assert_eq!(occ.kind, OccultationKind::Partial),
+            SolarEclipseKind::None => panic!("peak frame must be eclipsing"),
+        }
+        assert!(
+            (occ.obscuration as f32 - state.obscuration).abs() < 1.0e-6,
+            "obscuration drift: occluder {} vs state {}",
+            occ.obscuration,
+            state.obscuration,
+        );
+        // Front-disk direction must be a unit vector aligned with the
+        // Moon's apparent topocentric direction.
+        let n2 = occ.front_dir_eq[0] * occ.front_dir_eq[0]
+            + occ.front_dir_eq[1] * occ.front_dir_eq[1]
+            + occ.front_dir_eq[2] * occ.front_dir_eq[2];
+        assert!(
+            (n2 - 1.0).abs() < 1.0e-5,
+            "front_dir_eq not unit: |v|\u{00b2} = {n2}"
+        );
     }
 
     #[test]
