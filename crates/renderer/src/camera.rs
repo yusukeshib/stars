@@ -1,7 +1,7 @@
 use astronomy::{
     apparent_planets_topocentric, earth_velocity_over_c_j2000, equation_of_equinoxes,
     equatorial_to_horizontal_matrix, illuminants, lmst_radians, precession_nutation_matrix,
-    years_since_j2000, Observer, Planet, SunMoonApparent,
+    solar_eclipse_state, years_since_j2000, Observer, Planet, SolarEclipseKind, SunMoonApparent,
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -254,6 +254,21 @@ pub(crate) struct CameraUniform {
     /// `time_seconds_mod_day` is `fract(jd_ut1) * 86400`, so two renders of
     /// the same session at the same simulated UT1 produce identical pixels.
     pub scintillation_params: [f32; 4],
+    /// V-51c solar-eclipse state for the analytic Moon-on-Sun occluder
+    /// path. Layout:
+    /// `[kind_code, obscuration_fraction, totality_weight, partial_weight]`.
+    /// * `kind_code` is [`SolarEclipseKind::shader_code`]:
+    ///   0 = none, 1 = partial, 2 = annular, 3 = total.
+    /// * `obscuration_fraction` in `[0, 1]` is the fraction of the solar
+    ///   disk currently hidden by the Moon; the shader uses it to scale
+    ///   the daylight scattering radiance (Koomen 1952 falloff).
+    /// * `totality_weight` is a smoothstep on `obscuration` that climbs
+    ///   from 0 at second contact to 1 well inside totality; the shader
+    ///   reads it to gate the Baumbach 1937 corona term.
+    /// * `partial_weight` mirrors the same smoothstep but covers the
+    ///   partial / annular phase, so the daylight Koomen falloff fades
+    ///   in continuously around C2 / C3 instead of stepping.
+    pub solar_eclipse_state: [f32; 4],
 }
 
 pub(crate) const HW_COEFFS_PER_CHANNEL: usize = 9;
@@ -1309,6 +1324,39 @@ impl Camera {
                 0.0,
             ]
         };
+        // V-51c: classify the Moon-occults-Sun apparent-disk geometry for
+        // this frame. The renderer disables the analytic-mask path on
+        // external galactic viewpoints (no atmosphere, no apparent disks)
+        // and on `Atmosphere::OFF` (which already turns daylight off, so
+        // there is nothing to darken). The Koomen 1952 daylight falloff is
+        // applied later inside the skyglow shader via this uniform.
+        let solar_eclipse_state_uniform =
+            if self.atmosphere.sunlit_scattering && !self.viewpoint.is_external() {
+                let state = solar_eclipse_state(self.observer);
+                let totality_weight = if matches!(state.kind, SolarEclipseKind::Total) {
+                    // smoothstep((0.97, 0.998), obs): the totality envelope only
+                    // turns the corona on inside the Moon-larger-than-Sun core,
+                    // not during deep partial phases that still leave a bright
+                    // crescent (which would wash out the corona term).
+                    let t = ((state.obscuration as f32 - 0.97) / 0.028).clamp(0.0, 1.0);
+                    t * t * (3.0 - 2.0 * t)
+                } else {
+                    0.0
+                };
+                let partial_weight = if matches!(state.kind, SolarEclipseKind::None) {
+                    0.0
+                } else {
+                    state.obscuration
+                };
+                [
+                    state.kind.shader_code(),
+                    state.obscuration,
+                    totality_weight,
+                    partial_weight,
+                ]
+            } else {
+                [0.0, 0.0, 0.0, 0.0]
+            };
         CameraUniform {
             view_proj: view_proj.to_cols_array_2d(),
             inv_view_proj: inv_view_proj.to_cols_array_2d(),
@@ -1364,6 +1412,7 @@ impl Camera {
             hw_coeffs,
             hw_radiance,
             scintillation_params,
+            solar_eclipse_state: solar_eclipse_state_uniform,
         }
     }
 

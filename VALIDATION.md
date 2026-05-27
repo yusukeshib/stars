@@ -117,6 +117,47 @@ Current limitation:
 - `L-06` still tracks higher-precision DE440 / publication-grade ephemeris
   work. Do not describe the current stack as final research-grade ephemerides.
 
+### Eclipse / occultation geometry (`V-51`)
+
+Current implementation:
+
+- `crates/astronomy/src/occultation.rs` exposes the pair-wise
+  `ApparentDisk`, `classify_disks`, `obscuration_fraction`, and
+  `contact_times` helpers used by the solar-eclipse renderer
+  (`V-51c`), the V-36 lunar-eclipse aid, and future lunar / planetary
+  occultation and transit slices.
+- `planning::solar_eclipse_state` and `planning::find_solar_eclipse`
+  provide the per-frame state + window-search entry points the
+  renderer and planning UI read.
+
+Validation expectation:
+
+- Closed-form geometry must stay pinned for disjoint, touching,
+  concentric annular, concentric total, point-source, and contact-time
+  cases.
+- Real historical eclipses must keep producing the correct kind and a
+  plausible peak obscuration / totality duration:
+  - 2024-04-08 Mazatl\u00e1n: `Total`, peak obscuration > 0.999,
+    totality duration in `[60, 600]` s
+    (`planning::tests::find_solar_eclipse_finds_2024_mazatlan_totality`).
+  - 2012-05-21 Tokyo: `Annular` (or deep Partial) with peak
+    obscuration > 0.80 and P1 \u2264 peak \u2264 P4
+    (`planning::tests::find_solar_eclipse_finds_2012_tokyo_annular`).
+  - Non-eclipse dates must return `None`
+    (`planning::tests::find_solar_eclipse_returns_none_on_non_eclipse_day`).
+
+Current limitation:
+
+- Sub-30-second P1\u2013P4 accuracy against NASA TP-2006-214141 stays
+  gated on the DE440 upgrade tracked as `L-06`; the current VSOP87 /
+  ELP2000 stack reproduces classification and peak obscuration but
+  contact times agree only to within a few minutes.
+- The V-51 first slice ships the Moon-on-Sun pair only. Lunar
+  occultation of stars / planets, Mercury / Venus transits, and
+  mutual planetary occultation (`V-51d` / `V-51e` / `V-51f`) reuse
+  the same primitives but are not yet validated against the IOTA
+  catalogue or transit canon.
+
 ### Atmosphere and sky colour
 
 Current implementation includes:
@@ -218,8 +259,9 @@ Current implementation includes:
   overlays, projection/viewpoint, active corrections, atmosphere, catalog
   snapshot, and app version;
 - deterministic scene presets for Tokyo evening, dark sky, noon, sunset, civil /
-  nautical / astronomical twilight, moonlit night, an eclipse aid, all-sky maps,
-  and external galactic viewpoints;
+  nautical / astronomical twilight, moonlit night, a lunar eclipse aid, the
+  2024-04-08 Mazatl\u00e1n total solar eclipse (`SolarEclipse`, V-51c), all-sky
+  maps, and external galactic viewpoints;
 - notebook examples in `examples/notebooks` that load the same JSON sessions,
   compare pinned Sun/Moon/planet tables, and optionally render via CLI;
 - a validation/demo gallery generated from those presets by

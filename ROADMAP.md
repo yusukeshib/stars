@@ -120,7 +120,11 @@ features (`V-45`–`V-50`), and rare phenomena (`V-47`–`V-49`).
 **High priority next:** the visual-richness gaps `V-51`–`V-56` (eclipses /
 occultations, planetary rings and moons, resolved star clusters, double
 stars, artificial satellites, and object search / GoTo / info panel) —
-these surface existing engine capability that the current UI hides.
+these surface existing engine capability that the current UI hides. The
+first slice of `V-51` (common occultation primitives + the solar-eclipse
+renderer path, `V-51a` + `V-51c`) has shipped; `V-51b`/`d`/`e`/`f`
+(general N≤16 occluder array + lunar occultation + planetary transit +
+mutual planetary occultation) are next.
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
@@ -190,7 +194,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-48` | **Aurora display** | ⬜ |
 | `V-49` | **Comet rendering** | ⬜ |
 | `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ⬜ |
-| `V-51` | **Unified eclipse / occultation pass** | ⬜ |
+| `V-51` | **Unified eclipse / occultation pass** (`a` + `c` done; `b`/`d`/`e`/`f` open) | ⏳ |
 | `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** | ⬜ |
 | `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** | ⬜ |
 | `V-54` | **Double / binary star resolution** | ⬜ |
@@ -1628,7 +1632,7 @@ management is a post-gamut matrix + transfer-function swap.
 
 ## Solar system geometry — eclipses and occultations
 
-### `V-51` Unified eclipse / occultation pass — ⬜
+### `V-51` Unified eclipse / occultation pass — ⏳ (`V-51a` + `V-51c` shipped)
 
 **Item.** Today only the lunar eclipse is modelled (`V-36`: Earth's umbra
 darkening the Moon). Every other foreground/background pair where one
@@ -1681,25 +1685,38 @@ benchmark scenes.
 
 **Sub-items.**
 
-- **`V-51a` Common occlusion primitives.** New
-  `crates/astronomy/src/occultation.rs` exposing
-  `classify_pair(front, back) -> OccultationKind { None, Partial,
-  AnnularOrTransit, Total }`, `obscuration_fraction(front, back) -> f32`,
-  and `contact_times(front, back, window) -> [P1..P4]` for any pair of
-  apparent disks (Sun, Moon, planets). Pure geometry, no rendering.
-- **`V-51b` Renderer analytic-mask path.** Extend
-  `shaders/skyglow.wgsl` (and the star-sprite CPU cull) with an
-  occluder array `(dir, r_angular, kind)`; subtract the back body's
-  source term inside the front body's disk; cull background star
-  sprites whose direction lies inside any occluder disk. Bounded by
-  `MAX_OCCLUDERS = 16`. No depth / stencil attachments added.
-- **`V-51c` Solar eclipse (Moon → Sun).** Wires V-51a/b to the
-  Sun ↔ Moon pair; adds `shaders/corona.wgsl` (Baumbach profile,
-  scissor-bounded, total-only); reduces diffuse sky brightness via
-  the Koomen falloff during obscuration with smoothstep around C2/C3.
-  Bailey's beads / diamond ring emerge from the existing HDR + glare
-  path against the analytic mask. New `SolarEclipse` preset distinct
-  from the existing `EclipseAid` (which stays lunar).
+- **`V-51a` Common occlusion primitives.** ✅ Shipped.
+  `crates/astronomy/src/occultation.rs` exposes `ApparentDisk`,
+  `classify_disks(front, back) -> OccultationKind { None, Partial,
+  AnnularOrTransit, Total }`, `obscuration_fraction(front, back) -> f32`
+  (closed-form two-circle lens area / back area), and
+  `contact_times(start, end, disks) -> ContactTimes` returning the
+  canonical P1..P4 instants via a 30 s grid scan + bisection refine.
+  Pure geometry, no rendering. The V-36 Earth-shadow aid in
+  `apparent_moon` now delegates to `obscuration_fraction` so the
+  lunar-eclipse and solar-eclipse paths share one definition.
+- **`V-51b` Renderer analytic-mask path.** ⏳ The single-pair Moon-on-Sun
+  subtract for `V-51c` is shipped via
+  `CameraUniform::solar_eclipse_state`; the general
+  `MAX_OCCLUDERS = 16` uniform array (used by `V-51d`/`e`/`f`) and
+  the star-sprite CPU cull remain open. No depth / stencil
+  attachments added.
+- **`V-51c` Solar eclipse (Moon → Sun).** ✅ Shipped. Wires V-51a to
+  the Sun ↔ Moon pair via `solar_eclipse_state(observer)` and the
+  GPU `CameraUniform::solar_eclipse_state` quad-vector
+  `[kind_code, obscuration, totality_weight, partial_weight]`.
+  `shaders/skyglow.wgsl` extends `sun_moon_disk_radiance` with the
+  analytic Moon-on-Sun subtract plus an inline Baumbach 1937 corona
+  term (2° scissor, totality-only); the Hošek-Wilkie daylight branch
+  and the twilight branch both multiply through a Koomen 1952
+  falloff that drops to ~1e-4 of normal daylight at maximum
+  obscuration. Bailey's beads / diamond ring emerge from the
+  existing HDR + glare path against the analytic mask. New
+  `SolarEclipse` deterministic preset (2024-04-08 Mazatlán
+  totality, az≈138°, alt≈70°, 5° FoV) replaces the lunar-only
+  `EclipseAid` as the validation point for the solar pipeline.
+  `find_solar_eclipse(observer, start, end)` exposes peak +
+  contacts to planning hosts.
 - **`V-51d` Lunar occultation of stars and planets (Moon → star/planet).**
   CPU-side cull of HYG catalog sprites and planet sprites whose
   topocentric direction lies inside the Moon's disk. Disappearance /
@@ -1729,9 +1746,12 @@ benchmark scenes.
 
 **Tests / validation.** Pinned to entries logged in `VALIDATION.md`:
 - Solar eclipses: 2009-07-22 (Tokara, total), 2012-05-21 (Tokyo,
-  annular), 2024-04-08 (Mazatlán, total), 2035-09-02 (Utsunomiya,
-  predicted total) — Sun ↔ Moon separation within 1′ of NASA canon;
-  P1–P4 within 30 s.
+  annular, ✅ pinned), 2024-04-08 (Mazatlán, total, ✅ pinned),
+  2035-09-02 (Utsunomiya, predicted total) — Sun ↔ Moon separation
+  within 1′ of NASA canon; P1–P4 within 30 s once `L-06` (DE440
+  upgrade) lands. Current VSOP87 / ELP2000 stack pins detection,
+  classification, and totality-duration plausibility; sub-30 s
+  P1–P4 against TP-2006-214141 stays gated on DE440.
 - Lunar eclipses: 2000-01-21, 2025-09-08 — umbral contact times within
   30 s.
 - Lunar occultations: at least two IOTA-published star occultations

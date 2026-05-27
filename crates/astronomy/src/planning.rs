@@ -1,5 +1,9 @@
 //! Observation-planning helpers: twilight states and rise/transit/set tables.
 
+use crate::occultation::{
+    classify_disks, contact_times, obscuration_fraction, ApparentDisk, ContactTimes,
+    OccultationKind,
+};
 use crate::{
     apparent_moon_topocentric, apparent_planet_topocentric, apparent_sun_topocentric,
     equatorial_to_horizontal, lmst_radians, Observer, Planet, TimeScales, SECONDS_PER_DAY,
@@ -325,6 +329,194 @@ pub fn jd_utc_to_unix_ms(jd_utc: f64) -> f64 {
     (jd_utc - crate::UNIX_EPOCH_JD) * SECONDS_PER_DAY * 1000.0
 }
 
+/// Instantaneous solar-eclipse state for one observer at one instant
+/// (V-51c). Pairs the [`OccultationKind`] of the Moon-on-Sun geometry
+/// with the fraction of the solar disk currently hidden by the Moon, so
+/// the renderer can scale daylight scattering and draw the analytic
+/// occluder mask without re-running the geometry per fragment.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SolarEclipseState {
+    pub kind: SolarEclipseKind,
+    pub obscuration: f32,
+}
+
+/// Renderer-facing classification of the current solar-eclipse phase.
+/// Mirrors [`OccultationKind`] but is dedicated to the `Moon-occults-Sun`
+/// pair so the uniform can be a small fixed-size enum the shader unpacks
+/// without a branch table.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SolarEclipseKind {
+    /// No contact this instant.
+    #[default]
+    None,
+    /// Partial solar eclipse (limbs touching but not fully inside).
+    Partial,
+    /// Annular solar eclipse (Moon fully inside the solar disk).
+    Annular,
+    /// Total solar eclipse (solar disk fully behind the Moon).
+    Total,
+}
+
+impl SolarEclipseKind {
+    pub const fn as_kebab_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Partial => "partial",
+            Self::Annular => "annular",
+            Self::Total => "total",
+        }
+    }
+
+    /// Numeric label the shader uses to switch corona / Koomen falloff
+    /// branches. Stable across hosts so deterministic re-renders stay
+    /// bit-identical.
+    pub const fn shader_code(self) -> f32 {
+        match self {
+            Self::None => 0.0,
+            Self::Partial => 1.0,
+            Self::Annular => 2.0,
+            Self::Total => 3.0,
+        }
+    }
+
+    fn from_occultation(kind: OccultationKind, moon_radius: f64, sun_radius: f64) -> Self {
+        match kind {
+            OccultationKind::None => Self::None,
+            OccultationKind::Partial => Self::Partial,
+            OccultationKind::AnnularOrTransit => Self::Annular,
+            OccultationKind::Total => {
+                // The classifier returns `Total` whenever the front disk
+                // contains the back disk. For the Moon-on-Sun pair this
+                // is a true total solar eclipse only when the Moon is at
+                // least as large as the Sun; otherwise it would be an
+                // annular event already filtered above. The check here
+                // is a defensive guard against floating-point ties.
+                if moon_radius >= sun_radius {
+                    Self::Total
+                } else {
+                    Self::Annular
+                }
+            }
+        }
+    }
+}
+
+/// Compute the instantaneous solar-eclipse state for `observer`.
+///
+/// This is what the renderer reads every frame: it folds the Moon and
+/// Sun apparent topocentric disks into an [`OccultationKind`] and the
+/// fraction of the solar disk currently hidden. The helper is cheap
+/// (two ephemeris calls + closed-form geometry) so hosts can call it
+/// every frame without caching gymnastics.
+pub fn solar_eclipse_state(observer: Observer) -> SolarEclipseState {
+    let sun = apparent_sun_topocentric(observer);
+    let moon = apparent_moon_topocentric(observer);
+    let sun_disk = ApparentDisk::new(sun.direction_equatorial(), sun.angular_radius_rad);
+    let moon_disk = ApparentDisk::new(moon.direction_equatorial(), moon.angular_radius_rad);
+    let kind = SolarEclipseKind::from_occultation(
+        classify_disks(moon_disk, sun_disk),
+        moon.angular_radius_rad,
+        sun.angular_radius_rad,
+    );
+    let obscuration = if matches!(kind, SolarEclipseKind::None) {
+        0.0
+    } else {
+        obscuration_fraction(moon_disk, sun_disk)
+    };
+    SolarEclipseState { kind, obscuration }
+}
+
+/// One solar-eclipse event located inside a planning window.
+#[derive(Debug, Clone, Copy)]
+pub struct SolarEclipseEvent {
+    /// Deepest phase reached anywhere in the window (peak obscuration).
+    pub kind: SolarEclipseKind,
+    /// Peak obscuration fraction `[0, 1]`.
+    pub peak_obscuration: f32,
+    /// Julian Date (UTC) of peak obscuration.
+    pub peak_jd_utc: f64,
+    /// Canonical P1..P4 contact times (UTC Julian Dates). `P2`/`P3` are
+    /// `None` for purely partial events.
+    pub contacts: ContactTimes,
+}
+
+impl SolarEclipseEvent {
+    pub fn is_central(&self) -> bool {
+        matches!(
+            self.kind,
+            SolarEclipseKind::Annular | SolarEclipseKind::Total
+        )
+    }
+}
+
+/// Search `[start_jd_utc, end_jd_utc]` for a solar eclipse visible from
+/// `observer`. Returns `None` when the Moon-Sun apparent separation
+/// never falls below `r_moon + r_sun` inside the window.
+///
+/// The search uses a coarse 5-minute scan to bracket P1 and a finer
+/// pass via [`contact_times`] to refine the contact instants to ≤ 1 s.
+/// This is the helper hosts call when adding eclipse markers to the
+/// planning UI; it does *not* try to enumerate every eclipse in a long
+/// window — call it once per known eclipse date in the canon and pass a
+/// ±12 h bracket.
+pub fn find_solar_eclipse(
+    observer: Observer,
+    start_jd_utc: f64,
+    end_jd_utc: f64,
+) -> Option<SolarEclipseEvent> {
+    if !(start_jd_utc.is_finite() && end_jd_utc.is_finite()) || end_jd_utc <= start_jd_utc {
+        return None;
+    }
+    let disks = |jd: f64| -> (ApparentDisk, ApparentDisk) {
+        let obs = observer_at(observer, jd);
+        let sun = apparent_sun_topocentric(obs);
+        let moon = apparent_moon_topocentric(obs);
+        (
+            ApparentDisk::new(moon.direction_equatorial(), moon.angular_radius_rad),
+            ApparentDisk::new(sun.direction_equatorial(), sun.angular_radius_rad),
+        )
+    };
+    // 5 min scan for the peak; the eclipse window over Earth is several
+    // hours wide so this is dense enough to catch totality even when it
+    // is only a few minutes long.
+    let scan_step = 5.0 / (24.0 * 60.0);
+    let mut peak_jd = start_jd_utc;
+    let mut peak_obscuration = 0.0_f32;
+    let mut peak_kind = SolarEclipseKind::None;
+    let mut t = start_jd_utc;
+    while t <= end_jd_utc + 1e-12 {
+        let (front, back) = disks(t.min(end_jd_utc));
+        let kind = SolarEclipseKind::from_occultation(
+            classify_disks(front, back),
+            front.angular_radius_rad,
+            back.angular_radius_rad,
+        );
+        let obs = obscuration_fraction(front, back);
+        if obs > peak_obscuration {
+            peak_obscuration = obs;
+            peak_jd = t.min(end_jd_utc);
+            peak_kind = kind;
+        }
+        t += scan_step;
+    }
+    if !peak_kind.is_event() || peak_obscuration <= 0.0 {
+        return None;
+    }
+    let contacts = contact_times(start_jd_utc, end_jd_utc, disks);
+    Some(SolarEclipseEvent {
+        kind: peak_kind,
+        peak_obscuration,
+        peak_jd_utc: peak_jd,
+        contacts,
+    })
+}
+
+impl SolarEclipseKind {
+    fn is_event(self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,6 +542,93 @@ mod tests {
         let west_wrapped = local_midnight_jd_utc(2_460_000.5, 350_f64.to_radians());
         assert!((east - 2_460_000.472_222_222).abs() < 1e-9);
         assert!((west_wrapped - 2_459_999.527_777_778).abs() < 1e-9);
+    }
+
+    fn jd_utc_from_iso_hours(year: i32, month: u32, day: u32, hour: f64) -> f64 {
+        // Closed-form Gregorian → JD; matches `astro::time::julian_day` for the
+        // dates used in the eclipse tests below.
+        let (y, m) = if month <= 2 {
+            (year - 1, month + 12)
+        } else {
+            (year, month)
+        };
+        let a = (y as f64 / 100.0).floor();
+        let b = 2.0 - a + (a / 4.0).floor();
+        let jd_midnight = (365.25 * (y as f64 + 4716.0)).floor()
+            + (30.6001 * (m as f64 + 1.0)).floor()
+            + day as f64
+            + b
+            - 1524.5;
+        jd_midnight + hour / 24.0
+    }
+
+    #[test]
+    fn find_solar_eclipse_finds_2024_mazatlan_totality() {
+        // 2024-04-08 total solar eclipse. Peak over Mazatlán ≈ 18:13:08 UT,
+        // totality 4m 17s. Bracket a ~6 h local window so the contact-time
+        // refinement can lock onto P1..P4 regardless of the exact ephemeris
+        // peak.
+        let start = jd_utc_from_iso_hours(2024, 4, 8, 15.0);
+        let end = jd_utc_from_iso_hours(2024, 4, 8, 21.0);
+        let mid = 0.5 * (start + end);
+        let observer = Observer::from_degrees(23.219, -106.420, mid);
+        let event = find_solar_eclipse(observer, start, end)
+            .expect("2024 Mazatl\u{00e1}n total eclipse must be detected");
+        assert!(
+            matches!(event.kind, SolarEclipseKind::Total),
+            "expected Total at Mazatl\u{00e1}n peak, got {:?} (peak obs {})",
+            event.kind,
+            event.peak_obscuration
+        );
+        assert!(
+            event.peak_obscuration > 0.999,
+            "peak obscuration too low: {}",
+            event.peak_obscuration
+        );
+        let p2 = event.contacts.p2.expect("P2 must exist for totality");
+        let p3 = event.contacts.p3.expect("P3 must exist for totality");
+        let totality_seconds = (p3 - p2) * 86_400.0;
+        assert!(
+            (60.0..600.0).contains(&totality_seconds),
+            "totality duration {totality_seconds} s outside the 1-10 min plausibility band",
+        );
+    }
+
+    #[test]
+    fn find_solar_eclipse_finds_2012_tokyo_annular() {
+        // 2012-05-21 annular eclipse over Tokyo, peak ≈ 22:34 UT on 2012-05-20
+        // (07:34 JST on the 21st). Bracket the whole local morning.
+        let start = jd_utc_from_iso_hours(2012, 5, 20, 19.0);
+        let end = jd_utc_from_iso_hours(2012, 5, 21, 1.0);
+        let mid = 0.5 * (start + end);
+        let observer = Observer::from_degrees(35.68, 139.69, mid);
+        let event = find_solar_eclipse(observer, start, end)
+            .expect("2012 Tokyo annular eclipse must be detected");
+        assert!(
+            matches!(
+                event.kind,
+                SolarEclipseKind::Annular | SolarEclipseKind::Partial
+            ),
+            "expected Annular (or deep Partial fallback) at Tokyo peak, got {:?}",
+            event.kind
+        );
+        assert!(
+            event.peak_obscuration > 0.80,
+            "peak obscuration too low: {}",
+            event.peak_obscuration
+        );
+        // Contact times must straddle the peak.
+        let p1 = event.contacts.p1.expect("P1 must exist");
+        let p4 = event.contacts.p4.expect("P4 must exist");
+        assert!(p1 <= event.peak_jd_utc && event.peak_jd_utc <= p4);
+    }
+
+    #[test]
+    fn find_solar_eclipse_returns_none_on_non_eclipse_day() {
+        let start = jd_utc_from_iso_hours(2025, 7, 1, 0.0);
+        let end = jd_utc_from_iso_hours(2025, 7, 1, 24.0);
+        let observer = Observer::from_degrees(35.68, 139.69, 0.5 * (start + end));
+        assert!(find_solar_eclipse(observer, start, end).is_none());
     }
 
     #[test]

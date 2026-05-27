@@ -38,6 +38,7 @@ When generated, PNGs live under `docs/assets/validation/`.
 | `astronomical-twilight` | ![Astronomical twilight](assets/validation/astronomical-twilight.png) | Astronomical twilight boundary and dark-sky continuity. |
 | `moonlit-night` | ![Moonlit night](assets/validation/moonlit-night.png) | Moon disk, lunar illuminance, and moonlit sky term. |
 | `eclipse-aid` | ![Lunar eclipse aid](assets/validation/eclipse-aid.png) | Moon phase and Earth-shadow aid path. |
+| `solar-eclipse` | ![Total solar eclipse](assets/validation/solar-eclipse.png) | V-51c solar-eclipse pipeline: analytic Moon-on-Sun mask, Koomen 1952 daylight darkening, Baumbach 1937 corona. |
 | `all-sky-hammer` | ![Hammer all-sky map](assets/validation/all-sky-hammer.png) | Hammer projection and full-sky overlay clipping. |
 | `all-sky-mollweide` | ![Mollweide all-sky map](assets/validation/all-sky-mollweide.png) | Equal-area map and Milky Way / coordinate-grid continuity. |
 | `galactic-north` | ![Galactic-north viewpoint](assets/validation/galactic-north.png) | External viewpoint, HYG distances, analytic Milky Way disk. |

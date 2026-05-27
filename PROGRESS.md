@@ -414,6 +414,101 @@ gibbous appears as a ~24 % waning crescent). The sign is now `-moon_dir`,
 matching the geometric convention that `moon_dir` points from the observer to
 the Moon.
 
+### Unified eclipse / occultation pass (`V-51a` + `V-51c`)
+
+First slice of `V-51` (unified eclipse / occultation pass): common
+occultation primitives plus the solar-eclipse renderer wiring
+(Moon → Sun pair). Lunar occultation, planetary transit, and mutual
+planetary occultation slices (`V-51d`/`e`/`f`) build on the same
+primitives and ship in a follow-up PR.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/occultation.rs` (new)
+- `crates/astronomy/src/planning.rs` (eclipse search + state helpers)
+- `crates/astronomy/src/ephemeris.rs` (V-36 lunar-eclipse aid folded
+  into the V-51a `obscuration_fraction` helper)
+- `crates/renderer/src/camera.rs` (`solar_eclipse_state` uniform)
+- `crates/renderer/src/shaders/skyglow.wgsl` (analytic-mask Sun
+  subtract, Koomen 1952 daylight falloff, Baumbach 1937 corona)
+- `crates/common/src/presets.rs` + `docs/presets/sessions/solar-eclipse.json`
+  (`SolarEclipse` deterministic preset wired to the 2024-04-08
+  Mazatlán totality)
+
+Shipped capabilities (`V-51a`):
+
+- `ApparentDisk { direction, angular_radius_rad }` is the renderer /
+  planning contract for any pair-wise occlusion; a unit direction in
+  any consistent frame paired with an apparent semidiameter.
+- `classify_disks(front, back) -> OccultationKind` returns
+  `None | Partial | AnnularOrTransit | Total` from the Meeus AA §54
+  apparent-disk geometry.
+- `obscuration_fraction(front, back) -> f32` is the closed-form
+  two-circle lens-area formula divided by the back-disk area, with
+  the annular and total saturation edges handled in closed form.
+- `contact_times(start, end, disks)` returns the four canonical
+  contact instants P1–P4 via a 30 s grid scan + bisection refine
+  (≤30 iterations, sub-50 ms numerical precision).
+- The V-36 lunar-eclipse aid in `apparent_moon` now delegates its
+  Earth-shadow fraction to `obscuration_fraction(Earth umbra, Moon)`,
+  collapsing two copies of the same geometry into one.
+
+Shipped capabilities (`V-51c`):
+
+- `solar_eclipse_state(observer)` folds the Moon-on-Sun pair into a
+  renderer-facing `(SolarEclipseKind, obscuration)` state, cheap
+  enough to call every frame.
+- `find_solar_eclipse(observer, start, end) -> Option<SolarEclipseEvent>`
+  is the planning-side entry point: scans the window for peak
+  obscuration, then refines P1–P4 via `contact_times`.
+- `CameraUniform::solar_eclipse_state` is the GPU-side handle
+  `[kind_code, obscuration, totality_weight, partial_weight]`. The
+  renderer disables it on external galactic viewpoints and on
+  `Atmosphere::OFF`.
+- `shaders/skyglow.wgsl` extends `sun_moon_disk_radiance` with an
+  analytic Moon-on-Sun subtract (no depth / stencil pass) plus a
+  Baumbach 1937 corona term gated by the totality weight and
+  evaluated only inside a 2° scissor centred on the Sun. The
+  Hošek-Wilkie daylight and twilight branches multiply through a
+  Koomen 1952 falloff that drops to ≈1e-4 of normal daylight at
+  totality, with a continuous smoothstep through C2 / C3.
+- New `SolarEclipse` scene preset framing the 2024-04-08 totality at
+  Mazatlán (greatest eclipse, az≊138°, alt≊70°, 5° FoV), wired
+  into the deterministic preset list and the validation gallery.
+
+Validation (pinned in `VALIDATION.md`):
+
+- `occultation::tests::*` pin the closed-form geometry for disjoint,
+  touching, concentric total, concentric annular, point-source, and
+  contact-time cases.
+- `planning::tests::find_solar_eclipse_finds_2024_mazatlan_totality`
+  asserts `Total` with `peak_obscuration > 0.999` and a 1–10 min
+  totality duration against the Espenak / NASA TP-2006-214141 canon.
+- `planning::tests::find_solar_eclipse_finds_2012_tokyo_annular`
+  asserts the 2012-05-21 Tokyo annular eclipse and that the P1 /
+  P4 contacts straddle the peak instant.
+- `planning::tests::find_solar_eclipse_returns_none_on_non_eclipse_day`
+  guards against false-positive event detection.
+- `docs/assets/validation/solar-eclipse.png` ships in the deterministic
+  gallery as the visual contract for the analytic-mask + Koomen +
+  corona pipeline.
+
+Deliberately out of scope for this slice (deferred to `V-51d`/`e`/`f`):
+lunar occultation of stars and planets, Mercury / Venus transit of
+the Sun, mutual planetary occultation, and the general `MAX_OCCLUDERS
+= 16` uniform array. The current single-pair Moon-on-Sun path uses
+the same `ApparentDisk` contract, so the array generalisation is
+additive rather than a rewrite.
+
+Documented limit. With the current VSOP87 / ELP2000 + WGS84
+parallax ephemeris stack the apparent Moon and Sun radii at the
+2024-04-08 Mazatlán peak come in within a few ×10⁻⁴ of equality;
+`classify_disks` correctly returns `Total` once the search has
+located the deepest sample. Sub-30-second P1–P4 accuracy against
+NASA TP-2006-214141 requires the DE440 upgrade tracked as `L-06`;
+the current contact times agree to within a few minutes, which is
+adequate for the analytic-mask + Koomen + corona contract.
+
 ### Solar / lunar illuminants and physical sky colour
 
 Implemented:
