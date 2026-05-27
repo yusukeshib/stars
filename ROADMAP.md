@@ -116,6 +116,11 @@ remaining items are realism polish (`V-24`–`V-28`), site-specific brightness
 `V-37`, and the daylight model upgrade `V-38` has shipped), niche visual
 features (`V-45`–`V-50`), and rare phenomena (`V-47`–`V-49`).
 
+**High priority next:** the visual-richness gaps `V-51`–`V-56` (eclipses /
+occultations, planetary rings and moons, resolved star clusters, double
+stars, artificial satellites, and object search / GoTo / info panel) —
+these surface existing engine capability that the current UI hides.
+
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
 headless server (`L-21`, `L-22`), planning polish (`L-09`), variable-star
@@ -184,6 +189,12 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-48` | **Aurora display** | ⬜ |
 | `V-49` | **Comet rendering** | ⬜ |
 | `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ⬜ |
+| `V-51` | **Unified eclipse / occultation pass** | ⬜ |
+| `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** | ⬜ |
+| `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** | ⬜ |
+| `V-54` | **Double / binary star resolution** | ⬜ |
+| `V-55` | **Artificial satellites (TLE / SGP4)** | ⬜ |
+| `V-56` | **Object search, GoTo, and info panel** | ⬜ |
 
 ### Library track
 
