@@ -1594,6 +1594,141 @@ management is a post-gamut matrix + transfer-function swap.
 
 ---
 
+## Solar system geometry — eclipses and occultations
+
+### `V-51` Unified eclipse / occultation pass — ⬜
+
+**Item.** Today only the lunar eclipse is modelled (`V-36`: Earth's umbra
+darkening the Moon). Every other foreground/background pair where one
+solar-system body hides another is missing: solar eclipses, lunar
+occultations of stars and planets, Mercury / Venus transits across the
+Sun, and the (rare) mutual planetary occultations. Add one common
+geometry + render path that handles all of them from a given observer,
+with deterministic visual support and contact-timing checks against
+published circumstances.
+
+**Performance contract.** All occlusions are sub-degree screen regions,
+so the path is **analytic angular masks**, not depth / stencil. The
+hot skyglow fragment shader gains one `subtract` branch per occluder
+(`N ≤ ~10`); star sprites are culled CPU-side by angular separation
+against occluders (`10⁴ × 10 ≈ 0.1 ms`); the corona is drawn only at
+totality, inside a 2° scissor rect. No GPU depth buffer, no full-screen
+re-passes. Target: no measurable fps regression on the existing
+benchmark scenes.
+
+**Scientific basis.**
+- Apparent positions come from existing `apparent_*_topocentric`
+  helpers (VSOP87D + ELP2000-style + WGS84 parallax). Pair-wise
+  classification by angular separation `Δ` vs apparent radii
+  `r_front`, `r_back`:
+  - **none** when `Δ ≥ r_front + r_back`,
+  - **partial** when `|r_front − r_back| < Δ < r_front + r_back`,
+  - **annular / transit** when `Δ ≤ r_back − r_front` and `r_front < r_back`,
+  - **total / full occultation** when `Δ ≤ r_front − r_back`.
+- Sky brightness during solar totality reduced via Koomen et al. 1952
+  illuminance falloff applied to the diffuse-sky source term — no
+  Mie multiple-scattering re-solve.
+- Corona: Baumbach 1937 `B(r) = a r^−2.5 + b r^−7 + c r^−17`,
+  normalized so the inner corona matches ~10^−6 of mean solar disk
+  brightness; rendered only when `kind == Total` for the
+  Moon → Sun pair.
+
+**References.**
+- Meeus, J. 1998, *Astronomical Algorithms*, 2nd ed., ch. 54 (solar
+  eclipse circumstances; Besselian elements).
+- Espenak, F., Meeus, J. 2006, NASA TP-2006-214141, *Five Millennium
+  Canon of Solar Eclipses* (validation circumstances).
+- Espenak, F., Meeus, J. 2009, NASA TP-2009-214174, *Five Millennium
+  Canon of Lunar Eclipses*.
+- Baumbach, S. 1937, Astronomische Nachrichten 263, 121 (coronal
+  brightness law).
+- Koomen, M. J. et al. 1952, J. Opt. Soc. Am. 42, 353 (sky brightness
+  during total solar eclipse).
+- IOTA (International Occultation Timing Association) predictions for
+  lunar occultation contact timing validation.
+
+**Sub-items.**
+
+- **`V-51a` Common occlusion primitives.** New
+  `crates/astronomy/src/occultation.rs` exposing
+  `classify_pair(front, back) -> OccultationKind { None, Partial,
+  AnnularOrTransit, Total }`, `obscuration_fraction(front, back) -> f32`,
+  and `contact_times(front, back, window) -> [P1..P4]` for any pair of
+  apparent disks (Sun, Moon, planets). Pure geometry, no rendering.
+- **`V-51b` Renderer analytic-mask path.** Extend
+  `shaders/skyglow.wgsl` (and the star-sprite CPU cull) with an
+  occluder array `(dir, r_angular, kind)`; subtract the back body's
+  source term inside the front body's disk; cull background star
+  sprites whose direction lies inside any occluder disk. Bounded by
+  `MAX_OCCLUDERS = 16`. No depth / stencil attachments added.
+- **`V-51c` Solar eclipse (Moon → Sun).** Wires V-51a/b to the
+  Sun ↔ Moon pair; adds `shaders/corona.wgsl` (Baumbach profile,
+  scissor-bounded, total-only); reduces diffuse sky brightness via
+  the Koomen falloff during obscuration with smoothstep around C2/C3.
+  Bailey's beads / diamond ring emerge from the existing HDR + glare
+  path against the analytic mask. New `SolarEclipse` preset distinct
+  from the existing `EclipseAid` (which stays lunar).
+- **`V-51d` Lunar occultation of stars and planets (Moon → star/planet).**
+  CPU-side cull of HYG catalog sprites and planet sprites whose
+  topocentric direction lies inside the Moon's disk. Disappearance /
+  reappearance contact times exposed via `planning.rs`.
+- **`V-51e` Mercury / Venus transit of the Sun (planet → Sun).** Planet
+  apparent disk drawn as a black sub-circle inside the Sun sprite via
+  the same subtract path; partial / interior contact times exposed.
+- **`V-51f` Mutual planetary occultation (planet → planet).** Same
+  classify + mask path applied to the planet ↔ planet pairs. Rare in
+  practice; validated only at known historical events (e.g. Venus
+  occults Jupiter 1818-01-03).
+
+**Implementation scope.**
+- `crates/astronomy/src/occultation.rs` (new): pair-wise classifier,
+  obscuration, contact-time helpers.
+- `crates/astronomy/src/ephemeris.rs`: reuse for `V-36` lunar-eclipse
+  fraction (the existing geometry collapses into the new helpers).
+- `crates/astronomy/src/planning.rs`: `eclipse_events(window, observer)`
+  returning typed events with P1–P4 timestamps.
+- `crates/renderer/src/shaders/skyglow.wgsl`,
+  `crates/renderer/src/shaders/corona.wgsl` (new),
+  `crates/renderer/src/stars.rs` (CPU cull).
+- `crates/common/src/presets.rs`: `SolarEclipse`, `VenusTransit`,
+  `LunarOccultationOfPlanet` presets. Existing `EclipseAid` stays lunar.
+- CLI / viewer / web: HUD line showing active event + obscuration %;
+  session JSON schema bump documented in `PROGRESS.md`.
+
+**Tests / validation.** Pinned to entries logged in `VALIDATION.md`:
+- Solar eclipses: 2009-07-22 (Tokara, total), 2012-05-21 (Tokyo,
+  annular), 2024-04-08 (Mazatlán, total), 2035-09-02 (Utsunomiya,
+  predicted total) — Sun ↔ Moon separation within 1′ of NASA canon;
+  P1–P4 within 30 s.
+- Lunar eclipses: 2000-01-21, 2025-09-08 — umbral contact times within
+  30 s.
+- Lunar occultations: at least two IOTA-published star occultations
+  within 5 s of predicted disappearance time.
+- Transits: 2012-06-06 Venus transit, 2032-11-13 Mercury transit —
+  ingress / egress times within 60 s.
+- Visual: deterministic renders for partial / annular / total solar,
+  total lunar, Venus-transit, and a star occultation added to the
+  gallery, regenerated by `./scripts/generate-readme-images.sh`.
+- Perf: `cargo bench` scene set must not regress beyond noise vs the
+  pre-V-51 baseline; the analytic-mask path is the contract.
+
+**Deliberate non-goal scope.** No prominence / chromosphere structure,
+no polarized K-corona separation, no shadow-band atmospheric
+scintillation, no global umbral-path map over Earth, no Jovian /
+Saturnian moon eclipses (their parent moons are not rendered), no
+asteroidal star occultations (asteroids not rendered). Documented in
+`docs/standards-compliance.md` alongside the existing lunar-eclipse aid
+caveat.
+
+**Dependencies.** Tightens with `L-06` (DE440 / VSOP87 upgrade) for
+sub-arcsecond contact timing; usable before that with the existing
+~1″-class apparent positions. Subsumes the geometry half of `V-36`
+(visual aid kept as-is for back-compat).
+
+**Hosts wired.** CLI / viewer / web.
+
+---
+
 # Library track
 
 ## Time and positional precision
