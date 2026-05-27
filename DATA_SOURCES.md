@@ -368,17 +368,35 @@ References named in roadmap:
 - Leinert et al. 1998;
 - Roach & Megill 1961;
 - Schlegel, Finkbeiner & Davis 1998;
-- Preetham, Shirley & Smits 1999;
+- Hošek & Wilkie 2012 (V-38 default daylight sky-dome model);
 - Krisciunas & Schaefer 1991;
 - ASTM G-173 / CIE daylight-basis references where used by code comments.
 
 Implementation areas:
 
 - `crates/astronomy/src/atmosphere.rs`
+- `crates/astronomy/src/atmosphere/hosek_wilkie.rs`
 - `crates/astronomy/src/illuminants.rs`
 - `crates/astronomy/src/skyglow.rs`
 - `crates/renderer/src/skyglow.rs`
 - renderer shaders.
+
+Embedded Hošek-Wilkie coefficient table (V-38):
+
+- Source: <https://cgg.mff.cuni.cz/projects/SkylightModelling/>,
+  release v1.4a (22 Feb 2013), BSD 3-clause.
+- Local path: `crates/astronomy/data/hosek_wilkie/coefficients_rgb.bin`
+  (28,816 bytes; hashed in `data/manifest.toml` under
+  `hosek-wilkie-2012-rgb-v1.4a`).
+- Regenerator: `scripts/build-hosek-wilkie.py`. Re-running the script
+  re-downloads the upstream `ArHosekSkyModelData_RGB.h` and rewrites the
+  packed binary; `make manifest-check` then fails until the SHA-256 is
+  re-pinned in the manifest.
+- Fields used: `datasetRGB{1,2,3}` (9 polynomial coefficients per
+  channel / albedo / turbidity / elevation control point) and
+  `datasetRGBRad{1,2,3}` (per-channel master radiance scale). The
+  spectral and CIE XYZ tables shipped with the same upstream archive are
+  not vendored — only the RGB path is consumed by the renderer.
 
 ### Time, coordinate corrections, and ephemerides
 

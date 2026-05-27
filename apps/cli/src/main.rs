@@ -189,6 +189,13 @@ struct Args {
     #[arg(long, allow_hyphen_values = true)]
     temperature_c: Option<f32>,
 
+    /// Override ground albedo seen by the daylight sky model (V-38).
+    /// Defaults to a per-preset value (clear-rural ≈ 0.10, hazy-urban
+    /// ≈ 0.13, high-altitude ≈ 0.30). Snow / desert ground brightens the
+    /// zenith via Hošek-Wilkie's ground-albedo coupling.
+    #[arg(long)]
+    surface_albedo: Option<f32>,
+
     /// Disable Mercury-through-Neptune rendering.
     #[arg(long)]
     no_planets: bool,
@@ -264,6 +271,7 @@ fn main() -> Result<()> {
                 ozone_du: args.ozone_du,
                 pressure_hpa: args.pressure_hpa,
                 temperature_c: args.temperature_c,
+                surface_albedo: args.surface_albedo,
             },
         );
         let (viewpoint, external_viewpoint) = viewpoint_from_args(

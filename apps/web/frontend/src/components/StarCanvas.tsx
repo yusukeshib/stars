@@ -127,6 +127,7 @@ export function StarCanvas({
       atmosphere.ozoneDu,
       atmosphere.pressureHpa,
       atmosphere.temperatureC,
+      atmosphere.surfaceAlbedo,
     );
   }, [atmosphere]);
 
@@ -155,6 +156,7 @@ export function StarCanvas({
         at.ozoneDu,
         at.pressureHpa,
         at.temperatureC,
+        at.surfaceAlbedo,
       );
       handle.set_planets_enabled(planetsRef.current.enabled);
       const ep = eyepieceRef.current;

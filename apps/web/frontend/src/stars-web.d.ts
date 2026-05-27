@@ -43,6 +43,7 @@ declare module "stars-web" {
       ozoneDu: number,
       pressureHpa: number,
       temperatureC: number,
+      surfaceAlbedo: number,
     ): void;
     resize(width: number, height: number): void;
     sun_altitude_deg(): number;

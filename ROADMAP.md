@@ -68,8 +68,9 @@ is split into independently shippable rungs:
    polluting the star catalogue. ✅ (low-precision ephemerides; `L-06`
    upgrades).
 3. **Daylight model** — daylight sky colour driven by a cited model over its
-   valid domain. ✅ (Preetham via `V-32`; `V-38` replaces it with
-   Hošek-Wilkie).
+   valid domain. ✅ (Preetham via `V-32`; replaced by Hošek-Wilkie 2012
+   in `V-38`).
+
 4. **Twilight model** — sun-below-horizon sky brightness from a real radiance
    model, continuous in time and direction. ✅ (zenith curve via `V-33`;
    `V-27` adds the azimuthally-resolved Belt of Venus / Earth-shadow band).
@@ -110,10 +111,10 @@ side-effect, not the motivation.
 ## Current focus
 
 The Visual track is at "naked-eye physical realism is mostly there" — the
-remaining items are realism polish (`V-24`–`V-28`), the daylight model upgrade
-and site-specific brightness (`V-38`–`V-39`; the unified (β, α, DU) state
-those depend on is now in place via `V-37`), niche visual features
-(`V-45`–`V-50`), and rare phenomena (`V-47`–`V-49`).
+remaining items are realism polish (`V-24`–`V-28`), site-specific brightness
+(`V-39`; the unified (β, α, DU) state it depends on is in place via
+`V-37`, and the daylight model upgrade `V-38` has shipped), niche visual
+features (`V-45`–`V-50`), and rare phenomena (`V-47`–`V-49`).
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
@@ -170,7 +171,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-35` | Planets (Mercury → Neptune) | ✅ |
 | `V-36` | Moon phase + Earth-shadow aid | ✅ |
 | `V-37` | Unified spectral extinction (β / α / DU) | ✅ |
-| `V-38` | **Hošek-Wilkie daylight sky model** | ⬜ |
+| `V-38` | Hošek-Wilkie daylight sky model | ✅ |
 | `V-39` | **Light pollution / Bortle map** | ⬜ |
 | `V-40` | Full-sky projections (Mollweide / Aitoff / Hammer) | ✅ |
 | `V-41` | Out-of-Earth galactic-north viewpoint | ✅ |
@@ -944,9 +945,9 @@ blue daylight, golden-hour warmth, sunset reddening, and horizon haze.
 noon, sunset, civil twilight; Preetham's documented validity window is
 the model boundary.
 
-**Dependencies.** `V-38` replaces this with Hošek-Wilkie 2012 (default)
-while keeping Preetham accessible via `--legacy-preetham` for
-reproducibility of older sessions.
+**Dependencies.** Superseded by `V-38` (Hošek-Wilkie 2012); the
+Preetham evaluator and turbidity helpers have been removed from the
+renderer.
 
 ---
 
@@ -1080,7 +1081,7 @@ reuse the same `(β, α, DU)` state without further schema churn.
 
 ---
 
-### `V-38` Hošek-Wilkie daylight sky model — ⬜
+### `V-38` Hošek-Wilkie daylight sky model — ✅ done
 
 **Item.** Replace Preetham (`V-32`) with the Hošek & Wilkie 2012 sky dome
 model as the default daylight radiance source. Preetham 1999 breaks down
@@ -1105,23 +1106,40 @@ us share spectra with `V-37`.
 - Bruneton, E. 2017, Comp. Graph. Forum 36(2), 167 (qualitative
   comparison of analytic sky models).
 
-**Implementation scope.**
-- Ingest the public HW2012 coefficient tables (BSD-style licence; cite
-  the original CGG / Charles University source) under
-  `crates/astronomy/data/hosek_wilkie/`; entry in `data/manifest.toml`.
-- `crates/astronomy/src/atmosphere.rs`: `hosek_wilkie::Coefficients`
-  loader + `hosek_wilkie_radiance(theta_rad, gamma_rad, turbidity,
-  albedo, channel) -> radiance`.
-- `crates/renderer/src/shaders/skyglow.wgsl`: replace the Preetham
-  radiance call with the HW evaluator; keep Preetham under a
-  `--legacy-preetham` host flag for reproducibility of older sessions.
-- Wire (β, α, DU) from `V-37` into an effective HW turbidity.
+**Implementation.**
+- Vendored HW2012 RGB coefficient table (BSD 3-clause, upstream release
+  v1.4a, 22 Feb 2013) at
+  `crates/astronomy/data/hosek_wilkie/coefficients_rgb.bin`, packed by
+  `scripts/build-hosek-wilkie.py` and pinned in `data/manifest.toml`
+  under `hosek-wilkie-2012-rgb-v1.4a`.
+- `crates/astronomy/src/atmosphere/hosek_wilkie.rs`: parser + `cook(t,
+  albedo, sun_elev) -> HosekWilkieParams` (quintic-Bezier blend across
+  the elevation control points, linear interpolation in turbidity and
+  ground albedo) + `radiance(params, θ, γ) -> [f64; 3]`.
+- `crates/renderer/src/camera.rs`: per-frame CPU `cook` call; nine
+  vec4 coefficient rows + a radiance vec4 added to `CameraUniform`.
+- `crates/renderer/src/shaders/skyglow.wgsl`:
+  `hosek_wilkie_sky_luminance_rgb` evaluator replaces the Preetham
+  daylight path entirely. The legacy Preetham WGSL evaluator and the
+  Rust `preetham_zenith_luminance_cd_m2` helper are removed; the
+  shared Linke-turbidity bridge stays under the model-neutral name
+  `linke_turbidity_from_aerosol` in `astronomy::atmosphere`.
+- `crates/renderer/src/camera.rs` adds `Atmosphere::surface_albedo`;
+  CLI / viewer / web all expose `--surface-albedo` (plus matching web
+  UI control). `SessionAtmosphere` adds `surfaceAlbedo` as a required
+  field; session schema bumps to v3 since the daylight model is no
+  longer a stored choice.
 
 **Tests / validation.**
-- Unit: at sun_alt = 1° and turbidity 4, HW radiance is finite and
-  positive at all view directions (Preetham fails this).
-- Visual: re-render sunset / civil twilight scene presets; document
-  chromaticity shift vs. Preetham in `docs/standards-compliance.md`.
+- Unit: HW radiance is finite and non-negative across the upper
+  hemisphere at sun_alt = 1°, T = 4 (Preetham asymptote fails this).
+- Unit: zenith luminance monotone in turbidity and ground albedo;
+  per-channel zenith ordering satisfies B > G > R for clear sky.
+- Unit: HW zenith luminance at the noon reference (T = 2.5, albedo =
+  0.10, sun_alt = 60°) lies in the published 1–15 kcd/m² daylight
+  range after the 683 lm/W radiometric → photometric conversion.
+- Unit: cooked configuration returns the zero sentinel below the
+  horizon so the shader stays branch-free.
 
 **Hosts wired.** CLI / viewer / web.
 

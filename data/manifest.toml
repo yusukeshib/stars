@@ -225,12 +225,43 @@ point-in-region test.
 # ---------------------------------------------------------------------------
 
 [[artifact]]
+id = "hosek-wilkie-2012-rgb-v1.4a"
+description = "Hošek-Wilkie 2012 analytic full-spectral sky-dome model: packed RGB coefficient table (3 channels × 2 albedos × 10 turbidities × 6 elevation control points × 9 polynomial coefficients + per-(channel, albedo, turbidity, elev) radiance scale)."
+kind = "generated"
+path = "crates/astronomy/data/hosek_wilkie/coefficients_rgb.bin"
+sha256 = "063c1300d750e150554a6ebdf795c8a0e84ae411c977c837be864c2637d65ca4"
+bytes = 28816
+source = "https://cgg.mff.cuni.cz/projects/SkylightModelling/HosekWilkie_SkylightModel_C_Source.1.4a.zip"
+archive_id = "HosekWilkie_SkylightModel_C_Source.1.4a/ArHosekSkyModelData_RGB.h"
+citation = "Hošek, L. & Wilkie, A. 2012, ACM TOG 31(4), 'An Analytic Model for Full Spectral Sky-Dome Radiance'."
+version = "1.4a"
+retrieved = "2026-05"
+license = "BSD-3-Clause"
+license_url = "https://cgg.mff.cuni.cz/projects/SkylightModelling/"
+preprocessing = "scripts/build-hosek-wilkie.py"
+fields_used = ["datasetRGB1", "datasetRGB2", "datasetRGB3", "datasetRGBRad1", "datasetRGBRad2", "datasetRGBRad3"]
+used_by = [
+    "crates/astronomy/src/atmosphere/hosek_wilkie.rs",
+    "crates/renderer/src/camera.rs",
+    "crates/renderer/src/shaders/skyglow.wgsl",
+]
+limitations = """
+Table covers turbidity ∈ [1, 10], ground albedo ∈ [0, 1], and sun
+elevation ∈ [0, π/2]. Inputs outside these ranges are clamped at the
+function boundary. The RGB path returns radiometric W·m⁻²·sr⁻¹ per
+channel; the renderer multiplies by the standard 683 lm/W luminous
+efficacy to produce per-channel cd/m² on the same scale as the rest of
+the skyglow pipeline. Below-horizon sun is handled by the twilight
+radiance path (`V-33`), not by HW.
+"""
+
+[[artifact]]
 id = "scene-preset-session-tokyo-tonight"
 description = "Scene preset JSON: Tokyo tonight."
 kind = "generated"
 path = "docs/presets/sessions/tokyo-tonight.json"
-sha256 = "96ba78dafa58d4980f724862913d43b01f15008e045061bfe168b4f88dcc758b"
-bytes = 1935
+sha256 = "aaddffcbbaab4955614223f5967eab3d4d5a98f57e021d16b28071ff55aab3fb"
+bytes = 1961
 license = "see-upstream"
 preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md", "apps/web", "examples/notebooks"]
@@ -240,8 +271,8 @@ id = "scene-preset-session-dark-sky"
 description = "Scene preset JSON: dark-sky reference scene."
 kind = "generated"
 path = "docs/presets/sessions/dark-sky.json"
-sha256 = "ab42001f3de1ec8a91e8e9fc70c1d9a7972073247643095e9496430f709d8b70"
-bytes = 1891
+sha256 = "778a041391c700d16f4ecfeb927b3744fccde78087288a23fe24a415be4f8ae7"
+bytes = 1917
 license = "see-upstream"
 preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md"]
@@ -251,8 +282,8 @@ id = "scene-preset-session-noon"
 description = "Scene preset JSON: daytime noon."
 kind = "generated"
 path = "docs/presets/sessions/noon.json"
-sha256 = "ea078a607354f77ab40c1742ea381acfa0fc7ef999f7276f07c379ecbfa00240"
-bytes = 1847
+sha256 = "128ae51bb583705ef81858b86640ca711b3809a8832115bac38fafc4a56d7c41"
+bytes = 1873
 license = "see-upstream"
 preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md"]
@@ -262,8 +293,8 @@ id = "scene-preset-session-sunset"
 description = "Scene preset JSON: sunset."
 kind = "generated"
 path = "docs/presets/sessions/sunset.json"
-sha256 = "ed44cb9a0119403203cd0cc3cf32ac4a829cb8eab77bd093e61f110629f95dec"
-bytes = 1859
+sha256 = "a3413a43d59c37ec19da51fb066e59c6c40b7f5dc2a0f10dcab4a47ed45ceb53"
+bytes = 1885
 license = "see-upstream"
 preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md"]
@@ -273,8 +304,8 @@ id = "scene-preset-session-civil-twilight"
 description = "Scene preset JSON: civil twilight."
 kind = "generated"
 path = "docs/presets/sessions/civil-twilight.json"
-sha256 = "6602fc5170eba86bb892a6e0a15720bd2d9c03453ce0888cbf7d0d6db5e5be33"
-bytes = 1879
+sha256 = "58253e45af5cea0d3f6c41f20e68aa66dc4bbf055f0ba107f642a40300cfe81c"
+bytes = 1905
 license = "see-upstream"
 preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md"]
@@ -284,8 +315,8 @@ id = "scene-preset-session-nautical-twilight"
 description = "Scene preset JSON: nautical twilight."
 kind = "generated"
 path = "docs/presets/sessions/nautical-twilight.json"
-sha256 = "4b1b241e2c7fb2ca5804e5a5826ff363355102d69b3adb8c1130445a2a8252fd"
-bytes = 1882
+sha256 = "4ccb8ed1259c4acb5b9ee5f2dd35d35ac61dfb4483e09b487dc173e6e7d3f039"
+bytes = 1908
 license = "see-upstream"
 preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md"]
@@ -295,8 +326,8 @@ id = "scene-preset-session-astronomical-twilight"
 description = "Scene preset JSON: astronomical twilight."
 kind = "generated"
 path = "docs/presets/sessions/astronomical-twilight.json"
-sha256 = "7b572c231b68b5d55d3257272cec3354a93e1564f228d92485f4611f83439a7e"
-bytes = 1893
+sha256 = "b8ce0e6b734d292156728058ef02f3aa0e94aad959950e23bf746c04393524e3"
+bytes = 1919
 license = "see-upstream"
 preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md"]
@@ -306,8 +337,8 @@ id = "scene-preset-session-moonlit-night"
 description = "Scene preset JSON: moonlit-night reference scene."
 kind = "generated"
 path = "docs/presets/sessions/moonlit-night.json"
-sha256 = "2363369c7934e668a26b90992a0a37ffe756799181913009ee16ce6a8569f40d"
-bytes = 1904
+sha256 = "ef50034b7ffcef850f63c700712e57d2837e0a2cebc1600721c3464a0caf592e"
+bytes = 1930
 license = "see-upstream"
 preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md", "examples/notebooks"]
@@ -317,8 +348,8 @@ id = "scene-preset-session-eclipse-aid"
 description = "Scene preset JSON: lunar eclipse aid."
 kind = "generated"
 path = "docs/presets/sessions/eclipse-aid.json"
-sha256 = "9748f046fed27f2379491c8c12bd885f4b19eaa91b54f6ab8625886992b6837f"
-bytes = 1884
+sha256 = "a50e8cfb5f3d3a9ad3a62d72b4e7f6744d2244a6c5493da14b5a4fffd7b7a778"
+bytes = 1910
 license = "see-upstream"
 preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md"]
@@ -328,8 +359,8 @@ id = "scene-preset-session-all-sky-mollweide"
 description = "Scene preset JSON: all-sky Mollweide projection."
 kind = "generated"
 path = "docs/presets/sessions/all-sky-mollweide.json"
-sha256 = "0051364ceed98bfee7d70b800a0c629e8595e81fa4eae5f09a402fd56484e3c4"
-bytes = 1908
+sha256 = "b44f7d46499d3600ba4e8d65a27f16a8cc830f7b272474df18178fc459254783"
+bytes = 1934
 license = "see-upstream"
 preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md"]
@@ -339,8 +370,8 @@ id = "scene-preset-session-all-sky-hammer"
 description = "Scene preset JSON: all-sky Hammer projection."
 kind = "generated"
 path = "docs/presets/sessions/all-sky-hammer.json"
-sha256 = "6efd468b5d990433ac0c8d6fa85ba168acee0ac9e46839e40d1bbeefe3c68160"
-bytes = 1905
+sha256 = "9b276402c95ddc75147d87dfa09ab9f7ff3eba17148ccbd276a787e3ccf8181f"
+bytes = 1931
 license = "see-upstream"
 preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md"]
@@ -350,8 +381,8 @@ id = "scene-preset-session-galactic-north"
 description = "Scene preset JSON: external galactic-north viewpoint."
 kind = "generated"
 path = "docs/presets/sessions/galactic-north.json"
-sha256 = "aa428c2c7c636ae3b2bcb5cbcb50ba90adb9caed64593609767a7b5df43cc0a3"
-bytes = 1792
+sha256 = "c31376e78d7a445213a0aaa8a037a09c3aa453d9b2e963bf5263697d0cddf5fd"
+bytes = 1818
 license = "see-upstream"
 preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md"]
@@ -361,8 +392,8 @@ id = "scene-preset-session-custom-external"
 description = "Scene preset JSON: custom external viewpoint."
 kind = "generated"
 path = "docs/presets/sessions/custom-external.json"
-sha256 = "ff76823989932a21ead2447a0876bd32234b5c49a7aed01edc31d6cbfe533a8e"
-bytes = 1787
+sha256 = "3e5de2af266c3ce9933035f652316b0f4e14ce89e3b1c1f80ec0cd23d24064d7"
+bytes = 1813
 license = "see-upstream"
 preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md"]

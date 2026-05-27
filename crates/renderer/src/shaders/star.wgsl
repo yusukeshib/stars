@@ -23,7 +23,7 @@ struct CameraUniform {
     extinction_k_rgb: vec4<f32>,
     // Apparent Sun direction in equatorial coordinates. `w` is angular radius.
     sun_eq_radius: vec4<f32>,
-    // [preetham_turbidity_eff, observer_altitude_m, solar_illuminance_lux,
+    // [linke_turbidity_eff, observer_altitude_m, solar_illuminance_lux,
     // scattering_enabled]. Effective turbidity is derived from Ångström β (V-37)
     // so the daylight and stellar paths share one (β, α, DU) state.
     atmosphere_params: vec4<f32>,

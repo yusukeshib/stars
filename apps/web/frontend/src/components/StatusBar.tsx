@@ -973,6 +973,19 @@ function SettingsPanel({
               onSetAtmosphere({ ...atmosphere, temperatureC: clamp(temperatureC, -80, 60) })
             }
           />
+          <SliderNumberRow
+            id="atmosphere-surface-albedo"
+            label={t("card.atmosphere.surfaceAlbedo")}
+            value={atmosphere.surfaceAlbedo}
+            min={0}
+            max={1}
+            step={0.01}
+            decimals={2}
+            disabled={!atmosphere.enabled}
+            onChange={(surfaceAlbedo) =>
+              onSetAtmosphere({ ...atmosphere, surfaceAlbedo: clamp(surfaceAlbedo, 0, 1) })
+            }
+          />
         </div>
         </SettingCard>
       )}

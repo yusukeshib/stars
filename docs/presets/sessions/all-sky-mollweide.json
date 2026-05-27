@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "appVersion": "0.1.0",
   "createdBy": "stars-cli",
   "observer": {
@@ -61,7 +61,8 @@
     "observerAltitudeM": 0.0,
     "ozoneDu": 300.0,
     "pressureHpa": 1010.0,
-    "temperatureC": 10.0
+    "temperatureC": 10.0,
+    "surfaceAlbedo": 0.1
   },
   "planets": {
     "enabled": true

@@ -399,6 +399,7 @@ impl StarView {
         ozone_du: f32,
         pressure_hpa: f32,
         temperature_c: f32,
+        surface_albedo: f32,
     ) {
         self.state.borrow_mut().camera.atmosphere = if enabled {
             let mut atmosphere = AtmospherePreset::from_kebab_str(&preset)
@@ -410,6 +411,7 @@ impl StarView {
             atmosphere.ozone_du = ozone_du;
             atmosphere.pressure_hpa = pressure_hpa;
             atmosphere.temperature_c = temperature_c;
+            atmosphere.surface_albedo = surface_albedo;
             atmosphere
         } else {
             Atmosphere::OFF

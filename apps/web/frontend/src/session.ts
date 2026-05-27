@@ -242,6 +242,7 @@ function parseAtmosphere(value: unknown): AtmosphereConfig {
     ozoneDu: inRange(v.ozoneDu, 0, 600) ? v.ozoneDu : DEFAULT_ATMOSPHERE_CONFIG.ozoneDu,
     pressureHpa: inRange(v.pressureHpa, 0, 1100) ? v.pressureHpa : DEFAULT_ATMOSPHERE_CONFIG.pressureHpa,
     temperatureC: inRange(v.temperatureC, -80, 60) ? v.temperatureC : DEFAULT_ATMOSPHERE_CONFIG.temperatureC,
+    surfaceAlbedo: inRange(v.surfaceAlbedo, 0, 1) ? v.surfaceAlbedo : DEFAULT_ATMOSPHERE_CONFIG.surfaceAlbedo,
   };
 }
 
