@@ -33,7 +33,7 @@ struct CameraUniform {
     extinction_k_rgb: vec4<f32>,
     // Apparent Sun direction in equatorial coordinates. `w` is angular radius.
     sun_eq_radius: vec4<f32>,
-    // [preetham_turbidity_eff, observer_altitude_m, solar_illuminance_lux,
+    // [linke_turbidity_eff, observer_altitude_m, solar_illuminance_lux,
     // scattering_enabled]. Effective turbidity is derived from Ångström β (V-37)
     // so the daylight and stellar paths share one (β, α, DU) state.
     atmosphere_params: vec4<f32>,
@@ -59,6 +59,14 @@ struct CameraUniform {
     planet_rgb_magnitude: array<vec4<f32>, 7>,
     // [planet_count, planets_enabled, unused, unused].
     planet_params: vec4<f32>,
+    // Hošek-Wilkie 2012 RGB sky-dome coefficients (V-38). Nine vec4s; row i
+    // holds the per-channel i-th analytic coefficient (A..I) as (R, G, B, _).
+    // Pre-cooked on the CPU each frame from (turbidity, albedo, sun_elev).
+    // All-zero when atmosphere_params.w == 0 (atmosphere off).
+    hw_coeffs: array<vec4<f32>, 9>,
+    // Per-channel HW master radiance scales (R, G, B, _). Same lifecycle as
+    // hw_coeffs.
+    hw_radiance: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -157,88 +165,94 @@ fn hdr_flux_from_cd_m2(luminance_cd_m2: vec3<f32>, zeropoint: f32) -> vec3<f32> 
     return luminance_cd_m2 / max(zp_luminance, 1e-20);
 }
 
-fn perez_distribution(theta: f32, gamma: f32, coeffs: vec4<f32>, e: f32) -> f32 {
-    let cos_theta = max(cos(theta), 0.01);
-    let cos_gamma = cos(gamma);
-    return (1.0 + coeffs.x * exp(coeffs.y / cos_theta))
-        * (1.0 + coeffs.z * exp(coeffs.w * gamma) + e * cos_gamma * cos_gamma);
-}
+// V-38: Hošek-Wilkie 2012 analytic sky-dome radiance, ported from
+// `astronomy::atmosphere::hosek_wilkie::radiance`. The per-frame coefficients
+// are cooked on the CPU in `Camera::uniform_with_planets`; this evaluator is
+// the angular polynomial they parameterise. Returns per-channel cd/m² (the
+// raw W·m⁻²·sr⁻¹ output multiplied by 683 lm/W; see
+// `HW_RADIANCE_TO_LUMINANCE_LM_PER_W` in the Rust module).
+//
+// Reference: Hošek, L. & Wilkie, A. 2012, ACM TOG 31(4),
+//   "An Analytic Model for Full Spectral Sky-Dome Radiance", eq. (3).
+const HW_RADIANCE_TO_LUMINANCE_LM_PER_W: f32 = 683.0;
 
-fn xyy_to_linear_rgb(xyy: vec3<f32>) -> vec3<f32> {
-    let x = clamp(xyy.x, 1e-4, 0.9);
-    let y = clamp(xyy.y, 1e-4, 0.9);
-    let Y = max(xyy.z, 0.0);
-    let X = x * Y / y;
-    let Z = max(0.0, (1.0 - x - y) * Y / y);
-    let rgb = vec3<f32>(
-        3.2406 * X - 1.5372 * Y - 0.4986 * Z,
-        -0.9689 * X + 1.8758 * Y + 0.0415 * Z,
-        0.0557 * X - 0.2040 * Y + 1.0570 * Z,
-    );
-    return max(rgb, vec3<f32>(0.0));
-}
-
-fn preetham_sky_luminance_rgb(ray_dir: vec3<f32>, sin_alt: f32) -> vec3<f32> {
-    let sun_dir = normalize(camera.sun_eq_radius.xyz);
-    let sun_alt = sun_altitude_rad();
-    if sun_alt <= 0.0 {
-        // Preetham/Perez is a daylight model for a directly illuminated
-        // atmosphere. Do not invent twilight with an arbitrary solar-depression
-        // fade; twilight needs a separate multiple-scattering / Earth-shadow
-        // model before it can be academically defensible.
-        return vec3<f32>(0.0);
+fn hosek_wilkie_channel(channel: i32, theta: f32, gamma: f32) -> f32 {
+    // Unpack the nine (A..I) coefficients for `channel` (0=R, 1=G, 2=B) from
+    // the per-frame uniform. WGSL has no dynamic indexing into a vec3 in this
+    // configuration, so unroll the three cases.
+    var A: f32; var B: f32; var C: f32; var D: f32; var E: f32;
+    var F: f32; var G: f32; var H: f32; var I: f32;
+    if channel == 0 {
+        A = camera.hw_coeffs[0].x; B = camera.hw_coeffs[1].x;
+        C = camera.hw_coeffs[2].x; D = camera.hw_coeffs[3].x;
+        E = camera.hw_coeffs[4].x; F = camera.hw_coeffs[5].x;
+        G = camera.hw_coeffs[6].x; H = camera.hw_coeffs[7].x;
+        I = camera.hw_coeffs[8].x;
+    } else if channel == 1 {
+        A = camera.hw_coeffs[0].y; B = camera.hw_coeffs[1].y;
+        C = camera.hw_coeffs[2].y; D = camera.hw_coeffs[3].y;
+        E = camera.hw_coeffs[4].y; F = camera.hw_coeffs[5].y;
+        G = camera.hw_coeffs[6].y; H = camera.hw_coeffs[7].y;
+        I = camera.hw_coeffs[8].y;
+    } else {
+        A = camera.hw_coeffs[0].z; B = camera.hw_coeffs[1].z;
+        C = camera.hw_coeffs[2].z; D = camera.hw_coeffs[3].z;
+        E = camera.hw_coeffs[4].z; F = camera.hw_coeffs[5].z;
+        G = camera.hw_coeffs[6].z; H = camera.hw_coeffs[7].z;
+        I = camera.hw_coeffs[8].z;
     }
 
-    let T = clamp(camera.atmosphere_params.x, 1.7, 10.0);
+    let cos_gamma = cos(gamma);
+    let cos_theta = cos(theta);
+    let exp_m = exp(E * gamma);
+    let ray_m = cos_gamma * cos_gamma;
+    let denom = pow(max(1.0 + I * I - 2.0 * I * cos_gamma, 1e-6), 1.5);
+    let mie_m = (1.0 + cos_gamma * cos_gamma) / denom;
+    let zenith = sqrt(max(cos_theta, 0.0));
+
+    let term1 = 1.0 + A * exp(B / (cos_theta + 0.01));
+    let term2 = C + D * exp_m + F * ray_m + G * mie_m + H * zenith;
+    return max(term1 * term2, 0.0);
+}
+
+// Half-width (radians, 1°) of the daylight↔twilight smoothstep blend.
+// Must match `DAY_NIGHT_BLEND_HALF_WINDOW_RAD` in
+// `astronomy::atmosphere::hosek_wilkie`. The host extends `cook` to keep
+// producing horizon-grazing coefficients across the same window so this
+// fade has something physical to scale.
+const HW_DAY_NIGHT_BLEND_HALF_WINDOW_RAD: f32 = 0.017453292519943295;
+
+fn hosek_wilkie_sky_luminance_rgb(ray_dir: vec3<f32>, sin_alt: f32) -> vec3<f32> {
+    let sun_dir = normalize(camera.sun_eq_radius.xyz);
+    let sun_alt = sun_altitude_rad();
+    // Smooth fade across the daylight ↔ twilight handoff. Below the lower
+    // edge of the window the host has already zeroed the HW coefficients;
+    // this weight handles the upper half of the transition so the sky does
+    // not flicker dark when the apparent Sun crosses the horizon.
+    let day_weight = smoothstep(
+        -HW_DAY_NIGHT_BLEND_HALF_WINDOW_RAD,
+        0.0,
+        sun_alt,
+    );
+    if day_weight <= 0.0 {
+        return vec3<f32>(0.0);
+    }
     let theta = acos(clamp(sin_alt, 0.0, 1.0));
-    let theta_s = clamp(PI * 0.5 - sun_alt, 0.0, PI * 0.5 - 0.01);
     let gamma = acos(clamp(dot(ray_dir, sun_dir), -1.0, 1.0));
 
-    // Preetham, Shirley & Smits 1999 analytic daylight model: zenith
-    // luminance/chromaticity plus Perez all-weather angular distributions.
-    let chi = (4.0 / 9.0 - T / 120.0) * (PI - 2.0 * theta_s);
-    let Yz = max(0.0, ((4.0453 * T - 4.9710) * tan(chi) - 0.2155 * T + 2.4192) * 1000.0);
+    let r = hosek_wilkie_channel(0, theta, gamma) * camera.hw_radiance.x;
+    let g = hosek_wilkie_channel(1, theta, gamma) * camera.hw_radiance.y;
+    let b = hosek_wilkie_channel(2, theta, gamma) * camera.hw_radiance.z;
 
-    let ts2 = theta_s * theta_s;
-    let ts3 = ts2 * theta_s;
-    let T2 = T * T;
-    let xz = (0.00165 * ts3 - 0.00374 * ts2 + 0.00208 * theta_s) * T2
-        + (-0.02902 * ts3 + 0.06377 * ts2 - 0.03202 * theta_s + 0.00394) * T
-        + (0.11693 * ts3 - 0.21196 * ts2 + 0.06052 * theta_s + 0.25885);
-    let yz = (0.00275 * ts3 - 0.00610 * ts2 + 0.00317 * theta_s) * T2
-        + (-0.04214 * ts3 + 0.08970 * ts2 - 0.04153 * theta_s + 0.00516) * T
-        + (0.15346 * ts3 - 0.26756 * ts2 + 0.06670 * theta_s + 0.26688);
-
-    let coeff_y = vec4<f32>(0.1787 * T - 1.4630, -0.3554 * T + 0.4275, -0.0227 * T + 5.3251, 0.1206 * T - 2.5771);
-    let coeff_x = vec4<f32>(-0.0193 * T - 0.2592, -0.0665 * T + 0.0008, -0.0004 * T + 0.2125, -0.0641 * T - 0.8989);
-    let coeff_ch_y = vec4<f32>(-0.0167 * T - 0.2608, -0.0950 * T + 0.0092, -0.0079 * T + 0.2102, -0.0441 * T - 1.6537);
-
-    let denom_y = max(perez_distribution(0.0, theta_s, coeff_y, -0.0670 * T + 0.3703), 1e-4);
-    let denom_x = max(perez_distribution(0.0, theta_s, coeff_x, -0.0033 * T + 0.0452), 1e-4);
-    let denom_ch_y = max(perez_distribution(0.0, theta_s, coeff_ch_y, -0.0109 * T + 0.0529), 1e-4);
-
-    let Y = Yz * perez_distribution(theta, gamma, coeff_y, -0.0670 * T + 0.3703) / denom_y;
-    let x = xz * perez_distribution(theta, gamma, coeff_x, -0.0033 * T + 0.0452) / denom_x;
-    let y = yz * perez_distribution(theta, gamma, coeff_ch_y, -0.0109 * T + 0.0529) / denom_ch_y;
-
-    // Preetham assumes mean solar irradiance at sea level; retain the small
-    // Earth-Sun distance modulation from the ephemeris/illuminant pipeline.
+    // Radiometric (W·m⁻²·sr⁻¹) → photometric (cd/m²) per channel, with the
+    // small Earth-Sun distance modulation the host already applied to the
+    // solar illuminant. Daylight ↔ twilight cross-fade is applied last so
+    // both models can additively overlap in the narrow blend window.
     let solar_scale = max(camera.atmosphere_params.z, 0.0) / 127000.0;
-    let altitude_scale = exp(-max(camera.atmosphere_params.y, 0.0) / 8000.0);
-    // V-37: derive Preetham's "haze whitening" from Ångström β directly,
-    // anchored so β=0.10 (Hardie mid-quality site) reproduces the historical
-    // visibility_km ≈ 50 km behaviour (haze ≈ 1.0).
-    let beta = clamp(camera.atmosphere_optics.y, 0.0, 2.0);
-    let haze = clamp(beta / 0.10, 0.25, 4.0);
-    let ozone = clamp(camera.atmosphere_optics.x, 0.0, 600.0) / 300.0;
-    // Compact Chappuis-band approximation: ozone absorbs broad green/orange
-    // light on long slant paths, deepening blue zeniths and red sunsets.
-    let slant = 1.0 / max(sin_alt + 0.08, 0.08);
-    let ozone_transmission = exp(-0.035 * ozone * slant * vec3<f32>(0.30, 0.62, 0.18));
-    let haze_whitening = mix(vec3<f32>(1.0), vec3<f32>(1.04, 1.02, 0.96), clamp((haze - 1.0) / 3.0, 0.0, 1.0));
-    return xyy_to_linear_rgb(vec3<f32>(x, y, Y * solar_scale * altitude_scale))
-        * ozone_transmission
-        * haze_whitening;
+    return max(vec3<f32>(r, g, b), vec3<f32>(0.0))
+        * HW_RADIANCE_TO_LUMINANCE_LM_PER_W
+        * solar_scale
+        * day_weight;
 }
 
 // Keep sunlit sky radiance on the same physical cd/m² scale as the dark-sky
@@ -247,10 +261,14 @@ fn preetham_sky_luminance_rgb(ray_dir: vec3<f32>, sin_alt: f32) -> vec3<f32> {
 const SUNLIT_SKY_EXPOSURE: f32 = 1.0;
 
 fn sunlit_scattering_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> vec3<f32> {
+    // Sky-only fragments below the geometric horizon are still skipped;
+    // the daylight ↔ twilight blend lives inside
+    // `hosek_wilkie_sky_luminance_rgb` so the apparent-Sun crossing does
+    // not produce a dark frame at sunset.
     if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
         return vec3<f32>(0.0);
     }
-    return hdr_flux_from_cd_m2(preetham_sky_luminance_rgb(ray_dir, sin_alt), zeropoint)
+    return hdr_flux_from_cd_m2(hosek_wilkie_sky_luminance_rgb(ray_dir, sin_alt), zeropoint)
         * SUNLIT_SKY_EXPOSURE;
 }
 

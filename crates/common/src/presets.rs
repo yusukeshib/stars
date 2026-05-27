@@ -509,7 +509,7 @@ mod tests {
             )
             .unwrap_or_else(|error| panic!("{preset} failed: {error:#}"));
             let json = serde_json::to_string(&session).unwrap();
-            assert!(json.contains("\"schemaVersion\":2"));
+            assert!(json.contains("\"schemaVersion\":3"));
             let parsed: StarSession = serde_json::from_str(&json).unwrap();
             let restored = parsed
                 .to_scene()

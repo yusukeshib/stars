@@ -19,10 +19,12 @@ Shipped:
   physical dark-sky visual pipeline (`V-13`–`V-23`), atmospheric refraction
   and Sun / Moon / planet rendering (`V-29`–`V-36`), unified spectral
   extinction — one (β, α, DU) state shared by the stellar and daylight
-  paths (`V-37`), full-sky projections (`V-40`), out-of-Earth galactic and
-  custom external viewpoints (`V-41`, `V-44`), telescope eyepiece simulation
-  (`V-43`), and the deep-sky overlay with Messier objects plus the bright
-  NGC / IC subset (`V-42`).
+  paths (`V-37`), the Hošek-Wilkie 2012 daylight sky-dome model as the
+  daylight scattering source (`V-38`, replacing the legacy Preetham 1999
+  path outright), full-sky projections (`V-40`), out-of-Earth galactic
+  and custom external viewpoints (`V-41`, `V-44`),
+  telescope eyepiece simulation (`V-43`), and the deep-sky overlay with
+  Messier objects plus the bright NGC / IC subset (`V-42`).
 - **Library track** — IAU-grade time / precession / nutation / aberration /
   proper motion (`L-01`–`L-05`), planning helpers (`L-07`, `L-08`),
   schema-versioned JSON sessions (`L-10`, `L-11`), deterministic scene
@@ -33,11 +35,11 @@ Shipped:
 
 Still open:
 
-- **Visual track** — dark-sky realism gaps (`V-24`–`V-28`), daylight model
-  upgrade and site-specific brightness (`V-38`–`V-39`), niche visual
-  features (`V-45`–`V-50`), rare phenomena (`V-47`–`V-49`). A follow-up PR will add a runtime
-  streaming backend for the full ~14,000-entry OpenNGC catalogue on top of
-  the embedded `V-42` subset shipped here.
+- **Visual track** — dark-sky realism gaps (`V-24`–`V-28`), site-specific
+  brightness (`V-39`), niche visual features (`V-45`–`V-50`), rare
+  phenomena (`V-47`–`V-49`). A follow-up PR will add a runtime streaming
+  backend for the full ~14,000-entry OpenNGC catalogue on top of the
+  embedded `V-42` subset shipped here.
 - **Library track** — DE440 ephemerides (`L-06`), large catalog ingest
   (`L-17`), identifier preservation (`L-18`), SIMBAD / VizieR links
   (`L-19`), variable-star light curves (`L-20`), Python bindings (`L-21`),
@@ -189,6 +191,72 @@ Primary implementation areas:
 - `crates/astronomy/src/skyglow.rs`
 - `crates/astronomy/src/photometry.rs`
 - `crates/renderer/src/skyglow.rs`
+
+### Hošek-Wilkie 2012 daylight sky model (`V-38`)
+
+Replaced the Preetham 1999 daylight evaluator with the Hošek-Wilkie
+2012 analytic full-spectral sky-dome model as the default daylight
+radiance source. HW is the published modern replacement for Preetham:
+it stays finite and positive below sun_alt = 5° (where Preetham's
+asymptotic Perez fit fails), handles high turbidity correctly, and
+couples to ground albedo.
+
+Shipped:
+
+- Vendored RGB coefficient table (upstream BSD 3-clause release v1.4a,
+  22 Feb 2013): `crates/astronomy/data/hosek_wilkie/coefficients_rgb.bin`,
+  regenerated from the upstream `ArHosekSkyModelData_RGB.h` by
+  `scripts/build-hosek-wilkie.py` and pinned in `data/manifest.toml`
+  under `hosek-wilkie-2012-rgb-v1.4a` (28,816 bytes).
+- `crates/astronomy/src/atmosphere/hosek_wilkie.rs`: binary loader
+  (validated against the documented magic / size), `cook(turbidity,
+  albedo, sun_elev)` (quintic-Bezier elevation blend, linear in
+  turbidity + albedo) and `radiance(params, θ, γ)` evaluator returning
+  per-channel W·m⁻²·sr⁻¹; the standard 683 lm/W luminous efficacy
+  converts to the cd/m² scale the rest of the skyglow pipeline uses.
+- `crates/renderer/src/camera.rs`: per-frame CPU cook + nine vec4
+  coefficient rows plus a radiance vec4 added to `CameraUniform`; sky
+  model selector encoded in `atmosphere_params.w` (0 = off, 1 = HW
+  default, 2 = Preetham legacy). `Atmosphere::surface_albedo` and
+  `Atmosphere::surface_albedo` added with per-preset defaults
+  (clear-rural ≈ 0.10, hazy-urban ≈ 0.13, high-altitude ≈ 0.30).
+- `crates/renderer/src/shaders/skyglow.wgsl`: WGSL port of the HW
+  evaluator replaces the Preetham daylight path; the legacy WGSL
+  `preetham_sky_luminance_rgb`, `perez_distribution`, and
+  `xyy_to_linear_rgb` helpers are removed.
+- CLI / viewer: `--surface-albedo` flag; `AtmosphereOverrides`
+  extended; web frontend exposes the slider in the atmosphere settings
+  card with EN / JA labels and persists it through the session JSON
+  and localStorage paths.
+- `SessionAtmosphere` adds `surfaceAlbedo` as a required field; the
+  JSON session schema bumps to v3 since the daylight model is no
+  longer a stored choice.
+- Turbidity bridge: the V-37 Ångström β → Linke turbidity helper
+  keeps a single home but is now exposed under the model-neutral name
+  `linke_turbidity_from_aerosol`. HW consumes it directly through
+  `astronomy::atmosphere::hosek_wilkie::turbidity_from_aerosol`.
+
+Tests pinned at the boundaries that motivated the upgrade:
+
+- HW radiance is finite and non-negative across the upper hemisphere
+  at sun_alt = 1°, T = 4 (Preetham's Perez asymptote goes negative
+  here).
+- Zenith luminance is monotone in turbidity and in ground albedo, and
+  the per-channel zenith ordering satisfies B > G > R for clear sky
+  (catches dataset-channel-misalignment regressions).
+- Zenith luminance at the noon reference (T = 2.5, albedo = 0.10,
+  sun_alt = 60°) lies in the published 1–15 kcd/m² daylight range
+  after the radiometric → photometric conversion.
+- `cook` returns the zero sentinel below the horizon so the shader
+  stays branch-free.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/atmosphere.rs`
+- `crates/astronomy/src/atmosphere/hosek_wilkie.rs`
+- `crates/renderer/src/camera.rs`
+- `crates/renderer/src/shaders/skyglow.wgsl`
+- `apps/{cli,viewer,web}` host wiring + web UI controls.
 
 ## Observation planning and positional trust (legacy `Phase 2`)
 

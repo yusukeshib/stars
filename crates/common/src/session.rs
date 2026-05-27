@@ -21,7 +21,7 @@ use crate::{AtmospherePresetArg, OverlayArg, ProjectionArg, ViewpointArg};
 
 /// Current JSON session schema. Increment when a breaking semantic change is
 /// made to any serialized field.
-pub const SESSION_SCHEMA_VERSION: u32 = 2;
+pub const SESSION_SCHEMA_VERSION: u32 = 3;
 
 /// Complete scene/session file. Unknown future fields are ignored by serde, but
 /// the top-level schema version must match before a host uses the data.
@@ -140,6 +140,8 @@ pub struct SessionAtmosphere {
     pub ozone_du: f32,
     pub pressure_hpa: f32,
     pub temperature_c: f32,
+    /// Ground albedo seen by the V-38 Hošek-Wilkie daylight model.
+    pub surface_albedo: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -369,6 +371,7 @@ impl SessionAtmosphere {
             ozone_du: atmosphere.ozone_du,
             pressure_hpa: atmosphere.pressure_hpa,
             temperature_c: atmosphere.temperature_c,
+            surface_albedo: atmosphere.surface_albedo,
         }
     }
 
@@ -404,6 +407,12 @@ impl SessionAtmosphere {
             -80.0,
             60.0,
             "atmosphere.temperatureC",
+        )? as f32;
+        atmosphere.surface_albedo = finite_in_range(
+            self.surface_albedo as f64,
+            0.0,
+            1.0,
+            "atmosphere.surfaceAlbedo",
         )? as f32;
         Ok(atmosphere)
     }
@@ -670,7 +679,7 @@ mod tests {
         let scene = sample_scene();
         let session = StarSession::from_scene("0.1.0", "test", &scene);
         let json = serde_json::to_string(&session).unwrap();
-        assert!(json.contains("\"schemaVersion\":2"));
+        assert!(json.contains("\"schemaVersion\":3"));
         assert!(json.contains("\"cardinal-labels\""));
         let parsed: StarSession = serde_json::from_str(&json).unwrap();
         let restored = parsed.to_scene().unwrap();

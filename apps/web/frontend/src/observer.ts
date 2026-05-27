@@ -68,6 +68,9 @@ export type AtmosphereConfig = {
   ozoneDu: number;
   pressureHpa: number;
   temperatureC: number;
+  /** Ground albedo seen by the V-38 Hošek-Wilkie daylight model.
+   *  Continental mixed terrain ≈ 0.10; snow ≈ 0.80; ocean ≈ 0.06. */
+  surfaceAlbedo: number;
 };
 
 export type PlanetsConfig = {
@@ -162,12 +165,13 @@ export const DEFAULT_ATMOSPHERE_CONFIG: AtmosphereConfig = {
   ozoneDu: 300,
   pressureHpa: 1010,
   temperatureC: 10,
+  surfaceAlbedo: 0.10,
 };
 
-export const ATMOSPHERE_PRESET_DEFAULTS: Record<AtmospherePreset, Pick<AtmosphereConfig, "aerosolBeta" | "aerosolAlpha" | "observerAltitudeM" | "ozoneDu" | "pressureHpa" | "temperatureC">> = {
-  "clear-rural":   { aerosolBeta: 0.10, aerosolAlpha: 1.30, observerAltitudeM: 0,    ozoneDu: 300, pressureHpa: 1010, temperatureC: 10 },
-  "hazy-urban":    { aerosolBeta: 0.35, aerosolAlpha: 1.10, observerAltitudeM: 0,    ozoneDu: 325, pressureHpa: 1010, temperatureC: 15 },
-  "high-altitude": { aerosolBeta: 0.04, aerosolAlpha: 1.30, observerAltitudeM: 2500, ozoneDu: 275, pressureHpa:  750, temperatureC:  0 },
+export const ATMOSPHERE_PRESET_DEFAULTS: Record<AtmospherePreset, Pick<AtmosphereConfig, "aerosolBeta" | "aerosolAlpha" | "observerAltitudeM" | "ozoneDu" | "pressureHpa" | "temperatureC" | "surfaceAlbedo">> = {
+  "clear-rural":   { aerosolBeta: 0.10, aerosolAlpha: 1.30, observerAltitudeM: 0,    ozoneDu: 300, pressureHpa: 1010, temperatureC: 10, surfaceAlbedo: 0.10 },
+  "hazy-urban":    { aerosolBeta: 0.35, aerosolAlpha: 1.10, observerAltitudeM: 0,    ozoneDu: 325, pressureHpa: 1010, temperatureC: 15, surfaceAlbedo: 0.13 },
+  "high-altitude": { aerosolBeta: 0.04, aerosolAlpha: 1.30, observerAltitudeM: 2500, ozoneDu: 275, pressureHpa:  750, temperatureC:  0, surfaceAlbedo: 0.30 },
 };
 
 export const isAtmospherePreset = (s: unknown): s is AtmospherePreset =>

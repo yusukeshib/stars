@@ -206,10 +206,10 @@ pub(crate) struct CameraUniform {
     /// solar angular radius in radians.
     pub sun_eq_radius: [f32; 4],
     /// Atmosphere controls for the sunlit-scattering shader:
-    /// `[preetham_turbidity_eff, observer_altitude_m, solar_illuminance_lux,
-    /// scattering_enabled]`. `preetham_turbidity_eff` is derived from
-    /// `(β, α)` per V-37 so the daylight model and the stellar extinction
-    /// path share one (β, α, DU) state.
+    /// `[linke_turbidity_eff, observer_altitude_m, solar_illuminance_lux,
+    /// scattering_enabled]`. `linke_turbidity_eff` is derived from `(β, α)`
+    /// per V-37 so the daylight model (Hošek-Wilkie 2012, V-38) and the
+    /// stellar extinction path share one (β, α, DU) state.
     pub atmosphere_params: [f32; 4],
     /// Top-of-atmosphere solar RGB illuminant, normalised around D65. `w` is
     /// currently unused.
@@ -238,7 +238,18 @@ pub(crate) struct CameraUniform {
     pub planet_rgb_magnitude: PlanetRgbMagnitudeUniform,
     /// `[planet_count, planets_enabled, unused, unused]`.
     pub planet_params: [f32; 4],
+    /// Hošek-Wilkie 2012 RGB sky-dome coefficients pre-cooked on the host
+    /// each frame (V-38). Nine `vec4`s; row `i` holds the per-channel `i`-th
+    /// analytic coefficient (A..I) as `(R, G, B, _)`. Unused when
+    /// `atmosphere_params.w != 1.0`.
+    pub hw_coeffs: HosekWilkieCoefficientsUniform,
+    /// Per-channel Hošek-Wilkie master radiance scales as `(R, G, B, _)`.
+    /// Unused when `atmosphere_params.w != 1.0`.
+    pub hw_radiance: [f32; 4],
 }
+
+pub(crate) const HW_COEFFS_PER_CHANNEL: usize = 9;
+pub(crate) type HosekWilkieCoefficientsUniform = [[f32; 4]; HW_COEFFS_PER_CHANNEL];
 
 pub(crate) const PLANET_UNIFORM_COUNT: usize = 7;
 pub(crate) type PlanetEqRadiusUniform = [[f32; 4]; PLANET_UNIFORM_COUNT];
@@ -326,6 +337,11 @@ pub struct Atmosphere {
     /// Air temperature in °C for apparent-altitude refraction. Saemundsson's
     /// correction scales as 283 K / (273 + T).
     pub temperature_c: f32,
+    /// Ground albedo seen by the daylight sky model (V-38). Hošek-Wilkie
+    /// uses this to lift the zenith when the ground is bright (snow,
+    /// sand) or darken it when the ground is dark (forest, ocean).
+    /// Default 0.10 ≈ mixed-vegetation continental terrain.
+    pub surface_albedo: f32,
     /// Whether direct solar scattering is enabled. `Atmosphere::OFF` disables
     /// both extinction and daylight/twilight scattering.
     pub sunlit_scattering: bool,
@@ -337,6 +353,11 @@ impl Atmosphere {
     /// `β = 0.10` matches Hardie 1962's mid-quality observatory V-band
     /// extinction within 0.03 mag/airmass; `α = 1.30` is the AERONET
     /// continental-aerosol mean.
+    /// Default ground albedo for clear-rural / continental presets.
+    /// AERONET / MODIS mid-latitude broadband albedo sits near 0.10
+    /// across forest, cropland, and mixed grassland (Liang 2000 §4).
+    pub const DEFAULT_SURFACE_ALBEDO: f32 = 0.10;
+
     pub const CLEAR_RURAL: Self = Self {
         aerosol_beta: 0.10,
         aerosol_alpha: 1.30,
@@ -344,6 +365,7 @@ impl Atmosphere {
         ozone_du: 300.0,
         pressure_hpa: 1010.0,
         temperature_c: 10.0,
+        surface_albedo: Self::DEFAULT_SURFACE_ALBEDO,
         sunlit_scattering: true,
     };
 
@@ -354,6 +376,9 @@ impl Atmosphere {
         ozone_du: 325.0,
         pressure_hpa: 1010.0,
         temperature_c: 15.0,
+        // Urban broadband albedo (asphalt + concrete + rooftops) sits
+        // around 0.13 in Akbari & Levinson 2008.
+        surface_albedo: 0.13,
         sunlit_scattering: true,
     };
 
@@ -364,6 +389,10 @@ impl Atmosphere {
         ozone_du: 275.0,
         pressure_hpa: 750.0,
         temperature_c: 0.0,
+        // Snow / bare-rock observatory sites are brighter than 0.10;
+        // 0.30 is a representative seasonal-average for Mauna-Kea-class
+        // alpine sites (Sicart et al. 2001).
+        surface_albedo: 0.30,
         sunlit_scattering: true,
     };
 
@@ -387,6 +416,7 @@ impl Atmosphere {
         ozone_du: 0.0,
         pressure_hpa: 0.0,
         temperature_c: 10.0,
+        surface_albedo: 0.0,
         sunlit_scattering: false,
     };
 
@@ -1081,7 +1111,7 @@ impl Camera {
             [0.0; 3]
         };
         let turbidity_eff = if self.atmosphere.sunlit_scattering {
-            astronomy::atmosphere::preetham_turbidity_from_aerosol(aerosol_beta as f64) as f32
+            astronomy::atmosphere::linke_turbidity_from_aerosol(aerosol_beta as f64) as f32
         } else {
             0.0
         };
@@ -1129,10 +1159,55 @@ impl Camera {
             moon.distance_km,
             moon.phase_angle_rad,
         ) as f32;
+        // V-38: pre-cook the Hošek-Wilkie nine-parameter (A..I) coefficients
+        // and per-channel radiance scales for this frame's (turbidity,
+        // albedo, sun elevation) configuration. `cook` returns the all-zero
+        // sentinel for sun below the horizon so the shader can stay
+        // branch-free.
         let scattering_enabled = if self.atmosphere.sunlit_scattering {
-            1.0
+            1.0_f32
         } else {
             0.0
+        };
+        let surface_albedo = if self.atmosphere.surface_albedo.is_finite() {
+            self.atmosphere.surface_albedo.clamp(0.0, 1.0)
+        } else {
+            Atmosphere::DEFAULT_SURFACE_ALBEDO
+        };
+        let (hw_coeffs, hw_radiance) = if self.atmosphere.sunlit_scattering {
+            // Apparent (refraction-corrected) solar altitude in the
+            // observer's local ENU frame. The shader gates the HW daylight
+            // branch on the same refracted `sun_altitude_rad()` it reads
+            // from `sun_eq_radius`, so cooking the coefficients against the
+            // geometric altitude here would leave a multi-arcminute band
+            // where the host emits the zero sentinel but the shader still
+            // evaluates the HW branch — the dark frame the user saw right
+            // after sunset.
+            let sun_enu = date_to_local.transform_vector3(j2000_to_date.transform_vector3(sun_dir));
+            let sun_alt = (sun_enu.z as f64).clamp(-1.0, 1.0).asin();
+            let params = astronomy::atmosphere::hosek_wilkie::cook(
+                turbidity_eff as f64,
+                surface_albedo as f64,
+                sun_alt,
+            );
+            let mut coeffs = [[0.0_f32; 4]; HW_COEFFS_PER_CHANNEL];
+            for (coeff_idx, slot) in coeffs.iter_mut().enumerate() {
+                *slot = [
+                    params.coeffs[0][coeff_idx] as f32,
+                    params.coeffs[1][coeff_idx] as f32,
+                    params.coeffs[2][coeff_idx] as f32,
+                    0.0,
+                ];
+            }
+            let radiance = [
+                params.radiances[0] as f32,
+                params.radiances[1] as f32,
+                params.radiances[2] as f32,
+                0.0,
+            ];
+            (coeffs, radiance)
+        } else {
+            ([[0.0; 4]; HW_COEFFS_PER_CHANNEL], [0.0; 4])
         };
         let view_proj = self.shader_view_proj();
         let inv_view_proj = self.shader_inv_view_proj();
@@ -1191,6 +1266,8 @@ impl Camera {
             planet_eq_radius: planet_uniforms.eq_radius,
             planet_rgb_magnitude: planet_uniforms.rgb_magnitude,
             planet_params: planet_uniforms.params,
+            hw_coeffs,
+            hw_radiance,
         }
     }
 
@@ -1393,7 +1470,7 @@ mod tests {
         assert!((uniform.extinction_k_rgb[0] - expected_k[0]).abs() < 1e-6);
         assert!((uniform.extinction_k_rgb[1] - expected_k[1]).abs() < 1e-6);
         assert!((uniform.extinction_k_rgb[2] - expected_k[2]).abs() < 1e-6);
-        let expected_t = astronomy::atmosphere::preetham_turbidity_from_aerosol(
+        let expected_t = astronomy::atmosphere::linke_turbidity_from_aerosol(
             Atmosphere::DEFAULT.aerosol_beta as f64,
         ) as f32;
         assert!((uniform.atmosphere_params[0] - expected_t).abs() < 1e-6);

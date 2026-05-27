@@ -224,5 +224,8 @@ function parseAtmosphereConfig(v: unknown): AtmosphereConfig | null {
     temperatureC: inRange(o.temperatureC, TEMPERATURE_RANGE)
       ? o.temperatureC
       : DEFAULT_ATMOSPHERE_CONFIG.temperatureC,
+    surfaceAlbedo: inRange(o.surfaceAlbedo, [0, 1])
+      ? o.surfaceAlbedo
+      : DEFAULT_ATMOSPHERE_CONFIG.surfaceAlbedo,
   };
 }

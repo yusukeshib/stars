@@ -2,29 +2,14 @@
 //!
 //! Runtime rendering happens in `crates/renderer/src/shaders/skyglow.wgsl`, but
 //! the scalar pieces below give the Rust side pinned, documented values for the
-//! same cited model family: Preetham/Shirley/Smits daylight zenith luminance and
-//! a continuous solar-depression twilight curve tied to clear-site visual sky
-//! brightness. They are intentionally small reference functions, not a spectral
-//! multiple-scattering solver.
+//! daylight / twilight pipeline: the Hošek-Wilkie 2012 daytime sky-dome model
+//! (V-38, see [`hosek_wilkie`]), a continuous solar-depression twilight curve
+//! tied to clear-site visual sky brightness, and the unified spectral
+//! extinction model (V-37) shared with the stellar reddening path.
+
+pub mod hosek_wilkie;
 
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
-
-/// Perez/Preetham zenith luminance in cd/m² for a directly sunlit sky.
-///
-/// Implements the zenith luminance term from Preetham, Shirley & Smits 1999,
-/// with turbidity clamped to the paper's practical daylight range. Returns
-/// `None` when the Sun is below the geometric horizon because Preetham is a
-/// daylight model, not a twilight model.
-pub fn preetham_zenith_luminance_cd_m2(solar_altitude_rad: f64, turbidity: f64) -> Option<f64> {
-    if solar_altitude_rad <= 0.0 || !solar_altitude_rad.is_finite() {
-        return None;
-    }
-    let t = turbidity.clamp(1.7, 10.0);
-    let theta_s = (std::f64::consts::FRAC_PI_2 - solar_altitude_rad)
-        .clamp(0.0, std::f64::consts::FRAC_PI_2 - 0.01);
-    let chi = (4.0 / 9.0 - t / 120.0) * (std::f64::consts::PI - 2.0 * theta_s);
-    Some(((4.0453 * t - 4.9710) * chi.tan() - 0.2155 * t + 2.4192).max(0.0) * 1000.0)
-}
 
 /// Clear-site zenith twilight brightness in cd/m².
 ///
@@ -166,19 +151,20 @@ pub fn extinction_k_rgb(h_obs_m: f64, beta: f64, alpha: f64, ozone_du: f64) -> [
     ]
 }
 
-/// Effective Preetham daylight-model turbidity for the given aerosol depth.
+/// Effective Linke turbidity for the given Ångström aerosol depth.
 ///
-/// Preetham, Shirley & Smits 1999 define turbidity as
+/// Linke turbidity is defined as
 ///   T = (τ_aerosol + τ_molecular) / τ_molecular
 /// evaluated at 550 nm, so the (β, α) state determines T directly via
-/// `T = 1 + β / RAYLEIGH_K550`. The result is clamped to Preetham's
-/// documented practical window [1.7, 10] which the shader expects.
+/// `T = 1 + β / RAYLEIGH_K550`. The result is clamped to the practical
+/// daylight window [1.7, 10] that both the Hošek-Wilkie 2012 sky-dome
+/// dataset and the legacy Preetham 1999 evaluator were originally fit
+/// against.
 ///
-/// `V-37` keeps the Preetham shader as-is and feeds it this derived T so
-/// stellar extinction and daylight reddening share one (β, α) state. The
-/// `V-38` Hošek–Wilkie upgrade will replace the Preetham evaluator entirely;
-/// this function is the bridge until then.
-pub fn preetham_turbidity_from_aerosol(beta: f64) -> f64 {
+/// V-37 ties the daylight scattering term and the stellar k(λ) reddening
+/// to a single (β, α, DU) state; V-38 then uses this Linke turbidity
+/// directly as the HW input.
+pub fn linke_turbidity_from_aerosol(beta: f64) -> f64 {
     let t = 1.0 + beta.max(0.0) / RAYLEIGH_K550_MAG_PER_AIRMASS;
     t.clamp(1.7, 10.0)
 }
@@ -252,31 +238,13 @@ mod tests {
     }
 
     #[test]
-    fn preetham_turbidity_clamps_to_documented_window() {
-        assert_eq!(preetham_turbidity_from_aerosol(0.0), 1.7);
+    fn linke_turbidity_clamps_to_documented_window() {
+        assert_eq!(linke_turbidity_from_aerosol(0.0), 1.7);
         // β=0.12 → T = 1 + 1.403 = 2.40
-        let t = preetham_turbidity_from_aerosol(0.12);
+        let t = linke_turbidity_from_aerosol(0.12);
         assert!((t - 2.40).abs() < 0.05);
         // β=1.0 → T well above 10, clamped.
-        assert_eq!(preetham_turbidity_from_aerosol(1.0), 10.0);
-    }
-
-    #[test]
-    fn preetham_daylight_is_bright_and_domain_limited() {
-        assert_eq!(
-            preetham_zenith_luminance_cd_m2((-1.0_f64).to_radians(), 2.5),
-            None
-        );
-        let noon = preetham_zenith_luminance_cd_m2(60_f64.to_radians(), 2.5).unwrap();
-        let low_sun = preetham_zenith_luminance_cd_m2(5_f64.to_radians(), 2.5).unwrap();
-        assert!(
-            noon > 4_000.0,
-            "clear daylight zenith should be thousands of cd/m²"
-        );
-        assert!(
-            low_sun < noon,
-            "low-sun zenith should be dimmer than high-sun zenith"
-        );
+        assert_eq!(linke_turbidity_from_aerosol(1.0), 10.0);
     }
 
     #[test]

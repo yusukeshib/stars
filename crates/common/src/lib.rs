@@ -293,6 +293,8 @@ pub struct AtmosphereOverrides {
     pub ozone_du: Option<f32>,
     pub pressure_hpa: Option<f32>,
     pub temperature_c: Option<f32>,
+    /// Override the daylight sky model's ground albedo (V-38).
+    pub surface_albedo: Option<f32>,
 }
 
 /// Build a renderer atmosphere from native-host CLI values.
@@ -323,6 +325,9 @@ pub fn atmosphere_from_args(
     }
     if let Some(temperature_c) = overrides.temperature_c {
         atmosphere.temperature_c = temperature_c;
+    }
+    if let Some(surface_albedo) = overrides.surface_albedo {
+        atmosphere.surface_albedo = surface_albedo;
     }
     atmosphere
 }
@@ -547,6 +552,7 @@ mod tests {
                 ozone_du: Some(280.0),
                 pressure_hpa: Some(900.0),
                 temperature_c: Some(5.0),
+                surface_albedo: Some(0.4),
             },
         );
         // Overrides take precedence over the preset's (β, α, DU) values.
@@ -556,6 +562,7 @@ mod tests {
         assert_eq!(atmosphere.ozone_du, 280.0);
         assert_eq!(atmosphere.pressure_hpa, 900.0);
         assert_eq!(atmosphere.temperature_c, 5.0);
+        assert_eq!(atmosphere.surface_albedo, 0.4);
 
         let off = atmosphere_from_args(
             true,
@@ -567,6 +574,7 @@ mod tests {
                 ozone_du: Some(280.0),
                 pressure_hpa: Some(900.0),
                 temperature_c: Some(5.0),
+                surface_albedo: None,
             },
         );
         assert_eq!(off.extinction_k_rgb(), [0.0; 3]);

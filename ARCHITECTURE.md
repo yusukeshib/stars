@@ -247,8 +247,11 @@ The exact pass layout can change, but responsibilities should stay separated:
   extinction and daylight scattering both read the same canonical
   (β, α, DU, observer altitude) optical-depth state through
   `astronomy::atmosphere::extinction_coefficients` (V-37); the renderer
-  derives a Preetham-effective turbidity from β at uniform-build time so
-  the daylight Mie term and the stellar k(λ) reddening can't disagree.
+  derives an effective Linke turbidity from β at uniform-build time so
+  the daylight scattering term and the stellar k(λ) reddening can't
+  disagree. The daylight sky-dome radiance comes from the Hošek-Wilkie
+  2012 analytic model (V-38), cooked per frame on the CPU in
+  `astronomy::atmosphere::hosek_wilkie::cook` and evaluated on the GPU.
   Perspective
   reconstructs rays through the inverse view-projection matrix; all-sky modes
   invert the selected Mollweide / Aitoff / Hammer map before rotating the ray

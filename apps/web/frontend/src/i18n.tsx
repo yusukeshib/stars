@@ -167,6 +167,7 @@ const en: Dictionary = {
 
   "card.atmosphere.pressure": "Pressure (hPa)",
   "card.atmosphere.temperature": "Temperature (°C)",
+  "card.atmosphere.surfaceAlbedo": "Surface albedo",
 
   // Settings — Session card
   "card.session.title": "Session",
@@ -362,6 +363,7 @@ const ja: Dictionary = {
 
   "card.atmosphere.pressure": "気圧 (hPa)",
   "card.atmosphere.temperature": "気温 (°C)",
+  "card.atmosphere.surfaceAlbedo": "地表アルベド",
 
   "card.session.title": "セッション",
   "card.session.description":
