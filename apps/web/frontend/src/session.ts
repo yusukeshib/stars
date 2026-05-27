@@ -21,7 +21,12 @@ import {
   type View,
 } from "./observer";
 
-export const SESSION_SCHEMA_VERSION = 1;
+// Must track `SESSION_SCHEMA_VERSION` in `crates/common/src/session.rs`.
+// v2 unified spectral extinction (V-37); v3 added `surfaceAlbedo` for the
+// Hošek-Wilkie daylight model (V-38). The Rust hosts and `docs/presets/
+// sessions/*.json` all emit v3, so the web UI must accept and emit v3 too
+// or cross-host session import/export is broken.
+export const SESSION_SCHEMA_VERSION = 3;
 const APP_VERSION = "0.1.0";
 const UNIX_EPOCH_JD = 2440587.5;
 const SECONDS_PER_DAY = 86400;
