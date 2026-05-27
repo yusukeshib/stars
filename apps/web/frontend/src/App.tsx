@@ -416,6 +416,7 @@ export function App() {
         onSetPlanets={setPlanets}
         onSetProjection={setProjection}
         onSetEyepiece={setEyepiece}
+        onSetView={setView}
         onCopySessionUrl={async () => {
           const url = sessionUrl({ observer, view, overlays, atmosphere, planets, projection, eyepiece, timeMs });
           try {

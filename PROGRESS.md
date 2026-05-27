@@ -687,14 +687,15 @@ the Rust engine or WASM bridge had to change.
 Locale selection priority:
 
 1. `?lang=en|ja` URL parameter (so shared session URLs can pin a language);
-2. `localStorage["stars:locale"]` (the user's most recent manual choice);
-3. `navigator.language` / `navigator.languages` prefix match;
-4. fallback to `en`.
+2. `navigator.language` / `navigator.languages` prefix match;
+3. fallback to `en`.
 
-A language switcher in the Settings popover persists the choice through
-`localStorage`, and the active locale is mirrored onto `<html lang="…">` so
-assistive tech sees the right language. English remains the source of truth
-for the key set; missing Japanese keys fall back to English at lookup time.
+There is no in-app language switcher: the UI follows the browser. Users who
+want to override the auto-detected locale pass `?lang=ja` (or `?lang=en`) in
+the URL or change their browser's preferred language. The active locale is
+mirrored onto `<html lang="…">` so assistive tech sees the right language.
+English remains the source of truth for the key set; missing Japanese keys
+fall back to English at lookup time.
 
 The canonical English strings emitted by the wasm planning bridge
 (`PlanningBody::name`, `TwilightBand::label` — e.g. `"Mercury"`,
@@ -721,6 +722,77 @@ Validation:
 - `make frontend-check` (TypeScript strict mode) covers the React refactor.
   No numerical behaviour changes, so no new pinned numerical tests were
   added.
+
+## Web status-bar polish (single-line strip, draggable values, tabbed settings)
+
+The web status strip and Settings popover were reworked for a less cluttered
+look and faster interaction. No engine or numerical behaviour changed.
+
+Status strip:
+
+- One inline row instead of two stacked rows; the floating background panel
+  was dropped in favour of a text-shadow so the strip sits directly over the
+  sky.
+- Every value on the strip is now a horizontal scrubber via the shared
+  `useStepDrag` hook (`apps/web/frontend/src/components/useStepDrag.ts`):
+  date (±1 day/step), clock (±10 min/step), latitude / longitude (±0.1°
+  /step), azimuth (±1°/step), altitude (±0.5°/step), and FOV
+  (multiplicative, factor 0.97/step, drag right = zoom in to match the
+  scroll wheel). Az/Alt clamp / wrap through the existing `clampAltitude` /
+  `wrapAzimuth` / `clampFov` helpers from `observer.ts`.
+- The Projection text on the strip is now a button: clicking it cycles
+  through `SKY_PROJECTIONS` in place, only when the viewpoint is Earth
+  (matches the disabled-selector logic in the Settings panel).
+
+Popovers (Location / Time / Settings):
+
+- Click-anywhere-outside dismiss via a transparent fixed backdrop sitting
+  behind the popover layer.
+- Sticky header with the close button — the dialog title and `×` stay
+  visible while the body scrolls.
+- Settings popover stretches between the viewport top and the status strip
+  (`top: 14; bottom: 56`) so long content keeps its top edge attached to
+  the window instead of overflowing upward.
+- Location popover replaces the lat/lng sliders with plain number inputs
+  (precision 0.0001°). Time popover drops the redundant date picker since
+  the local datetime input covers the same job.
+
+Settings panel reorganisation:
+
+- Tabbed view with four sections: **Sky** (solar-system toggle, overlays,
+  planning), **View** (viewpoint, external camera, screen projection,
+  telescope eyepiece), **Environment** (atmosphere & extinction), and
+  **Session** (copy URL / copy JSON / load JSON).
+- Flat section style: nested card-in-card boxes were removed; section
+  headings now sit flush with the popover edge, separated only by parent
+  grid `gap`. `OverlayToggles` was switched from `<fieldset>` groups to
+  flat `<section>` blocks to match.
+
+Language switcher removal:
+
+- The Settings panel's English / 日本語 button row was removed; the locale
+  is now detected once at load from `?lang=` or the browser preference (see
+  the i18n section above). `localStorage` persistence was dropped together
+  with `useState` / `setLocale` / `LOCALES` / `LOCALE_LABELS` exports.
+
+Primary implementation areas:
+
+- `apps/web/frontend/src/components/StatusBar.tsx` — strip layout,
+  scrubber wiring, popover shell, sticky header, settings tabs;
+- `apps/web/frontend/src/components/useStepDrag.ts` — new shared horizontal
+  drag hook used by every scrubber;
+- `apps/web/frontend/src/components/OverlayToggles.tsx` — flat sub-section
+  styling matching the parent settings layout;
+- `apps/web/frontend/src/i18n.tsx` — dropped manual locale switcher,
+  added strings for new drag tooltips, projection-cycle hint, tab labels,
+  and the new Solar-system card;
+- `apps/web/frontend/src/App.tsx` — passes `setView` through as
+  `onSetView` so the new scrubbers can mutate camera state.
+
+Validation:
+
+- `make frontend-check` (TypeScript strict mode) covers the refactor; no
+  engine, renderer, or numerical behaviour changes.
 
 ## Documentation progress
 
