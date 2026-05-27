@@ -116,6 +116,11 @@ remaining items are realism polish (`V-24`–`V-28`), site-specific brightness
 `V-37`, and the daylight model upgrade `V-38` has shipped), niche visual
 features (`V-45`–`V-50`), and rare phenomena (`V-47`–`V-49`).
 
+**High priority next:** the visual-richness gaps `V-51`–`V-56` (eclipses /
+occultations, planetary rings and moons, resolved star clusters, double
+stars, artificial satellites, and object search / GoTo / info panel) —
+these surface existing engine capability that the current UI hides.
+
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
 headless server (`L-21`, `L-22`), planning polish (`L-09`), variable-star
@@ -184,6 +189,12 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-48` | **Aurora display** | ⬜ |
 | `V-49` | **Comet rendering** | ⬜ |
 | `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ⬜ |
+| `V-51` | **Unified eclipse / occultation pass** | ⬜ |
+| `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** | ⬜ |
+| `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** | ⬜ |
+| `V-54` | **Double / binary star resolution** | ⬜ |
+| `V-55` | **Artificial satellites (TLE / SGP4)** | ⬜ |
+| `V-56` | **Object search, GoTo, and info panel** | ⬜ |
 
 ### Library track
 
@@ -1724,6 +1735,266 @@ caveat.
 sub-arcsecond contact timing; usable before that with the existing
 ~1″-class apparent positions. Subsumes the geometry half of `V-36`
 (visual aid kept as-is for back-compat).
+
+**Hosts wired.** CLI / viewer / web.
+
+---
+
+## Solar system depth
+
+### `V-52` Planetary rings and moons — ⬜
+
+**Item.** Today `V-35` renders Mercury–Neptune as bare disks. Three
+visually unmistakable elements are missing: **Saturn's ring system**,
+the **Galilean moons** (Io, Europa, Ganymede, Callisto), and **Titan**.
+Without them, telescope-eyepiece scenes (`V-43`) look obviously wrong.
+
+**Scientific basis.**
+- Saturn ring geometry: inner / outer radii from Cassini fits (Porco et
+  al. 2005); ring opening angle (B) from sub-Earth latitude of Saturn's
+  pole; A / B / Cassini Division / C-ring brightness ratios from
+  Dones et al. 1993.
+- Galilean moons: VSOP-style Sampson 1921 / Lieske E5 (Lieske 1998)
+  theory for Jovicentric positions, projected to topocentric apparent
+  positions; magnitudes from JPL Horizons-style geometric formulae.
+- Titan: TASS1.7 (Vienne & Duriez 1995) for Saturnicentric position.
+
+**References.**
+- Lieske, J. H. 1998, A&AS 129, 205 (E5 theory of Galilean moons).
+- Vienne, A., Duriez, L. 1995, A&A 297, 588 (TASS1.7 Saturnian moons).
+- Porco, C. C. et al. 2005, Science 307, 1226 (Cassini ring geometry).
+- Dones, L. et al. 1993, Icarus 105, 184 (ring photometric profiles).
+
+**Implementation scope.**
+- `crates/astronomy/src/moons.rs` (new): `apparent_galilean_moons`,
+  `apparent_titan` returning topocentric `(RA, Dec, magnitude,
+  shadow_on_planet)`.
+- `crates/astronomy/src/ephemeris.rs`: extend Saturn state with ring
+  opening angle `B` and `B'` (illumination side).
+- `crates/renderer`: Saturn-ring shader (oriented ellipse with A / B / C
+  bands and Cassini gap, shadowed by the planet body); moon sprites as
+  point lights with their own glare from the existing pipeline; shadow
+  transits drawn via the analytic-mask path of `V-51b`.
+- Reuse `V-51a/b` occultation primitives for mutual Galilean events
+  (Io occulting Europa, shadow transits on Jupiter).
+
+**Tests / validation.** Galilean configurations at known epochs within
+5″ of JPL Horizons; Saturn ring opening at solstices / equinoxes within
+0.1°; one deterministic eyepiece-sim render of Jupiter + 4 moons and
+one of Saturn + rings added to the gallery.
+
+**Deliberate non-goal scope.** No irregular moons of any planet, no
+Neptunian / Uranian rings (faint, requires deep-field telescope sim),
+no surface textures — the bodies stay as photometric point / disk
+sources with magnitudes.
+
+**Hosts wired.** CLI / viewer / web.
+
+---
+
+### `V-53` Resolved star clusters — ⬜
+
+**Item.** Bright open clusters (Pleiades M45, Hyades, Praesepe M44,
+Double Cluster, Beehive) currently appear as a single DSO label from
+`V-42`. They should appear as a **resolved field of HYG / Hipparcos
+stars** with the cluster label drawn over the field, because that is
+what a naked-eye observer actually sees.
+
+**Scientific basis.** Cluster membership lists from WEBDA / Cantat-Gaudin
+2020 (Gaia DR2/DR3 membership catalog); the stars themselves are
+already in HYG — only the membership tagging is new. No new photometry
+model needed.
+
+**References.**
+- Cantat-Gaudin, T. et al. 2020, A&A 633, A99 (open-cluster membership
+  from Gaia DR2).
+- Mermilliod, J.-C., Paunzen, E. 2003 (WEBDA database).
+
+**Implementation scope.**
+- `crates/catalog/src/clusters.rs` (new): membership table keyed by HYG
+  / Hip ID, joined into the loaded star slice.
+- `crates/catalog/src/deepsky.rs`: when a DSO entry is tagged
+  `resolve_as_member_field`, suppress the disk-only DSO sprite and
+  rely on the star sprites for the visual; keep the label.
+- `data/manifest.toml`: add cluster-membership snapshot with DOI.
+
+**Tests / validation.** Pleiades render at 30′ FOV shows the 7 named
+stars at the correct positions within 1′; one gallery image per
+cluster.
+
+**Deliberate non-goal scope.** No globular-cluster star-by-star
+resolution (too dense, no per-member catalog at hobbyist scale — keep
+as DSO disk). No cluster colour-magnitude diagrams.
+
+**Hosts wired.** CLI / viewer / web.
+
+---
+
+### `V-54` Double / binary star resolution — ⬜
+
+**Item.** Visual double / binary stars (Mizar / Alcor, Albireo,
+Castor, ε Lyr "Double Double", Algieba, etc.) currently merge into
+one HYG entry. At telescope-eyepiece zoom (`V-43`), close pairs must
+split into two distinct sprites with correct separation, position
+angle, and component magnitudes.
+
+**Scientific basis.** Washington Double Star (WDS) catalog (Mason et al.
+2001–) for separation `ρ`, position angle `θ`, and component
+magnitudes per epoch. Apply per-component HYG colour from V-23.
+
+**References.**
+- Mason, B. D. et al. 2001, AJ 122, 3466 (WDS); USNO maintained
+  updates.
+
+**Implementation scope.**
+- `crates/catalog/src/doubles.rs` (new): WDS-derived per-pair table
+  keyed by HYG / Hip ID with `(ρ, θ, m1, m2)` at a documented epoch.
+- `crates/catalog/src/catalog.rs`: when a HYG star matches a WDS
+  primary, emit two sprites at `(ρ, θ)` from the primary; suppress
+  the merged sprite.
+- Acceptance threshold: split only when projected separation ≥ 1 px in
+  the current FOV, otherwise fall back to the single merged sprite
+  (no aliasing).
+
+**Tests / validation.** Mizar / Alcor render at 1° FOV shows two
+resolved sprites; Albireo eyepiece render shows the gold-blue colour
+pair (V-23 photometry must agree); one gallery image.
+
+**Deliberate non-goal scope.** No spectroscopic-binary modelling, no
+orbital animation for short-period visual binaries (the catalog epoch
+position is used as-is).
+
+**Hosts wired.** CLI / viewer / web.
+
+---
+
+## Earth orbit
+
+### `V-55` Artificial satellites (TLE / SGP4) — ⬜
+
+**Item.** ISS, Starlink trains, the geostationary belt, and bright
+LEO satellites are visible most clear nights and absent from the
+renderer. Add a TLE-driven satellite layer propagated by SGP4, with
+Earth-shadow visibility and apparent magnitude.
+
+**Scientific basis.**
+- Orbit propagation: SGP4 / SDP4 from Vallado et al. 2006 (the
+  reference implementation that matches Space-Track distribution).
+- Visibility: a satellite is naked-eye-visible when the observer is
+  in night (Sun depression > civil) **and** the satellite is sunlit
+  (not in Earth's umbra/penumbra). Reuse the umbra cone geometry
+  already present for `V-36`.
+- Magnitude: standard intrinsic-magnitude-at-1000-km approximation
+  scaled by range and phase angle (McCants / Mike's Satellite Tracking
+  convention) for amateur-grade values. Per-satellite intrinsic
+  magnitudes from McCants' QuickSat MCNAMES file.
+
+**References.**
+- Vallado, D. A. et al. 2006, AIAA 2006-6753, *Revisiting Spacetrack
+  Report #3* (SGP4 reference).
+- Hoots, F. R., Roehrich, R. L. 1980, Spacetrack Report #3 (original
+  SGP4 / SDP4).
+- CelesTrak (celestrak.org) for current TLE feeds.
+- McCants, M. (mmccants.org) for satellite intrinsic-magnitude file.
+
+**Implementation scope.**
+- `crates/astronomy/src/satellites.rs` (new): TLE parser + SGP4
+  propagator (likely vendored from a reviewed crate such as `sgp4`),
+  returning `(ECI position, ECI velocity)` at a given epoch.
+- TLE to topocentric: rotate ECI to TEME → ECEF via existing
+  GMST/nutation → alt-az via existing observer transform.
+- Earth-shadow test: reuse umbra cone from `V-36`'s Earth-shadow
+  geometry.
+- `crates/renderer`: satellite sprites as moving point lights
+  (single-frame and **streak** mode when frame integration is on); the
+  streak length is `apparent_angular_velocity × exposure_seconds`,
+  exposing exposure as a session field.
+- `data/manifest.toml`: snapshot of a curated TLE set (ISS, a handful
+  of bright Starlink + Iridium + geostationary representatives) with
+  epoch and source URL, plus a regeneration command. Live TLE fetch
+  is an opt-in CLI flag, not a default — deterministic renders rely
+  on the snapshot.
+- `crates/common/src/presets.rs`: `IssPass` preset (a known ISS pass
+  for a fixed observer).
+
+**Tests / validation.**
+- SGP4: position at known TLE epochs matches the AIAA 2006-6753
+  reference test vectors to documented sub-km accuracy.
+- Visibility: ISS pass over Tokyo on a pinned date shows correct
+  rise / culmination / shadow-entry times within 5 s of Heavens-Above.
+- Visual: deterministic ISS-pass render and a Starlink-train render
+  added to the gallery.
+
+**Deliberate non-goal scope.** No collision-conjunction analysis, no
+cross-section / BRDF physical magnitude model (intrinsic-magnitude
+table is the agreed approximation), no debris cloud rendering, no
+live network fetch in the default render path (manifest-pinned
+snapshot only). Document live-fetch caveats in
+`docs/standards-compliance.md`.
+
+**Dependencies.** Independent of `V-51` but shares the Earth-shadow
+utility with `V-36`.
+
+**Hosts wired.** CLI / viewer / web.
+
+---
+
+## Interactive UX
+
+### `V-56` Object search, GoTo, and info panel — ⬜
+
+**Item.** Today the loaded catalog data (HYG star magnitudes, spectral
+classes, distances; Messier / NGC / IC IDs; planet ephemerides) has no
+UI surface beyond labels. Add three connected UX primitives:
+
+1. **Search box** — free-text lookup by name / Bayer / Flamsteed /
+   HD / HIP / HR / Messier / NGC / IC / planet / Moon / Sun, with
+   prefix + fuzzy match and a ranked dropdown.
+2. **GoTo** — selecting a result slews the camera to centre the
+   target at the current FOV (smooth interpolation in alt-az for
+   Earth observers; great-circle in the projection's native frame
+   for all-sky and external viewpoints).
+3. **Info panel** — click / tap / hover on any rendered body opens a
+   panel showing apparent magnitude, RA/Dec (J2000 + apparent),
+   Alt/Az, distance, spectral / colour class, rise / transit / set
+   (reusing `L-07`), and the deep-link block from `L-19` when wired.
+
+**Scientific basis.** No new physics — every datum already exists in
+`crates/catalog` and `crates/astronomy`. The contribution is an index
+layer + a picking buffer.
+
+**Implementation scope.**
+- `crates/catalog/src/search.rs` (new): in-memory inverted index over
+  catalog identifiers + common names, exposing
+  `search(query, limit) -> [Match { id, kind, score, display }]`.
+  Built once at catalog load, cost bounded by `L-16` backend.
+- `crates/renderer/src/picking.rs` (new): cheap ID picking via an
+  off-screen R32Uint attachment populated only when the host requests
+  a pick; falls back to nearest-sprite CPU search when picking buffer
+  is disabled (web-low-power path).
+- `crates/common`: `SelectedTarget` session field so a session JSON
+  records the currently-focused object.
+- `apps/web`, `apps/viewer`: search box widget + info panel,
+  bilingual (en/ja) consistent with the rest of the web UI.
+- `apps/cli`: `--goto <id>` flag that centres the camera on a named
+  target before rendering.
+
+**Tests / validation.**
+- Unit: search ranks `"vega"`, `"α Lyr"`, `"HIP 91262"`, `"M31"`,
+  `"NGC 224"`, `"saturn"`, `"土星"` to the expected catalog row.
+- Unit: GoTo on Vega from a fixed observer + epoch lands the centre
+  ray within 0.5′ of the apparent position.
+- Visual: one deterministic CLI render with `--goto m31` from Tokyo
+  added to the gallery.
+
+**Deliberate non-goal scope.** No natural-language query ("show me
+bright red giants near Orion") — keyword + identifier match only.
+No server-side search index — must work entirely in-process for the
+WASM build.
+
+**Dependencies.** Tightens with `L-17` / `L-18` (richer identifier
+preservation) and `L-19` (SIMBAD / VizieR deep links) but ships
+standalone against current HYG + DSO + planet labels.
 
 **Hosts wired.** CLI / viewer / web.
 
