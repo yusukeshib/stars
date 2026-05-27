@@ -414,15 +414,16 @@ gibbous appears as a ~24 % waning crescent). The sign is now `-moon_dir`,
 matching the geometric convention that `moon_dir` points from the observer to
 the Moon.
 
-### Unified eclipse / occultation pass (`V-51a` + `V-51b` + `V-51c`)
+### Unified eclipse / occultation pass (`V-51a` + `V-51b` + `V-51c` + `V-51d` + `V-51e`)
 
-First three slices of `V-51` (unified eclipse / occultation pass):
+First five slices of `V-51` (unified eclipse / occultation pass):
 common occultation primitives (`V-51a`), the general `MAX_OCCLUDERS
-= 16` analytic-mask uniform array (`V-51b`), and the solar-eclipse
-renderer wiring (Moon → Sun pair, `V-51c`). Lunar occultation,
-planetary transit, and mutual planetary occultation slices
-(`V-51d`/`e`/`f`) plug their own front-disk producers into the same
-`active_occluders` list and ship in follow-up PRs.
+= 16` analytic-mask uniform array (`V-51b`), the solar-eclipse
+renderer wiring (Moon → Sun pair, `V-51c`), lunar occultation of
+stars and planets (`V-51d`), and Mercury / Venus transit of the Sun
+(`V-51e`). The mutual planetary occultation slice (`V-51f`) plugs a
+planet-on-planet producer into the same `active_occluders` list and
+ships in a follow-up PR.
 
 Primary implementation areas:
 
@@ -618,12 +619,87 @@ Validation (pinned in `VALIDATION.md`):
   was extended to assert both the V-51c Sun entry (slot 0) *and* the
   V-51d Stars entry (slot 1) at greatest eclipse.
 
-Deliberately out of scope for this slice (deferred to `V-51e`/`f`):
-Mercury / Venus transit of the Sun, and mutual planetary
-occulation. Sub-second IOTA contact-time validation against
-published occultation predictions stays gated on `L-06` (the DE440
-ephemeris upgrade); the current VSOP87 / ELP2000 stack pins
+Deliberately out of scope for this slice (deferred to `V-51f`):
+mutual planetary occultation. Sub-second IOTA contact-time validation
+against published occultation predictions stays gated on `L-06` (the
+DE440 ephemeris upgrade); the current VSOP87 / ELP2000 stack pins
 detection and classification but not microsecond IOTA accuracy.
+
+### Mercury / Venus transit of the Sun (`V-51e`)
+
+Fifth slice of `V-51`: Mercury or Venus now occults the Sun when its
+apparent disk crosses the photosphere. The V-51b general
+`MAX_OCCLUDERS = 16` analytic-mask array routes the planet-disk
+subtract through the same `OccluderTarget::Sun` slot the V-51c
+Moon-on-Sun pair already uses, so the slice is the producer + the
+planning helper without any shader change.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/planning.rs` (`active_occluders` extended to
+  emit `Planet → Sun` entries for Mercury and Venus when the inner
+  planet is closer than the Sun and the disks are in contact; new
+  `find_planet_transit` planning helper with `PlanetTransitEvent`).
+- `crates/common/src/presets.rs` + `docs/presets/sessions/venus-transit.json`
+  (`VenusTransit` deterministic preset wired to the 2012-06-06
+  greatest transit from Tokyo).
+
+Shipped capabilities:
+
+- `active_occluders` emits a `Planet → Sun` entry whose front disk is
+  the planet's apparent topocentric semidiameter, whose target is
+  `OccluderTarget::Sun`, and whose kind is the raw
+  `classify_disks(planet, sun)` label. The producer gates on
+  `planet.distance_au < sun.distance_au` so the pure-geometry
+  classifier rejects superior-conjunction near-alignments where the
+  planet is in fact behind the Sun.
+- `find_planet_transit(observer, planet, start, end) ->
+  Option<PlanetTransitEvent>` mirrors `find_solar_eclipse`: a
+  5-minute scan locates the peak and `contact_times` refines P1–P4
+  via the shared bisection. The helper rejects outer planets up
+  front (only Mercury and Venus can transit the Sun from Earth) and
+  applies the same foreground gate inside the peak scan.
+- Renderer side: zero new code. The V-51b shader path
+  (`occluder_subtract_mask(OCCLUDER_TARGET_SUN, …)` inside
+  `sun_moon_disk_radiance`) already iterates every active occluder
+  whose target is the Sun, so the new planet entry draws as a black
+  silhouette inside the solar sprite. The Koomen 1952 daylight
+  falloff and Baumbach 1937 corona stay gated on
+  `solar_eclipse_state`, which is computed from the Moon-on-Sun pair
+  only — a transit therefore leaves the daylight sky untouched and
+  does not light up the corona.
+- New `VenusTransit` scene preset (2012-06-06T01:29:00Z, Tokyo, az
+  113°, alt 55°, 2° FoV) and the matching
+  `docs/presets/sessions/venus-transit.json` artifact wire the only
+  Venus transit in the validation canon until 2117 into the
+  deterministic preset list.
+
+Validation (pinned in `VALIDATION.md`):
+
+- `planning::tests::find_planet_transit_rejects_outer_planets`
+  guards the foreground-planet gate (Mars / Jupiter must be rejected
+  without running the scan).
+- `planning::tests::find_planet_transit_returns_none_off_transit_day`
+  guards against false-positive detection on a non-transit day.
+- `planning::tests::find_planet_transit_finds_2012_venus_transit`
+  asserts interior phase (P2/P3 present), peak obscuration in the
+  area-ratio band (5e-4..2e-3), and a 5–8 h total duration against
+  the NASA / IOTA canon.
+- `planning::tests::active_occluders_emit_planet_on_sun_at_venus_transit_peak`
+  pins the producer side: at greatest transit the list contains
+  exactly one Sun-targeted occluder whose front radius matches the
+  Venus apparent semidiameter and whose kind is
+  `AnnularOrTransit`.
+- `planning::tests::active_occluders_skip_planet_on_sun_at_superior_conjunction`
+  pins the foreground gate at the 2024-06-14 Mercury superior
+  conjunction: no Sun-targeted occluder is emitted even though the
+  apparent directions overlap.
+
+Deliberately out of scope for this slice (deferred to `V-51f`):
+mutual planetary occultation (planet-on-planet). The `MAX_OCCLUDERS`
+rails and the `OccluderTarget::Planet(i)` codes are already in
+place; V-51f only needs to add a planet-front-disk producer that
+routes to a planet target.
 
 Note on the V-51 performance contract. The ROADMAP originally
 phrased the star occlusion as a “CPU-side cull” (`10⁴ × 10 ≈ 0.1 ms`

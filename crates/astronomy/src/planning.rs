@@ -449,11 +449,16 @@ pub fn solar_eclipse_state(observer: Observer) -> SolarEclipseState {
 /// * **V-51d** — Moon-occults-planet
 ///   ([`OccluderTarget::Planet`] backed by the Moon), emitted only
 ///   when the Moon-planet pair is in contact.
+/// * **V-51e** — Mercury / Venus transit of the Sun
+///   ([`OccluderTarget::Sun`] backed by a planet disk). Inner planets
+///   only: outer planets cannot transit the solar disk from Earth.
+///   Emitted only when the planet is closer to the observer than the
+///   Sun (inferior-conjunction side); a superior conjunction places
+///   the planet behind the Sun, where the pure-geometry classifier
+///   would otherwise spuriously fire.
 ///
 /// Open producers (TODO):
 ///
-/// * `V-51e` — Mercury / Venus transits across the Sun
-///   ([`OccluderTarget::Sun`] backed by a planet disk).
 /// * `V-51f` — mutual planetary occultation
 ///   ([`OccluderTarget::Planet`] backed by another planet disk).
 ///
@@ -501,25 +506,54 @@ pub fn active_occluders(observer: Observer) -> ActiveOccluders {
         obscuration: 0.0,
     });
 
-    // V-51d Moon-on-Planet: classify each Moon ↔ planet pair, push only
-    // the active ones so the analytic-mask path stays at zero cost
-    // off-event. Indices follow `Planet::ALL`, which is also the order
-    // the renderer packs into `planet_eq_radius[i]`, so the shader's
-    // `OCCLUDER_TARGET_PLANET_BASE + i` lookup matches.
+    // V-51d Moon-on-Planet and V-51e Planet-on-Sun share the same
+    // per-planet ephemeris call, so the two producers fuse into one pass
+    // over `Planet::ALL`. The indexing follows `Planet::ALL`, which is
+    // also the order the renderer packs into `planet_eq_radius[i]`, so
+    // the shader's `OCCLUDER_TARGET_PLANET_BASE + i` lookup matches.
     for (i, &planet) in Planet::ALL.iter().enumerate() {
         let p = apparent_planet_topocentric(observer, planet);
         let p_disk = ApparentDisk::new(p.direction_equatorial(), p.angular_radius_rad);
-        let kind = classify_disks(moon_disk, p_disk);
-        if matches!(kind, OccultationKind::None) {
+
+        // V-51d Moon-on-Planet: classify each pair, push only the active
+        // ones so the analytic-mask path stays at zero cost off-event.
+        let moon_kind = classify_disks(moon_disk, p_disk);
+        if !matches!(moon_kind, OccultationKind::None) {
+            let obscuration = obscuration_fraction(moon_disk, p_disk) as f64;
+            let _ = out.push(Occluder {
+                front_dir_eq: moon_front_dir,
+                front_radius_rad: moon.angular_radius_rad,
+                target: OccluderTarget::Planet(i as u8),
+                kind: moon_kind,
+                obscuration,
+            });
+        }
+
+        // V-51e Planet-on-Sun: only inner planets can transit the solar
+        // disk from Earth, and the classifier is pure geometry so we
+        // also gate on the planet being closer than the Sun. A superior
+        // conjunction puts an inner planet behind the Sun with nearly
+        // identical apparent direction; without this gate the classifier
+        // would spuriously emit an "occlusion" of the Sun by Mercury or
+        // Venus when the planet is in fact being hidden by the Sun.
+        if !matches!(planet, Planet::Mercury | Planet::Venus) {
             continue;
         }
-        let obscuration = obscuration_fraction(moon_disk, p_disk) as f64;
+        if p.distance_au >= sun.distance_au {
+            continue;
+        }
+        let planet_sun_kind = classify_disks(p_disk, sun_disk);
+        if matches!(planet_sun_kind, OccultationKind::None) {
+            continue;
+        }
+        let p_dir = p.direction_equatorial();
+        let planet_obscuration = obscuration_fraction(p_disk, sun_disk) as f64;
         let _ = out.push(Occluder {
-            front_dir_eq: moon_front_dir,
-            front_radius_rad: moon.angular_radius_rad,
-            target: OccluderTarget::Planet(i as u8),
-            kind,
-            obscuration,
+            front_dir_eq: [p_dir.x as f64, p_dir.y as f64, p_dir.z as f64],
+            front_radius_rad: p.angular_radius_rad,
+            target: OccluderTarget::Sun,
+            kind: planet_sun_kind,
+            obscuration: planet_obscuration,
         });
     }
 
@@ -724,6 +758,116 @@ impl SolarEclipseKind {
     fn is_event(self) -> bool {
         !matches!(self, Self::None)
     }
+}
+
+/// One Mercury / Venus transit located inside a planning window (V-51e).
+#[derive(Debug, Clone, Copy)]
+pub struct PlanetTransitEvent {
+    /// Which inner planet transited the solar disk.
+    pub planet: Planet,
+    /// Deepest geometry reached anywhere in the window. Transits are
+    /// always [`OccultationKind::AnnularOrTransit`] at peak — the planet
+    /// disk is far smaller than the Sun — but the value is carried for
+    /// uniformity with [`SolarEclipseEvent::kind`].
+    pub kind: OccultationKind,
+    /// Peak obscuration fraction `[0, 1]`. For a transit this is the
+    /// area ratio `(r_planet / r_sun)²`, ≈2e-5 for Mercury and ≈1e-3
+    /// for Venus.
+    pub peak_obscuration: f32,
+    /// Julian Date (UTC) of minimum apparent separation.
+    pub peak_jd_utc: f64,
+    /// Canonical P1..P4 contact times (UTC Julian Dates). P1 / P4 are
+    /// the exterior contacts (first / last edge touch); P2 / P3 the
+    /// interior contacts when the planet disk fully enters / starts to
+    /// leave the solar disk.
+    pub contacts: ContactTimes,
+}
+
+impl PlanetTransitEvent {
+    /// `true` if the planet entered the interior phase (P2..P3) — the
+    /// planet's disk fully inside the Sun's disk.
+    pub fn is_interior(&self) -> bool {
+        self.contacts.is_central()
+    }
+}
+
+/// Search `[start_jd_utc, end_jd_utc]` for a Mercury or Venus transit
+/// across the Sun visible from `observer` (V-51e).
+///
+/// Returns `None` when the planet-Sun apparent separation never falls
+/// below `r_planet + r_sun` inside the window, or when `planet` is not
+/// an inner planet (only Mercury and Venus can transit the solar disk
+/// from Earth). Like [`find_solar_eclipse`], this is meant to be called
+/// once per known transit date with a ~12 h bracket; it does not try to
+/// enumerate every transit in a long window.
+///
+/// The classifier is pure geometry, so the helper additionally gates on
+/// the planet being closer than the Sun at the peak instant — a
+/// superior-conjunction near-alignment would otherwise appear identical
+/// to a transit from the front.
+pub fn find_planet_transit(
+    observer: Observer,
+    planet: Planet,
+    start_jd_utc: f64,
+    end_jd_utc: f64,
+) -> Option<PlanetTransitEvent> {
+    if !matches!(planet, Planet::Mercury | Planet::Venus) {
+        return None;
+    }
+    if !(start_jd_utc.is_finite() && end_jd_utc.is_finite()) || end_jd_utc <= start_jd_utc {
+        return None;
+    }
+    // Capture the per-sample (front, back) apparent disks plus the
+    // foreground gate — `contact_times` runs on the disks alone, while
+    // the peak-finding loop also enforces front < back distance so a
+    // superior conjunction is rejected even before geometry.
+    let probe = |jd: f64| -> (ApparentDisk, ApparentDisk, bool) {
+        let obs = observer_at(observer, jd);
+        let sun = apparent_sun_topocentric(obs);
+        let p = apparent_planet_topocentric(obs, planet);
+        let front = ApparentDisk::new(p.direction_equatorial(), p.angular_radius_rad);
+        let back = ApparentDisk::new(sun.direction_equatorial(), sun.angular_radius_rad);
+        let in_front = p.distance_au < sun.distance_au;
+        (front, back, in_front)
+    };
+    // 5-minute scan: a Mercury transit ingress is ≲5 min wide, a Venus
+    // transit ≳20 min; this catches both without missing the inner
+    // contact pair. Matches the cadence `find_solar_eclipse` uses.
+    let scan_step = 5.0 / (24.0 * 60.0);
+    let mut peak_jd = start_jd_utc;
+    let mut peak_obscuration = 0.0_f32;
+    let mut peak_kind = OccultationKind::None;
+    let mut t = start_jd_utc;
+    while t <= end_jd_utc + 1e-12 {
+        let (front, back, in_front) = probe(t.min(end_jd_utc));
+        if !in_front {
+            t += scan_step;
+            continue;
+        }
+        let kind = classify_disks(front, back);
+        let obs = obscuration_fraction(front, back);
+        if obs > peak_obscuration {
+            peak_obscuration = obs;
+            peak_jd = t.min(end_jd_utc);
+            peak_kind = kind;
+        }
+        t += scan_step;
+    }
+    if matches!(peak_kind, OccultationKind::None) || peak_obscuration <= 0.0 {
+        return None;
+    }
+    let disks = |jd: f64| -> (ApparentDisk, ApparentDisk) {
+        let (front, back, _) = probe(jd);
+        (front, back)
+    };
+    let contacts = contact_times(start_jd_utc, end_jd_utc, disks);
+    Some(PlanetTransitEvent {
+        planet,
+        kind: peak_kind,
+        peak_obscuration,
+        peak_jd_utc: peak_jd,
+        contacts,
+    })
 }
 
 #[cfg(test)]
@@ -983,6 +1127,129 @@ mod tests {
             "min separation {} exceeds Moon apparent radius {}",
             event.min_separation_rad,
             peak_moon.angular_radius_rad,
+        );
+    }
+
+    #[test]
+    fn find_planet_transit_rejects_outer_planets() {
+        // V-51e gate: only Mercury and Venus can transit the Sun from
+        // Earth. The helper must reject Jupiter without even running the
+        // scan.
+        let start = jd_utc_from_iso_hours(2012, 6, 5, 21.0);
+        let end = jd_utc_from_iso_hours(2012, 6, 6, 5.0);
+        let observer = Observer::from_degrees(35.68, 139.69, 0.5 * (start + end));
+        assert!(find_planet_transit(observer, Planet::Jupiter, start, end).is_none());
+        assert!(find_planet_transit(observer, Planet::Mars, start, end).is_none());
+    }
+
+    #[test]
+    fn find_planet_transit_returns_none_off_transit_day() {
+        // 2025-07-01 Tokyo: neither Mercury nor Venus is at inferior
+        // conjunction, so the apparent-disk pair stays separated all day.
+        let start = jd_utc_from_iso_hours(2025, 7, 1, 0.0);
+        let end = jd_utc_from_iso_hours(2025, 7, 1, 24.0);
+        let observer = Observer::from_degrees(35.68, 139.69, 0.5 * (start + end));
+        assert!(find_planet_transit(observer, Planet::Mercury, start, end).is_none());
+        assert!(find_planet_transit(observer, Planet::Venus, start, end).is_none());
+    }
+
+    #[test]
+    fn find_planet_transit_finds_2012_venus_transit() {
+        // 2012-06-06 Venus transit. NASA canon: P1 ≈ 22:09 UT (2012-06-05),
+        // P2 ≈ 22:27 UT, greatest transit 01:29 UT (06-06), P3 ≈ 04:31 UT,
+        // P4 ≈ 04:49 UT. The whole event lasts ~6h 40m. Bracket a wide
+        // window so the contact-time refinement can lock onto all four
+        // contacts even if VSOP87 drifts a few minutes.
+        let start = jd_utc_from_iso_hours(2012, 6, 5, 21.0);
+        let end = jd_utc_from_iso_hours(2012, 6, 6, 6.0);
+        let mid = 0.5 * (start + end);
+        let observer = Observer::from_degrees(35.68, 139.69, mid);
+        let event = find_planet_transit(observer, Planet::Venus, start, end)
+            .expect("2012-06-06 Venus transit must be detected");
+        assert_eq!(event.planet, Planet::Venus);
+        assert!(
+            event.is_interior(),
+            "expected interior phase (P2/P3) for the 2012 Venus transit, got contacts {:?}",
+            event.contacts
+        );
+        // Venus apparent diameter ≈58″, Sun ≈1890″ at the 2012-06-06
+        // distances: peak obscuration ≈ (58/1890)² ≈ 9.4e-4. Well above
+        // any partial-crossing noise floor, and far below the ~1 %
+        // bar a partial solar eclipse would clear.
+        assert!(
+            (5.0e-4..2.0e-3).contains(&event.peak_obscuration),
+            "peak obscuration {} outside the Venus-transit area-ratio band",
+            event.peak_obscuration,
+        );
+        let p1 = event.contacts.p1.expect("P1 must exist");
+        let p4 = event.contacts.p4.expect("P4 must exist");
+        let duration_min = (p4 - p1) * 24.0 * 60.0;
+        assert!(
+            (5.0 * 60.0..8.0 * 60.0).contains(&duration_min),
+            "transit duration {duration_min:.1} min outside the 5-8 hr plausibility band",
+        );
+        assert!(p1 <= event.peak_jd_utc && event.peak_jd_utc <= p4);
+    }
+
+    #[test]
+    fn active_occluders_emit_planet_on_sun_at_venus_transit_peak() {
+        // V-51e producer contract: at the 2012-06-06 Venus transit peak,
+        // `active_occluders` must include exactly one Planet(Venus) ↔ Sun
+        // pair. The Moon-on-Stars cull entry is always present; the
+        // Moon-on-Sun pair is absent (no solar eclipse this date).
+        let start = jd_utc_from_iso_hours(2012, 6, 5, 21.0);
+        let end = jd_utc_from_iso_hours(2012, 6, 6, 6.0);
+        let observer = Observer::from_degrees(35.68, 139.69, 0.5 * (start + end));
+        let event = find_planet_transit(observer, Planet::Venus, start, end)
+            .expect("Venus transit peak must be detected");
+        let peak_observer = Observer::from_degrees(35.68, 139.69, event.peak_jd_utc);
+        let list = active_occluders(peak_observer);
+        let sun_occluders: Vec<_> = list
+            .as_slice()
+            .iter()
+            .filter(|o| o.target == OccluderTarget::Sun)
+            .collect();
+        assert_eq!(
+            sun_occluders.len(),
+            1,
+            "expected one Planet→Sun occluder at the Venus transit peak, got {sun_occluders:?}",
+        );
+        let occ = sun_occluders[0];
+        // Front disk must be Venus, not the Moon.
+        let venus = apparent_planet_topocentric(peak_observer, Planet::Venus);
+        assert!(
+            (occ.front_radius_rad - venus.angular_radius_rad).abs() < 1.0e-9,
+            "Planet→Sun front radius {} != Venus apparent radius {}",
+            occ.front_radius_rad,
+            venus.angular_radius_rad,
+        );
+        // Pure-geometry classifier returns AnnularOrTransit when the
+        // front disk is fully inside the back disk; the renderer reads
+        // this code to skip the Koomen falloff / corona that only the
+        // Moon-on-Sun pair triggers.
+        assert_eq!(occ.kind, OccultationKind::AnnularOrTransit);
+    }
+
+    #[test]
+    fn active_occluders_skip_planet_on_sun_at_superior_conjunction() {
+        // V-51e foreground gate: at superior conjunction the planet sits
+        // behind the Sun and the pure-geometry classifier would
+        // otherwise spuriously emit a "transit". The producer must skip
+        // when `planet.distance_au >= sun.distance_au`.
+        //
+        // 2024-06-14 ≈ Mercury superior conjunction. Mercury's apparent
+        // direction is within ~1° of the Sun's, but it is on the far side
+        // of its orbit (distance ≈1.34 AU vs Sun ≈1.015 AU).
+        let start = jd_utc_from_iso_hours(2024, 6, 14, 0.0);
+        let end = jd_utc_from_iso_hours(2024, 6, 14, 24.0);
+        let observer = Observer::from_degrees(35.68, 139.69, 0.5 * (start + end));
+        let list = active_occluders(observer);
+        assert!(
+            list.as_slice()
+                .iter()
+                .all(|o| o.target != OccluderTarget::Sun),
+            "no Sun-targeted occluder must be emitted at Mercury superior conjunction, got {:?}",
+            list.as_slice(),
         );
     }
 

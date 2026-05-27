@@ -366,6 +366,17 @@ preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md"]
 
 [[artifact]]
+id = "scene-preset-session-venus-transit"
+description = "Scene preset JSON: 2012-06-06 Venus transit from Tokyo (V-51e)."
+kind = "generated"
+path = "docs/presets/sessions/venus-transit.json"
+sha256 = "305fbd92abaeb8ddc3c01e6f4482d1b8fad8949a4f2f6d4953d813cdab6af9ca"
+bytes = 2004
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md"]
+
+[[artifact]]
 id = "scene-preset-session-all-sky-mollweide"
 description = "Scene preset JSON: all-sky Mollweide projection."
 kind = "generated"
@@ -587,6 +598,17 @@ kind = "generated"
 path = "docs/assets/validation/solar-eclipse.png"
 sha256 = "9b5c64c9dd491eeb8f887f0c149f71f178b5cd4c92cc04765f9b9d8ec3ba1cf5"
 bytes = 7467
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+
+[[artifact]]
+id = "validation-gallery-venus-transit"
+description = "Validation gallery PNG: 2012-06-06 Venus transit from Tokyo (V-51e)."
+kind = "generated"
+path = "docs/assets/validation/venus-transit.png"
+sha256 = "7a9df9ba9fbbad68d65dce7b6ed522572de634f92ea87a3cb04b0e06804814c8"
+bytes = 5289
 license = "see-upstream"
 preprocessing = "scripts/render-validation-gallery.sh"
 used_by = ["docs/validation-gallery.md"]

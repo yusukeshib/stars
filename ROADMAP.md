@@ -121,11 +121,11 @@ features (`V-45`–`V-50`), and rare phenomena (`V-47`–`V-49`).
 occultations, planetary rings and moons, resolved star clusters, double
 stars, artificial satellites, and object search / GoTo / info panel) —
 these surface existing engine capability that the current UI hides. The
-first four slices of `V-51` (common occultation primitives, the general
-N≤16 occluder uniform array, the solar-eclipse renderer path, and
-lunar occultation of stars and planets — `V-51a` + `V-51b` + `V-51c` +
-`V-51d`) have shipped; `V-51e`/`f` (planetary transit + mutual
-planetary occultation) are next.
+first five slices of `V-51` (common occultation primitives, the general
+N≤16 occluder uniform array, the solar-eclipse renderer path, lunar
+occultation of stars and planets, and Mercury / Venus transits of the
+Sun — `V-51a` + `V-51b` + `V-51c` + `V-51d` + `V-51e`) have shipped;
+`V-51f` (mutual planetary occultation) is next.
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
@@ -195,7 +195,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-48` | **Aurora display** | ⬜ |
 | `V-49` | **Comet rendering** | ⬜ |
 | `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ⬜ |
-| `V-51` | **Unified eclipse / occultation pass** (`a` + `b` + `c` + `d` done; `e`/`f` open) | ⏳ |
+| `V-51` | **Unified eclipse / occultation pass** (`a` + `b` + `c` + `d` + `e` done; `f` open) | ⏳ |
 | `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** | ⬜ |
 | `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** | ⬜ |
 | `V-54` | **Double / binary star resolution** | ⬜ |
@@ -1633,7 +1633,7 @@ management is a post-gamut matrix + transfer-function swap.
 
 ## Solar system geometry — eclipses and occultations
 
-### `V-51` Unified eclipse / occultation pass — ⏳ (`V-51a` + `V-51b` + `V-51c` + `V-51d` shipped)
+### `V-51` Unified eclipse / occultation pass — ⏳ (`V-51a` + `V-51b` + `V-51c` + `V-51d` + `V-51e` shipped)
 
 **Item.** Today only the lunar eclipse is modelled (`V-36`: Earth's umbra
 darkening the Moon). Every other foreground/background pair where one
@@ -1743,9 +1743,24 @@ benchmark scenes.
   V-51d render. Planning side: `find_lunar_occultation(observer,
   body, start, end)` with `LunarOccultedBody::{ Star { dir_date_eq },
   Planet(p) }` returns P1–P4 via the shared V-51a bisection refine.
-- **`V-51e` Mercury / Venus transit of the Sun (planet → Sun).** Planet
-  apparent disk drawn as a black sub-circle inside the Sun sprite via
-  the same subtract path; partial / interior contact times exposed.
+- **`V-51e` Mercury / Venus transit of the Sun (planet → Sun).**
+  ✅ Shipped. `astronomy::active_occluders` emits an
+  `OccluderTarget::Sun` entry backed by Mercury or Venus whenever the
+  inner planet is closer to the observer than the Sun *and* the
+  apparent disks are in contact — the foreground-gate guard rejects
+  the superior-conjunction near-alignment that would otherwise trip
+  the pure-geometry classifier. The V-51b analytic-mask shader path
+  iterates the new entry through the existing
+  `occluder_subtract_mask(OCCLUDER_TARGET_SUN, …)` loop, drawing the
+  planet's apparent disk as a black silhouette inside the solar
+  sprite; the Koomen 1952 daylight falloff and Baumbach 1937 corona
+  stay gated on `solar_eclipse_state` (Moon-on-Sun only) so a transit
+  leaves the daylight sky untouched. Planning side:
+  `find_planet_transit(observer, planet, start, end)` returns
+  `PlanetTransitEvent` with `PlanetTransitEvent::is_interior()` and
+  P1–P4 via the shared V-51a bisection refine. New `VenusTransit`
+  scene preset (2012-06-06, Tokyo, az ≈ 113°, alt ≈ 55°, 2° FoV)
+  frames the only transit in the validation canon until 2117.
 - **`V-51f` Mutual planetary occultation (planet → planet).** Same
   classify + mask path applied to the planet ↔ planet pairs. Rare in
   practice; validated only at known historical events (e.g. Venus
