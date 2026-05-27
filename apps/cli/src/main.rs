@@ -10,9 +10,10 @@ use renderer::{
 use stars_host_common::{
     atmosphere_from_args, eyepiece_from_args, hyg_catalog_snapshot, load_session,
     load_star_instances_from_file, overlay_config_from_args, parse_time_to_time_scales,
-    save_session, scene_from_preset, scene_preset_infos, viewpoint_from_args, AtmosphereOverrides,
-    AtmospherePresetArg, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides,
-    OverlayArg, ProjectionArg, ScenePresetArg, SessionScene, StarSession, ViewpointArg,
+    save_session, scene_from_preset, scene_preset_infos, scintillation_from_args,
+    viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg, CorrectionSnapshot,
+    ExternalViewpointOverrides, EyepieceOverrides, OverlayArg, ProjectionArg, ScenePresetArg,
+    ScintillationOverrides, SessionScene, StarSession, ViewpointArg,
 };
 
 /// Render the night sky as seen from a given observer to a PNG.
@@ -231,6 +232,23 @@ struct Args {
     /// Milky Way band is visible against the dark sky.
     #[arg(long)]
     no_skyglow: bool,
+
+    /// Disable atmospheric scintillation (V-24). With the default model on,
+    /// each star's RGB flux is modulated by a deterministic band-limited
+    /// noise whose variance scales as sec(z)³ and damps with observer
+    /// altitude (Young 1967 / Dravins 1997-98).
+    #[arg(long)]
+    no_scintillation: bool,
+
+    /// Override the dimensionless Cn² column scale. `1.0` reproduces the
+    /// Dravins 1997 amateur-site σ ≈ 4 % at the zenith for a 7 mm pupil at
+    /// sea level. Use < 1 for a calmer sky, > 1 for a more turbulent one.
+    #[arg(long)]
+    scintillation_scale: Option<f32>,
+
+    /// Override the scintillation noise seed for deterministic replays.
+    #[arg(long)]
+    scintillation_seed: Option<u32>,
 }
 
 fn main() -> Result<()> {
@@ -274,6 +292,13 @@ fn main() -> Result<()> {
                 surface_albedo: args.surface_albedo,
             },
         );
+        let scintillation = scintillation_from_args(
+            args.no_scintillation || args.no_extinction,
+            ScintillationOverrides {
+                c_n2_scale: args.scintillation_scale,
+                seed: args.scintillation_seed,
+            },
+        );
         let (viewpoint, external_viewpoint) = viewpoint_from_args(
             args.viewpoint,
             ExternalViewpointOverrides {
@@ -294,6 +319,7 @@ fn main() -> Result<()> {
             overlays,
             atmosphere_preset: args.atmosphere_preset.into(),
             atmosphere,
+            scintillation,
             planets_enabled: !args.no_planets,
             projection: args.projection.into(),
             viewpoint,
@@ -358,6 +384,7 @@ fn main() -> Result<()> {
         observer,
         scene.view,
         scene.atmosphere,
+        scene.scintillation,
         !args.no_skyglow,
         scene.planets_enabled,
         scene.projection,
@@ -405,6 +432,7 @@ async fn render_to_pixels(
     observer: Observer,
     view: LocalView,
     atmosphere: Atmosphere,
+    scintillation: renderer::Scintillation,
     skyglow_enabled: bool,
     planets_enabled: bool,
     projection: renderer::SkyProjection,
@@ -463,6 +491,7 @@ async fn render_to_pixels(
     renderer.set_skyglow_enabled(skyglow_enabled);
     let mut camera = Camera::new(observer, view, width as f32 / height as f32);
     camera.atmosphere = atmosphere;
+    camera.scintillation = scintillation;
     camera.planets_enabled = planets_enabled;
     camera.projection = projection;
     camera.viewpoint = viewpoint;

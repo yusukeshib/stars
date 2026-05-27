@@ -14,6 +14,7 @@ pub mod illuminants;
 mod observer;
 pub mod photometry;
 mod planning;
+pub mod scintillation;
 pub mod skyglow;
 mod time;
 

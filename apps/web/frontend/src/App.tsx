@@ -6,6 +6,7 @@ import {
   clampFov,
   wrapAzimuth,
   DEFAULT_ATMOSPHERE_CONFIG,
+  DEFAULT_SCINTILLATION_CONFIG,
   DEFAULT_EYEPIECE_CONFIG,
   DEFAULT_OVERLAY_CONFIG,
   DEFAULT_PLANETS_CONFIG,
@@ -17,6 +18,7 @@ import {
   isSkyProjection,
   isSkyViewpoint,
   type AtmosphereConfig,
+  type ScintillationConfig,
   type EyepieceConfig,
   type ExternalViewpointConfig,
   type Observer,
@@ -306,6 +308,9 @@ export function App() {
   const [atmosphere, setAtmosphere] = useState<AtmosphereConfig>(
     URL_ATMOSPHERE ?? PERSISTED?.atmosphere ?? DEFAULT_ATMOSPHERE_CONFIG,
   );
+  const [scintillation, setScintillation] = useState<ScintillationConfig>(
+    URL_SESSION?.scintillation ?? PERSISTED?.scintillation ?? DEFAULT_SCINTILLATION_CONFIG,
+  );
   const [planets, setPlanets] = useState<PlanetsConfig>(
     URL_SESSION?.planets ?? PERSISTED?.planets ?? DEFAULT_PLANETS_CONFIG,
   );
@@ -326,9 +331,12 @@ export function App() {
   // times a second. Time is intentionally not persisted: a stale timestamp on
   // next load would silently mislead the user.
   useEffect(() => {
-    const handle = setTimeout(() => saveConfig({ observer, view, overlays, atmosphere, planets, projection, eyepiece }), 250);
+    const handle = setTimeout(
+      () => saveConfig({ observer, view, overlays, atmosphere, scintillation, planets, projection, eyepiece }),
+      250,
+    );
     return () => clearTimeout(handle);
-  }, [observer, view, overlays, atmosphere, planets, projection, eyepiece]);
+  }, [observer, view, overlays, atmosphere, scintillation, planets, projection, eyepiece]);
 
   // Mirror the current session into the address bar so the user can copy the
   // URL at any time without going through the explicit "Copy URL" action.
@@ -346,7 +354,7 @@ export function App() {
     }, 250);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- timeMs deliberately excluded; see comment above.
-  }, [observer, view, overlays, atmosphere, planets, projection, eyepiece]);
+  }, [observer, view, overlays, atmosphere, scintillation, planets, projection, eyepiece]);
 
   // Clock always ticks. When the user picks a custom moment via the quick time
   // popup we simply rebase `timeMs`; the same loop keeps advancing from there.
@@ -368,6 +376,7 @@ export function App() {
     view,
     overlays,
     atmosphere,
+    scintillation,
     planets,
     projection,
     eyepiece,
@@ -379,6 +388,7 @@ export function App() {
     setView(session.view);
     setOverlays(normalizeWebOverlays(session.overlays));
     setAtmosphere(session.atmosphere);
+    setScintillation(session.scintillation);
     setPlanets(session.planets);
     setProjection(session.projection);
     setEyepiece(session.eyepiece);
@@ -404,6 +414,7 @@ export function App() {
         timeMs={timeMs}
         overlays={overlays}
         atmosphere={atmosphere}
+        scintillation={scintillation}
         planets={planets}
         projection={projection}
         eyepiece={eyepiece}

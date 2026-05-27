@@ -12,7 +12,7 @@ mod vertex;
 
 pub use camera::{
     Atmosphere, AtmospherePreset, Camera, ExternalViewpoint, EyepieceSimulation, LocalView,
-    SkyProjection, SkyViewpoint,
+    Scintillation, SkyProjection, SkyViewpoint,
 };
 pub use overlay::{OverlayConfig, OverlayKind, DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT};
 pub use renderer::Renderer;

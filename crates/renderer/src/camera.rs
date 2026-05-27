@@ -246,6 +246,14 @@ pub(crate) struct CameraUniform {
     /// Per-channel Hošek-Wilkie master radiance scales as `(R, G, B, _)`.
     /// Unused when `atmosphere_params.w != 1.0`.
     pub hw_radiance: [f32; 4],
+    /// V-24 scintillation state: `[sigma_sq_zenith, corner_hz_zenith,
+    /// seed_as_f32, time_seconds_mod_day]`. `sigma_sq_zenith == 0` disables
+    /// the per-star modulation in the shader. `seed_as_f32` is a `bitcast`
+    /// of the host-side `u32` seed; the shader recovers it with the same
+    /// `bitcast<u32>` so the noise field is deterministic across hosts.
+    /// `time_seconds_mod_day` is `fract(jd_ut1) * 86400`, so two renders of
+    /// the same session at the same simulated UT1 produce identical pixels.
+    pub scintillation_params: [f32; 4],
 }
 
 pub(crate) const HW_COEFFS_PER_CHANNEL: usize = 9;
@@ -442,6 +450,52 @@ impl Atmosphere {
 }
 
 impl Default for Atmosphere {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// Per-frame atmospheric scintillation state (V-24).
+///
+/// The renderer reads this together with [`Atmosphere::observer_altitude_m`]
+/// to derive a per-star intensity variance + temporal corner frequency, then
+/// modulates the star shader's RGB output by a deterministic band-limited
+/// noise field driven by `Observer::time.jd_ut1` so that the same JSON
+/// session re-renders bit-for-bit identical pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Scintillation {
+    /// Master enable. `false` matches a host that wants stars to render as
+    /// constant point sources (debugging, external galactic viewpoint).
+    pub enabled: bool,
+    /// Dimensionless Cn² column scale. `1.0` reproduces the Dravins 1997
+    /// amateur-site σ ≈ 4 % at the zenith for a 7 mm pupil at sea level;
+    /// see [`astronomy::scintillation`] for the calibration.
+    pub c_n2_scale: f32,
+    /// Noise seed. Part of the session schema so two renders of the same
+    /// session are bit-identical. `0` is allowed; the shader xors with a
+    /// fixed constant before hashing.
+    pub seed: u32,
+}
+
+impl Scintillation {
+    /// Default: enabled, calibrated against the amateur-site median.
+    pub const DEFAULT: Self = Self {
+        enabled: true,
+        c_n2_scale: astronomy::scintillation::DEFAULT_CN2_SCALE as f32,
+        seed: 0x5C_15_71_07,
+    };
+
+    /// Zero σ², used for the external galactic viewpoint and for hosts that
+    /// want every frame to be bit-deterministic without the time-varying
+    /// modulation.
+    pub const OFF: Self = Self {
+        enabled: false,
+        c_n2_scale: 0.0,
+        seed: 0,
+    };
+}
+
+impl Default for Scintillation {
     fn default() -> Self {
         Self::DEFAULT
     }
@@ -748,6 +802,9 @@ pub struct Camera {
     /// perspective view, its true field of view overrides [`LocalView::fov_y_rad`]
     /// while keeping the same azimuth/altitude pointing.
     pub eyepiece: EyepieceSimulation,
+    /// Atmospheric scintillation (V-24). Disabled automatically when the
+    /// renderer is rendering an external galactic viewpoint.
+    pub scintillation: Scintillation,
     /// Faintest magnitude the simulated observer should be able to detect.
     /// Anchors the linear-flux brightness scale used by both the star pass
     /// and the skyglow surface-brightness pass; see
@@ -770,6 +827,7 @@ impl Camera {
             external_viewpoint: ExternalViewpoint::default(),
             planets_enabled: true,
             eyepiece: EyepieceSimulation::default(),
+            scintillation: Scintillation::default(),
             limiting_magnitude: NAKED_EYE_LIMITING_MAGNITUDE,
         }
     }
@@ -1214,6 +1272,43 @@ impl Camera {
         let eq_to_local = self.equatorial_to_horizontal();
         let view_proj_local = self.shader_view_proj_local();
         let earth_velocity = earth_velocity_over_c_j2000(self.observer.time.jd_tdb);
+        // V-24 scintillation: derive zenith σ² + corner from astronomy,
+        // disable for the external galactic viewpoint, and drive the noise
+        // phase from `Observer.time.jd_ut1` so re-renders of the same
+        // session are bit-identical. The shader divides this by airmass
+        // per-star to get the altitude-dependent σ².
+        let scintillation_params = if self.scintillation.enabled
+            && self.atmosphere.sunlit_scattering
+            && !self.viewpoint.is_external()
+            && self.scintillation.c_n2_scale.is_finite()
+            && self.scintillation.c_n2_scale > 0.0
+        {
+            let (sigma_sq_zenith, corner_hz) = astronomy::scintillation::intensity_variance(
+                std::f64::consts::FRAC_PI_2,
+                observer_altitude_m as f64,
+                astronomy::scintillation::DEFAULT_PUPIL_MM,
+                self.scintillation.c_n2_scale as f64,
+            );
+            // Wrap to a UT1 day so the f32 phase keeps sub-frame precision
+            // (86400 s ≈ 17 bits of mantissa, leaving ~7 bits for sub-second
+            // resolution — plenty for a ~25 Hz noise field).
+            let day_fraction = self.observer.time.jd_ut1.rem_euclid(1.0);
+            let t_seconds = (day_fraction * 86_400.0) as f32;
+            let seed_bits = self.scintillation.seed;
+            [
+                sigma_sq_zenith as f32,
+                corner_hz as f32,
+                f32::from_bits(seed_bits),
+                t_seconds,
+            ]
+        } else {
+            [
+                0.0,
+                astronomy::scintillation::CORNER_HZ_ZENITH as f32,
+                0.0,
+                0.0,
+            ]
+        };
         CameraUniform {
             view_proj: view_proj.to_cols_array_2d(),
             inv_view_proj: inv_view_proj.to_cols_array_2d(),
@@ -1268,6 +1363,7 @@ impl Camera {
             planet_params: planet_uniforms.params,
             hw_coeffs,
             hw_radiance,
+            scintillation_params,
         }
     }
 
@@ -1495,6 +1591,49 @@ mod tests {
             uniform.refraction_params[1],
             Atmosphere::DEFAULT.temperature_c
         );
+    }
+
+    /// V-24: scintillation uniform must be deterministic across hosts for a
+    /// pinned (observer, time, seed) tuple, and must zero itself when the
+    /// camera is on an external galactic viewpoint or has scintillation off.
+    #[test]
+    fn scintillation_uniform_is_deterministic_and_gated() {
+        let mut cam = Camera::new(observer_at(35.68), LocalView::default(), 1.0);
+        cam.scintillation = Scintillation {
+            enabled: true,
+            c_n2_scale: 1.0,
+            seed: 0xDEAD_BEEF,
+        };
+        let a = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
+        let b = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
+        assert_eq!(
+            a.scintillation_params, b.scintillation_params,
+            "same (observer, time, seed) must produce identical scintillation params"
+        );
+        assert!(a.scintillation_params[0] > 0.0, "σ²_zenith must be positive when enabled");
+        assert!(a.scintillation_params[1] > 0.0, "corner_hz must be positive when enabled");
+        // Seed round-trip: shader recovers the host's u32 via bitcast.
+        assert_eq!(a.scintillation_params[2].to_bits(), 0xDEAD_BEEF);
+        // t_seconds is in the wrapped [0, 86400) window so f32 keeps subsecond precision.
+        assert!(a.scintillation_params[3] >= 0.0 && a.scintillation_params[3] < 86_400.0);
+
+        // External galactic viewpoint must zero σ² so off-Earth scenes stay
+        // deterministic and free of inadvertent stellar twinkle.
+        cam.viewpoint = SkyViewpoint::GalacticNorth;
+        let external = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
+        assert_eq!(external.scintillation_params[0], 0.0);
+
+        // Atmosphere::OFF must also disable scintillation.
+        cam.viewpoint = SkyViewpoint::Earth;
+        cam.atmosphere = Atmosphere::OFF;
+        let no_atmosphere = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
+        assert_eq!(no_atmosphere.scintillation_params[0], 0.0);
+
+        // Explicit disable.
+        cam.atmosphere = Atmosphere::DEFAULT;
+        cam.scintillation = Scintillation::OFF;
+        let off = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
+        assert_eq!(off.scintillation_params[0], 0.0);
     }
 
     #[test]

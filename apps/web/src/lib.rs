@@ -8,8 +8,8 @@ use astronomy::{
 use catalog::load_embedded;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, ExternalViewpoint,
-    EyepieceSimulation, LocalView, OverlayConfig, OverlayKind, Renderer, SkyProjection,
-    SkyViewpoint, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    EyepieceSimulation, LocalView, OverlayConfig, OverlayKind, Renderer, Scintillation,
+    SkyProjection, SkyViewpoint, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -415,6 +415,22 @@ impl StarView {
             atmosphere
         } else {
             Atmosphere::OFF
+        };
+    }
+
+    /// Update V-24 scintillation controls. `enabled=false` matches the
+    /// native `--no-scintillation` flag and disables the per-star
+    /// time-varying flux modulation entirely; the seed travels in the
+    /// session schema so deterministic re-renders share noise.
+    pub fn set_scintillation(&self, enabled: bool, c_n2_scale: f32, seed: u32) {
+        self.state.borrow_mut().camera.scintillation = if enabled {
+            Scintillation {
+                enabled: true,
+                c_n2_scale,
+                seed,
+            }
+        } else {
+            Scintillation::OFF
         };
     }
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { StarView } from "stars-web";
-import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type EyepieceConfig, type Observer, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type View } from "../observer";
+import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type EyepieceConfig, type Observer, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type ScintillationConfig, type View } from "../observer";
 
 type Props = {
   observer: Observer;
@@ -9,6 +9,7 @@ type Props = {
   timeMs: number;
   overlays: OverlayConfig;
   atmosphere: AtmosphereConfig;
+  scintillation: ScintillationConfig;
   planets: PlanetsConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
@@ -36,6 +37,7 @@ export function StarCanvas({
   timeMs,
   overlays,
   atmosphere,
+  scintillation,
   planets,
   projection,
   eyepiece,
@@ -57,6 +59,7 @@ export function StarCanvas({
   const timeRef = useRef(timeMs);
   const overlaysRef = useRef(overlays);
   const atmosphereRef = useRef(atmosphere);
+  const scintillationRef = useRef(scintillation);
   const planetsRef = useRef(planets);
   const projectionRef = useRef(projection);
   const eyepieceRef = useRef(eyepiece);
@@ -65,6 +68,7 @@ export function StarCanvas({
   timeRef.current = timeMs;
   overlaysRef.current = overlays;
   atmosphereRef.current = atmosphere;
+  scintillationRef.current = scintillation;
   planetsRef.current = planets;
   projectionRef.current = projection;
   eyepieceRef.current = eyepiece;
@@ -131,6 +135,14 @@ export function StarCanvas({
     );
   }, [atmosphere]);
 
+  useEffect(() => {
+    handleRef.current?.set_scintillation(
+      scintillation.enabled,
+      scintillation.cN2Scale,
+      scintillation.seed,
+    );
+  }, [scintillation]);
+
   // Boot wasm + start the render loop. Only ever runs once.
   useEffect(() => {
     let cancelled = false;
@@ -158,6 +170,8 @@ export function StarCanvas({
         at.temperatureC,
         at.surfaceAlbedo,
       );
+      const sc = scintillationRef.current;
+      handle.set_scintillation(sc.enabled, sc.cN2Scale, sc.seed);
       handle.set_planets_enabled(planetsRef.current.enabled);
       const ep = eyepieceRef.current;
       handle.set_eyepiece_simulation(

@@ -13,7 +13,7 @@ use anyhow::{bail, Context, Result};
 use astronomy::TimeScales;
 use renderer::{
     Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation, LocalView, OverlayConfig,
-    OverlayKind, SkyProjection, SkyViewpoint,
+    OverlayKind, Scintillation, SkyProjection, SkyViewpoint,
 };
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +21,7 @@ use crate::{AtmospherePresetArg, OverlayArg, ProjectionArg, ViewpointArg};
 
 /// Current JSON session schema. Increment when a breaking semantic change is
 /// made to any serialized field.
-pub const SESSION_SCHEMA_VERSION: u32 = 3;
+pub const SESSION_SCHEMA_VERSION: u32 = 4;
 
 /// Complete scene/session file. Unknown future fields are ignored by serde, but
 /// the top-level schema version must match before a host uses the data.
@@ -37,6 +37,7 @@ pub struct StarSession {
     pub overlays: SessionOverlays,
     pub projection: SessionProjection,
     pub atmosphere: SessionAtmosphere,
+    pub scintillation: SessionScintillation,
     pub planets: SessionPlanets,
     pub eyepiece: SessionEyepiece,
     pub catalog: CatalogSnapshot,
@@ -53,6 +54,7 @@ pub struct SessionScene {
     pub overlays: OverlayConfig,
     pub atmosphere_preset: AtmospherePreset,
     pub atmosphere: Atmosphere,
+    pub scintillation: Scintillation,
     pub planets_enabled: bool,
     pub projection: SkyProjection,
     pub viewpoint: SkyViewpoint,
@@ -142,6 +144,18 @@ pub struct SessionAtmosphere {
     pub temperature_c: f32,
     /// Ground albedo seen by the V-38 Hošek-Wilkie daylight model.
     pub surface_albedo: f32,
+}
+
+/// Per-frame atmospheric scintillation state (V-24).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionScintillation {
+    pub enabled: bool,
+    /// Dimensionless Cn² column scale; see `astronomy::scintillation`.
+    pub c_n2_scale: f32,
+    /// Deterministic noise seed. Two sessions with the same seed and the
+    /// same simulated UT1 produce bit-identical pixels.
+    pub seed: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -248,6 +262,7 @@ impl StarSession {
                 external: SessionExternalViewpoint::from(scene.external_viewpoint),
             },
             atmosphere: SessionAtmosphere::from_parts(scene.atmosphere_preset, scene.atmosphere),
+            scintillation: SessionScintillation::from(scene.scintillation),
             planets: SessionPlanets {
                 enabled: scene.planets_enabled,
             },
@@ -329,6 +344,7 @@ impl StarSession {
             },
             atmosphere_preset,
             atmosphere: self.atmosphere.to_atmosphere()?,
+            scintillation: self.scintillation.to_scintillation()?,
             planets_enabled: self.planets.enabled,
             projection: self.projection.projection.into(),
             viewpoint: self.projection.viewpoint.into(),
@@ -415,6 +431,28 @@ impl SessionAtmosphere {
             "atmosphere.surfaceAlbedo",
         )? as f32;
         Ok(atmosphere)
+    }
+}
+
+impl From<Scintillation> for SessionScintillation {
+    fn from(s: Scintillation) -> Self {
+        Self {
+            enabled: s.enabled,
+            c_n2_scale: s.c_n2_scale,
+            seed: s.seed,
+        }
+    }
+}
+
+impl SessionScintillation {
+    pub fn to_scintillation(self) -> Result<Scintillation> {
+        let c_n2_scale =
+            finite_in_range(self.c_n2_scale as f64, 0.0, 10.0, "scintillation.cN2Scale")? as f32;
+        Ok(Scintillation {
+            enabled: self.enabled,
+            c_n2_scale,
+            seed: self.seed,
+        })
     }
 }
 
@@ -664,6 +702,7 @@ mod tests {
             },
             atmosphere_preset: AtmospherePreset::ClearRural,
             atmosphere: Atmosphere::CLEAR_RURAL,
+            scintillation: Scintillation::default(),
             planets_enabled: true,
             projection: SkyProjection::Perspective,
             viewpoint: SkyViewpoint::Earth,
@@ -679,8 +718,9 @@ mod tests {
         let scene = sample_scene();
         let session = StarSession::from_scene("0.1.0", "test", &scene);
         let json = serde_json::to_string(&session).unwrap();
-        assert!(json.contains("\"schemaVersion\":3"));
+        assert!(json.contains("\"schemaVersion\":4"));
         assert!(json.contains("\"cardinal-labels\""));
+        assert!(json.contains("\"scintillation\""));
         let parsed: StarSession = serde_json::from_str(&json).unwrap();
         let restored = parsed.to_scene().unwrap();
         assert_eq!(restored.latitude_deg, scene.latitude_deg);
@@ -690,6 +730,7 @@ mod tests {
         assert_eq!(restored.projection, scene.projection);
         assert_eq!(restored.viewpoint, scene.viewpoint);
         assert_eq!(restored.eyepiece, scene.eyepiece);
+        assert_eq!(restored.scintillation, scene.scintillation);
     }
 
     #[test]

@@ -77,6 +77,21 @@ export type PlanetsConfig = {
   enabled: boolean;
 };
 
+/** Per-frame atmospheric scintillation state (V-24). */
+export type ScintillationConfig = {
+  enabled: boolean;
+  /** Dimensionless Cn² column scale (1.0 = Dravins amateur-site median). */
+  cN2Scale: number;
+  /** Deterministic noise seed; part of the session schema. */
+  seed: number;
+};
+
+export const DEFAULT_SCINTILLATION_CONFIG: ScintillationConfig = {
+  enabled: true,
+  cN2Scale: 1.0,
+  seed: 0x5C157107,
+};
+
 export type EyepieceConfig = {
   enabled: boolean;
   apertureMm: number;

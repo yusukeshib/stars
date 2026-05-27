@@ -67,6 +67,10 @@ struct CameraUniform {
     // Per-channel HW master radiance scales (R, G, B, _). Same lifecycle as
     // hw_coeffs.
     hw_radiance: vec4<f32>,
+    // V-24 scintillation tail (sigma_sq_zenith, corner_hz, seed, time_s).
+    // The skyglow pass does not consume it; declared only to keep the WGSL
+    // view of CameraUniform aligned with the host struct.
+    scintillation_params: vec4<f32>,
 };
 
 @group(0) @binding(0)
