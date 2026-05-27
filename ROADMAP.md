@@ -1711,9 +1711,10 @@ benchmark scenes.
   contract. `shaders/skyglow.wgsl::occluder_subtract_mask(ray_dir,
   target_code, pixel_sr)` is the shared union-of-disks helper consumed
   by both the Sun and Moon disk source terms. No depth / stencil
-  attachments added. The dormant CPU star-sprite cull tracked by
+  attachments added. The star-sprite cull tracked by
   [`OccluderTarget::Stars`](crates/astronomy/src/occultation.rs)
-  ships with `V-51d` when its producer wires up.
+  is now wired (V-51d) and consumed by the star vertex shader (one
+  normalised dot + one `cos(radius)` compare per active occluder).
 - **`V-51c` Solar eclipse (Moon → Sun).** ✅ Shipped. Wires V-51a to
   the Sun ↔ Moon pair via `solar_eclipse_state(observer)` and the
   GPU `CameraUniform::solar_eclipse_state` quad-vector

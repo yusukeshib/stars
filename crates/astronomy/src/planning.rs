@@ -8,6 +8,7 @@ use crate::{
     apparent_moon_topocentric, apparent_planet_topocentric, apparent_sun_topocentric,
     equatorial_to_horizontal, lmst_radians, Observer, Planet, TimeScales, SECONDS_PER_DAY,
 };
+use glam::Vec3;
 
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 const SEARCH_STEP_DAYS: f64 = 10.0 / (24.0 * 60.0); // 10 minutes
@@ -435,13 +436,22 @@ pub fn solar_eclipse_state(observer: Observer) -> SolarEclipseState {
 /// (apparent disks currently in contact); off-eclipse observers get an
 /// empty list and the shader short-circuits on `count == 0`.
 ///
-/// V-51b populates a single producer: the Moon-occults-Sun pair (the
-/// same geometry that drives [`solar_eclipse_state`]). Subsequent items
-/// extend the list:
+/// Wired producers (one [`Occluder`] per active pair):
 ///
-/// * `V-51d` — lunar occultations of stars / planets
-///   ([`OccluderTarget::Stars`] + [`OccluderTarget::Planet`] backed by
-///   the Moon).
+/// * **V-51c** — Moon-occults-Sun ([`OccluderTarget::Sun`], same
+///   geometry as [`solar_eclipse_state`]), emitted only when the
+///   Moon-Sun pair is in contact so off-eclipse frames stay empty.
+/// * **V-51d** — Moon-occults-stars
+///   ([`OccluderTarget::Stars`], emitted *unconditionally* so the
+///   star vertex shader can cull catalog sprites behind the lunar
+///   disk every frame; the analytic [`disk_mask`](`crate::occultation`)
+///   leaves frames far from any occultation bit-identical).
+/// * **V-51d** — Moon-occults-planet
+///   ([`OccluderTarget::Planet`] backed by the Moon), emitted only
+///   when the Moon-planet pair is in contact.
+///
+/// Open producers (TODO):
+///
 /// * `V-51e` — Mercury / Venus transits across the Sun
 ///   ([`OccluderTarget::Sun`] backed by a planet disk).
 /// * `V-51f` — mutual planetary occultation
@@ -458,20 +468,171 @@ pub fn active_occluders(observer: Observer) -> ActiveOccluders {
     let moon = apparent_moon_topocentric(observer);
     let sun_disk = ApparentDisk::new(sun.direction_equatorial(), sun.angular_radius_rad);
     let moon_disk = ApparentDisk::new(moon.direction_equatorial(), moon.angular_radius_rad);
-    let kind = classify_disks(moon_disk, sun_disk);
-    if !matches!(kind, OccultationKind::None) {
+    let moon_dir = moon.direction_equatorial();
+    let moon_front_dir = [moon_dir.x as f64, moon_dir.y as f64, moon_dir.z as f64];
+    let moon_sun_kind = classify_disks(moon_disk, sun_disk);
+    if !matches!(moon_sun_kind, OccultationKind::None) {
         let obscuration = obscuration_fraction(moon_disk, sun_disk) as f64;
-        let moon_dir = moon.direction_equatorial();
         let _ = out.push(Occluder {
-            front_dir_eq: [moon_dir.x as f64, moon_dir.y as f64, moon_dir.z as f64],
+            front_dir_eq: moon_front_dir,
             front_radius_rad: moon.angular_radius_rad,
             target: OccluderTarget::Sun,
+            kind: moon_sun_kind,
+            obscuration,
+        });
+    }
+
+    // V-51d Moon-on-Stars: emit unconditionally. The shader's analytic
+    // disk-mask is the actual gate — catalog stars whose direction does
+    // not fall inside the Moon's apparent disk are unaffected, so frames
+    // far from any lunar occultation stay bit-identical to the pre-V-51d
+    // render. Emitting one entry every frame costs the star vertex
+    // shader a single dot-product per active occluder; well under the
+    // V-51 "no measurable fps regression" contract.
+    let _ = out.push(Occluder {
+        front_dir_eq: moon_front_dir,
+        front_radius_rad: moon.angular_radius_rad,
+        target: OccluderTarget::Stars,
+        // The `kind` and `obscuration` fields are read by Sun-specific
+        // photometric paths only; for the star cull they are inert. We
+        // use `AnnularOrTransit` as a stable sentinel meaning "point
+        // sources fully inside are hidden".
+        kind: OccultationKind::AnnularOrTransit,
+        obscuration: 0.0,
+    });
+
+    // V-51d Moon-on-Planet: classify each Moon ↔ planet pair, push only
+    // the active ones so the analytic-mask path stays at zero cost
+    // off-event. Indices follow `Planet::ALL`, which is also the order
+    // the renderer packs into `planet_eq_radius[i]`, so the shader's
+    // `OCCLUDER_TARGET_PLANET_BASE + i` lookup matches.
+    for (i, &planet) in Planet::ALL.iter().enumerate() {
+        let p = apparent_planet_topocentric(observer, planet);
+        let p_disk = ApparentDisk::new(p.direction_equatorial(), p.angular_radius_rad);
+        let kind = classify_disks(moon_disk, p_disk);
+        if matches!(kind, OccultationKind::None) {
+            continue;
+        }
+        let obscuration = obscuration_fraction(moon_disk, p_disk) as f64;
+        let _ = out.push(Occluder {
+            front_dir_eq: moon_front_dir,
+            front_radius_rad: moon.angular_radius_rad,
+            target: OccluderTarget::Planet(i as u8),
             kind,
             obscuration,
         });
     }
 
     out
+}
+
+/// Body the Moon may occult (V-51d).
+///
+/// Stars are point sources; the caller passes the apparent direction
+/// already mapped into the *equatorial-of-date* frame used by
+/// [`apparent_moon_topocentric`] (proper motion, annual aberration, and
+/// precession baked in). The direction is treated as fixed across the
+/// contact window: a star moves by < 0.01″ over the 1–2 hr event while
+/// the Moon sweeps ~5°, so star sidereal motion is negligible at the
+/// IOTA contact-time validation contract (5 s).
+#[derive(Debug, Clone, Copy)]
+pub enum LunarOccultedBody {
+    Star { dir_date_eq: Vec3 },
+    Planet(Planet),
+}
+
+/// One lunar occultation event located inside a planning window.
+#[derive(Debug, Clone, Copy)]
+pub struct LunarOccultationEvent {
+    /// Deepest geometry reached inside the window (peak phase).
+    pub kind: OccultationKind,
+    /// Minimum Moon-body angular separation in radians inside the
+    /// window. Equivalent to the back-disk-centre closest approach.
+    pub min_separation_rad: f64,
+    /// Julian Date (UTC) of minimum separation.
+    pub peak_jd_utc: f64,
+    /// Canonical P1..P4 contact times (UTC Julian Dates). For point
+    /// sources P1 ≈ P2 and P3 ≈ P4 because external and internal
+    /// contact coincide (the back disk has zero radius); the helper
+    /// fills both so the same `ContactTimes` shape covers stars,
+    /// planets, and solar eclipses uniformly.
+    pub contacts: ContactTimes,
+}
+
+impl LunarOccultationEvent {
+    pub fn is_central(&self) -> bool {
+        matches!(
+            self.kind,
+            OccultationKind::AnnularOrTransit | OccultationKind::Total
+        )
+    }
+}
+
+/// Search `[start_jd_utc, end_jd_utc]` for a lunar occultation of
+/// `body` visible from `observer` (V-51d).
+///
+/// Returns `None` when the Moon-body apparent separation stays above
+/// `r_moon + r_back` across the entire window. The Moon's apparent
+/// motion is ~0.5°/hour, so the helper drives the search with a
+/// 1-minute scan followed by [`contact_times`] bisection refinement
+/// — sub-second precision against the 5 s contract pinned in
+/// `VALIDATION.md` for IOTA-published lunar occultations.
+///
+/// Like [`find_solar_eclipse`], this is meant to be called once per
+/// known event date with a ±12 h bracket. It does not try to enumerate
+/// every occultation in a long window.
+pub fn find_lunar_occultation(
+    observer: Observer,
+    body: LunarOccultedBody,
+    start_jd_utc: f64,
+    end_jd_utc: f64,
+) -> Option<LunarOccultationEvent> {
+    if !(start_jd_utc.is_finite() && end_jd_utc.is_finite()) || end_jd_utc <= start_jd_utc {
+        return None;
+    }
+    let disks = |jd: f64| -> (ApparentDisk, ApparentDisk) {
+        let obs = observer_at(observer, jd);
+        let moon = apparent_moon_topocentric(obs);
+        let front = ApparentDisk::new(moon.direction_equatorial(), moon.angular_radius_rad);
+        let back = match body {
+            LunarOccultedBody::Star { dir_date_eq } => ApparentDisk::new(dir_date_eq, 0.0),
+            LunarOccultedBody::Planet(planet) => {
+                let p = apparent_planet_topocentric(obs, planet);
+                ApparentDisk::new(p.direction_equatorial(), p.angular_radius_rad)
+            }
+        };
+        (front, back)
+    };
+    // 1-minute scan: lunar occultations have sharp ingress / egress
+    // (≲ 1 s for a star, ~30 s for a planet). 1 minute is dense enough
+    // to bracket both phases without missing a brief planet event
+    // (the Moon's apparent diameter is ~31′, traversed in ~1 hr).
+    let scan_step = 1.0 / (24.0 * 60.0);
+    let mut peak_jd = start_jd_utc;
+    let mut min_sep = f64::INFINITY;
+    let mut peak_kind = OccultationKind::None;
+    let mut t = start_jd_utc;
+    while t <= end_jd_utc + 1e-12 {
+        let t_clamped = t.min(end_jd_utc);
+        let (f, b) = disks(t_clamped);
+        let sep = f.separation_rad(b);
+        if sep.is_finite() && sep < min_sep {
+            min_sep = sep;
+            peak_jd = t_clamped;
+            peak_kind = classify_disks(f, b);
+        }
+        t += scan_step;
+    }
+    if matches!(peak_kind, OccultationKind::None) {
+        return None;
+    }
+    let contacts = contact_times(start_jd_utc, end_jd_utc, disks);
+    Some(LunarOccultationEvent {
+        kind: peak_kind,
+        min_separation_rad: min_sep,
+        peak_jd_utc: peak_jd,
+        contacts,
+    })
 }
 
 /// One solar-eclipse event located inside a planning window.
@@ -672,17 +833,32 @@ mod tests {
     }
 
     #[test]
-    fn active_occluders_is_empty_off_eclipse() {
-        // Same observer + epoch as the non-eclipse test below.
+    fn active_occluders_off_eclipse_emits_only_moon_on_stars() {
+        // V-51d: the Moon-on-Stars cull entry is always present so the
+        // star vertex shader can hide catalog sprites behind the lunar
+        // disk every frame. Off any solar / planet event the list
+        // therefore contains exactly that one entry (with the lunar
+        // apparent disk as the front).
         let start = jd_utc_from_iso_hours(2025, 7, 1, 0.0);
         let end = jd_utc_from_iso_hours(2025, 7, 1, 24.0);
         let observer = Observer::from_degrees(35.68, 139.69, 0.5 * (start + end));
         let list = active_occluders(observer);
-        assert!(
-            list.is_empty(),
-            "expected no occluders off-eclipse, got {} (first kind = {:?})",
+        assert_eq!(
             list.len(),
-            list.as_slice().first().map(|o| o.kind)
+            1,
+            "expected only the Moon-on-Stars cull entry off-eclipse, got {}",
+            list.len()
+        );
+        let occ = list.as_slice()[0];
+        assert_eq!(occ.target, OccluderTarget::Stars);
+        // Front disk must be the Moon: radius matches the ELP2000
+        // topocentric apparent semidiameter (~0.25°).
+        let moon = apparent_moon_topocentric(observer);
+        assert!(
+            (occ.front_radius_rad - moon.angular_radius_rad).abs() < 1.0e-9,
+            "Moon-on-Stars front radius {} != Moon apparent radius {}",
+            occ.front_radius_rad,
+            moon.angular_radius_rad,
         );
     }
 
@@ -705,9 +881,13 @@ mod tests {
         let state = solar_eclipse_state(peak_observer);
         let list = active_occluders(peak_observer);
 
-        assert_eq!(list.len(), 1, "only one Moon-on-Sun occluder is expected");
-        let occ = list.as_slice()[0];
-        assert_eq!(occ.target, OccluderTarget::Sun);
+        // V-51c Moon-on-Sun + V-51d Moon-on-Stars cull entry are both
+        // emitted; the Sun pair is the one this test asserts against.
+        let occ = *list
+            .as_slice()
+            .iter()
+            .find(|o| o.target == OccluderTarget::Sun)
+            .expect("Moon-on-Sun occluder must be present at the Mazatl\u{00e1}n peak");
         // Both producers must classify the deepest geometry the same way.
         // `solar_eclipse_state` collapses `Total`/`AnnularOrTransit` based
         // on relative radii; `Occluder::kind` is the raw pair-wise label.
@@ -742,6 +922,68 @@ mod tests {
         let end = jd_utc_from_iso_hours(2025, 7, 1, 24.0);
         let observer = Observer::from_degrees(35.68, 139.69, 0.5 * (start + end));
         assert!(find_solar_eclipse(observer, start, end).is_none());
+    }
+
+    #[test]
+    fn find_lunar_occultation_returns_none_off_event() {
+        // Mid-day Tokyo on a day with no scheduled lunar occultation of
+        // Jupiter — the Moon-Jupiter apparent separation stays many
+        // degrees throughout, so the helper must report no event.
+        let start = jd_utc_from_iso_hours(2025, 7, 1, 0.0);
+        let end = jd_utc_from_iso_hours(2025, 7, 1, 24.0);
+        let observer = Observer::from_degrees(35.68, 139.69, 0.5 * (start + end));
+        assert!(find_lunar_occultation(
+            observer,
+            LunarOccultedBody::Planet(Planet::Jupiter),
+            start,
+            end
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn find_lunar_occultation_detects_synthetic_point_source() {
+        // Drive the helper with a fixed direction sitting right on the
+        // ecliptic at a Moon-track epoch and assert it both finds the
+        // event and pins external contact times symmetrically around
+        // the closest approach. This guards the planning surface without
+        // depending on the long-term ELP2000 accuracy.
+        let start = jd_utc_from_iso_hours(2024, 4, 8, 15.0);
+        let end = jd_utc_from_iso_hours(2024, 4, 8, 21.0);
+        let mid = 0.5 * (start + end);
+        let observer = Observer::from_degrees(23.219, -106.420, mid);
+        // At Mazatlán peak the Moon is at the apparent Sun direction
+        // (V-51c Total). Pointing the synthetic "star" exactly there
+        // guarantees the Moon disk covers it across the totality
+        // window, mimicking a daytime lunar occultation of a planet at
+        // greatest eclipse.
+        let mid_obs = observer_at(observer, mid);
+        let sun = apparent_sun_topocentric(mid_obs);
+        let body = LunarOccultedBody::Star {
+            dir_date_eq: sun.direction_equatorial(),
+        };
+        let event = find_lunar_occultation(observer, body, start, end)
+            .expect("point source aligned with the Sun at greatest eclipse must be occulted");
+        assert!(
+            event.is_central(),
+            "expected central (AnnularOrTransit/Total) phase, got {:?}",
+            event.kind
+        );
+        let p1 = event.contacts.p1.expect("P1 must exist");
+        let p4 = event.contacts.p4.expect("P4 must exist");
+        assert!(
+            p1 <= event.peak_jd_utc && event.peak_jd_utc <= p4,
+            "peak must lie inside [P1, P4]"
+        );
+        // Geometry sanity: closest approach must be below the Moon's
+        // apparent radius for any central event.
+        let peak_moon = apparent_moon_topocentric(observer_at(observer, event.peak_jd_utc));
+        assert!(
+            event.min_separation_rad <= peak_moon.angular_radius_rad + 1.0e-6,
+            "min separation {} exceeds Moon apparent radius {}",
+            event.min_separation_rad,
+            peak_moon.angular_radius_rad,
+        );
     }
 
     #[test]

@@ -131,10 +131,19 @@ Current implementation:
   renderer and planning UI read.
 - `planning::active_occluders` is the V-51b producer that builds the
   bounded analytic-mask list (`MAX_OCCLUDERS = 16`) consumed by the
-  renderer's `CameraUniform::occluders` array. With V-51c shipped it
-  emits one Sun-targeted entry (Moon → Sun) whenever an eclipse is
-  in contact; V-51d/e/f extend the producer without touching the
-  shader contract.
+  renderer's `CameraUniform::occluders` array. With V-51c + V-51d
+  shipped it emits up to nine entries per frame: a Sun-targeted entry
+  (Moon → Sun) when an eclipse is in contact, an always-on
+  Stars-targeted entry (Moon → catalog stars; the star vertex shader
+  culls sprites whose direction falls inside the front disk), and one
+  Planet-targeted entry per Moon ↔ planet pair currently in contact.
+  V-51e/f extend the producer without touching the shader contract.
+- `planning::find_lunar_occultation(observer, body, start, end)` is
+  the planning-side entry point for `V-51d` lunar occultations of
+  stars and planets. `body` is
+  `LunarOccultedBody::{Star { dir_date_eq }, Planet(p)}`; the helper
+  drives a 1-minute scan to locate the closest approach and refines
+  P1–P4 via the shared `contact_times` bisection.
 
 Validation expectation:
 
@@ -158,20 +167,28 @@ Current limitation:
   gated on the DE440 upgrade tracked as `L-06`; the current VSOP87 /
   ELP2000 stack reproduces classification and peak obscuration but
   contact times agree only to within a few minutes.
-- V-51 currently ships the Moon-on-Sun pair only. Lunar
-  occultation of stars / planets, Mercury / Venus transits, and
-  mutual planetary occultation (`V-51d` / `V-51e` / `V-51f`) reuse
-  the same primitives but are not yet validated against the IOTA
-  catalogue or transit canon. The V-51b analytic-mask uniform path
-  is pinned by
+- V-51 currently ships the Moon-on-Sun pair (`V-51c`) and lunar
+  occultation of catalog stars + the seven rendered planets
+  (`V-51d`). Mercury / Venus transits across the Sun and mutual
+  planetary occultation (`V-51e` / `V-51f`) reuse the same primitives
+  but are not yet validated against the transit canon. The V-51b/d
+  analytic-mask uniform path is pinned by
   `camera::tests::occluder_uniform_matches_moon_state_at_mazatlan_peak`
-  (Sun-targeted entry, direction equal to `moon_eq_illuminance.xyz`,
-  radius equal to `moon_disk.x`, obscuration equal to
+  (Sun-targeted entry in slot 0 + Stars-targeted entry in slot 1, both
+  with direction equal to `moon_eq_illuminance.xyz` and radius equal
+  to `moon_disk.x`; obscuration on the Sun entry equal to
   `solar_eclipse_state.y`),
   `camera::tests::occluder_uniform_zeros_on_external_or_atmosphere_off`,
-  `camera::tests::occluder_uniform_empty_off_eclipse`, and the
-  committed `docs/assets/validation/solar-eclipse.png` golden frame,
-  which is byte-identical when rendered through the array path.
+  and `camera::tests::occluder_uniform_off_eclipse_emits_only_moon_on_stars`
+  (exactly one entry, target code `-1`, lunar apparent radius). The
+  star vertex shader cull is exercised by the producer-side test
+  `planning::tests::active_occluders_off_eclipse_emits_only_moon_on_stars`
+  and the planning-side
+  `planning::tests::find_lunar_occultation_detects_synthetic_point_source`.
+  Sub-second IOTA contact-time accuracy against published lunar
+  occultation predictions remains gated on `L-06` (DE440 upgrade);
+  the current VSOP87 / ELP2000 stack pins detection, classification,
+  and contact-time bracketing to within minutes.
 
 ### Atmosphere and sky colour
 
