@@ -49,6 +49,9 @@ type DragState<Base> = {
   /// Floating cursor indicator element (created lazily once lock is
   /// acquired). Null otherwise.
   indicator: HTMLElement | null;
+  /// Currently rendered highlight on the indicator. Tracked so we only
+  /// touch the DOM when the sign of `totalDx` actually changes.
+  highlight: CursorHighlight;
   base: Base;
   lastStep: number;
   moved: boolean;
@@ -67,14 +70,48 @@ export type StepDrag = {
 /// scrubbing maps 1:1 to physical mouse motion. Not in older lib.dom typings.
 type LockOptions = { unadjustedMovement?: boolean };
 
-/// Inline SVG for the floating ew-resize indicator. White fill + dark
-/// stroke so it stays visible against any sky colour.
-const CURSOR_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="14" viewBox="0 0 24 14">' +
-  '<path d="M 1 7 L 6 3 L 6 6 L 18 6 L 18 3 L 23 7 L 18 11 L 18 8 L 6 8 L 6 11 Z" ' +
-  'fill="#f5f7fb" stroke="#0a0c16" stroke-width="1" stroke-linejoin="round"/></svg>';
+/// Builds the ew-resize cursor SVG with one of three highlight states:
+///   - "none"  : both arrowheads bright (hover / no scrub direction yet)
+///   - "left"  : only the left arrowhead bright (user is scrubbing left)
+///   - "right" : only the right arrowhead bright (user is scrubbing right)
+///
+/// The three sub-paths (left head / connecting bar / right head) are drawn
+/// separately so each can be filled independently. The bar is always bright
+/// so the overall shape stays recognisable.
+type CursorHighlight = "none" | "left" | "right";
 
-function createCursorIndicator(clientX: number, clientY: number): HTMLElement {
+const CURSOR_BRIGHT = "#f5f7fb";
+const CURSOR_DIM = "rgba(245, 247, 251, 0.35)";
+const CURSOR_STROKE = "#0a0c16";
+
+function cursorSvg(highlight: CursorHighlight): string {
+  const leftFill = highlight === "right" ? CURSOR_DIM : CURSOR_BRIGHT;
+  const rightFill = highlight === "left" ? CURSOR_DIM : CURSOR_BRIGHT;
+  return (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="14" viewBox="0 0 24 14">' +
+    // Left arrowhead.
+    `<path d="M 1 7 L 6 3 L 6 11 Z" fill="${leftFill}" stroke="${CURSOR_STROKE}" stroke-width="1" stroke-linejoin="round"/>` +
+    // Connecting bar (always bright — keeps the shape readable).
+    `<path d="M 6 6 L 18 6 L 18 8 L 6 8 Z" fill="${CURSOR_BRIGHT}" stroke="${CURSOR_STROKE}" stroke-width="1" stroke-linejoin="round"/>` +
+    // Right arrowhead.
+    `<path d="M 23 7 L 18 3 L 18 11 Z" fill="${rightFill}" stroke="${CURSOR_STROKE}" stroke-width="1" stroke-linejoin="round"/>` +
+    "</svg>"
+  );
+}
+
+/// CSS `cursor` value using the neutral SVG (both arrows bright), with the
+/// hotspot at the arrow centre (12, 7). Falls back to the system
+/// `ew-resize` cursor if the data-URL form is rejected (very old browsers,
+/// CSP rules that block `data:` URLs for cursors, etc.).
+export const STEP_DRAG_CURSOR = `url('data:image/svg+xml;utf8,${encodeURIComponent(
+  cursorSvg("none"),
+)}') 12 7, ew-resize`;
+
+function createCursorIndicator(
+  clientX: number,
+  clientY: number,
+  highlight: CursorHighlight,
+): HTMLElement {
   const el = document.createElement("div");
   el.setAttribute("aria-hidden", "true");
   el.style.cssText = [
@@ -87,9 +124,13 @@ function createCursorIndicator(clientX: number, clientY: number): HTMLElement {
     "z-index: 2147483647",
     "filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55))",
   ].join("; ");
-  el.innerHTML = CURSOR_SVG;
+  el.innerHTML = cursorSvg(highlight);
   document.body.appendChild(el);
   return el;
+}
+
+function setIndicatorHighlight(el: HTMLElement, highlight: CursorHighlight) {
+  el.innerHTML = cursorSvg(highlight);
 }
 
 function removeCursorIndicator(drag: { indicator: HTMLElement | null }) {
@@ -97,6 +138,12 @@ function removeCursorIndicator(drag: { indicator: HTMLElement | null }) {
     drag.indicator.remove();
     drag.indicator = null;
   }
+}
+
+function highlightForDelta(dx: number): CursorHighlight {
+  if (dx > 0) return "right";
+  if (dx < 0) return "left";
+  return "none";
 }
 
 export function useStepDrag<Base>(opts: {
@@ -124,7 +171,12 @@ export function useStepDrag<Base>(opts: {
       if (!drag || !drag.wantsLock) return;
       if (document.pointerLockElement === drag.element) {
         if (!drag.indicator) {
-          drag.indicator = createCursorIndicator(drag.startClientX, drag.startClientY);
+          drag.highlight = highlightForDelta(drag.totalDx);
+          drag.indicator = createCursorIndicator(
+            drag.startClientX,
+            drag.startClientY,
+            drag.highlight,
+          );
         }
       } else {
         removeCursorIndicator(drag);
@@ -174,6 +226,7 @@ export function useStepDrag<Base>(opts: {
         startClientY: event.clientY,
         wantsLock,
         indicator: null,
+        highlight: "none",
         base: opts.onStart(),
         lastStep: 0,
         moved: false,
@@ -210,6 +263,17 @@ export function useStepDrag<Base>(opts: {
           } catch {
             // Older spec returns void; nothing to do on failure.
           }
+        }
+      }
+
+      // Keep the floating indicator's highlight in sync with the scrub
+      // direction. Only repaint when the sign actually flips, so dragging
+      // continuously in one direction does not thrash the DOM.
+      if (drag.indicator) {
+        const nextHighlight = highlightForDelta(drag.totalDx);
+        if (nextHighlight !== drag.highlight) {
+          drag.highlight = nextHighlight;
+          setIndicatorHighlight(drag.indicator, nextHighlight);
         }
       }
 

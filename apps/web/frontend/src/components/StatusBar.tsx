@@ -25,7 +25,7 @@ import {
   type View,
 } from "../observer";
 import { OverlayToggles } from "./OverlayToggles";
-import { useStepDrag } from "./useStepDrag";
+import { STEP_DRAG_CURSOR, useStepDrag } from "./useStepDrag";
 import {
   translateWasmBody,
   translateWasmTwilight,
@@ -1267,13 +1267,13 @@ const underlinedValueStyle = (active: boolean): React.CSSProperties => ({
 
 const draggableTimeValueStyle = (active: boolean): React.CSSProperties => ({
   ...underlinedValueStyle(active),
-  cursor: "ew-resize",
+  cursor: STEP_DRAG_CURSOR,
   touchAction: "none",
   userSelect: "none",
 });
 
 const draggableValueStyle: React.CSSProperties = {
-  cursor: "ew-resize",
+  cursor: STEP_DRAG_CURSOR,
   touchAction: "none",
   userSelect: "none",
   textDecoration: "underline",
