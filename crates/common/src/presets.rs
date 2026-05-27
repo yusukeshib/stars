@@ -34,6 +34,7 @@ pub enum ScenePresetArg {
     AstronomicalTwilight,
     MoonlitNight,
     EclipseAid,
+    SolarEclipse,
     AllSkyHammer,
     AllSkyMollweide,
     GalacticNorth,
@@ -51,6 +52,7 @@ impl ScenePresetArg {
         Self::AstronomicalTwilight,
         Self::MoonlitNight,
         Self::EclipseAid,
+        Self::SolarEclipse,
         Self::AllSkyHammer,
         Self::AllSkyMollweide,
         Self::GalacticNorth,
@@ -68,6 +70,7 @@ impl ScenePresetArg {
             Self::AstronomicalTwilight => "astronomical-twilight",
             Self::MoonlitNight => "moonlit-night",
             Self::EclipseAid => "eclipse-aid",
+            Self::SolarEclipse => "solar-eclipse",
             Self::AllSkyHammer => "all-sky-hammer",
             Self::AllSkyMollweide => "all-sky-mollweide",
             Self::GalacticNorth => "galactic-north",
@@ -145,6 +148,12 @@ pub const SCENE_PRESET_INFOS: &[ScenePresetInfo] = &[
         title: "Lunar eclipse aid",
         description: "Tight Moon-oriented aid scene around a lunar-eclipse date with planet labels and horizon context.",
         validation_focus: "Moon phase rendering, Earth-shadow aid input path, narrow-field labels",
+    },
+    ScenePresetInfo {
+        id: ScenePresetArg::SolarEclipse,
+        title: "Total solar eclipse",
+        description: "2024-04-08 total solar eclipse from Mazatl\u{00e1}n at greatest eclipse. Wires V-51 occultation primitives (analytic Moon-on-Sun mask, Koomen 1952 daylight falloff, Baumbach 1937 corona) to a real validated event.",
+        validation_focus: "V-51c solar-eclipse pipeline: analytic-mask Sun subtract, daylight darkening, corona during totality",
     },
     ScenePresetInfo {
         id: ScenePresetArg::AllSkyHammer,
@@ -325,6 +334,27 @@ pub fn scene_from_preset(
                 OverlayKind::Horizon,
                 OverlayKind::CardinalLabels,
                 OverlayKind::PlanetLabels,
+                OverlayKind::DegreeLabels,
+            ]),
+            AtmospherePreset::ClearRural,
+            catalog,
+        )?,
+        // V-51c validation scene: 2024-04-08 total solar eclipse over
+        // Mazatlán, framed on the solar disk at greatest eclipse. Apparent
+        // Sun position there is az\u2248138\u00b0, alt\u224870\u00b0; the
+        // narrow 5\u00b0 field exposes the Baumbach corona and the
+        // analytic Moon-on-Sun subtract, and the Koomen 1952 falloff
+        // darkens the sky background to the totality limit.
+        ScenePresetArg::SolarEclipse => earth_scene(
+            23.219,
+            -106.420,
+            "2024-04-08T18:13:00Z",
+            138.0,
+            70.0,
+            5.0,
+            overlay_config(&[
+                OverlayKind::Horizon,
+                OverlayKind::CardinalLabels,
                 OverlayKind::DegreeLabels,
             ]),
             AtmospherePreset::ClearRural,

@@ -29,8 +29,10 @@ The current engine already includes:
 - UTC / UT1 / TAI / TT / approximate TDB time scales;
 - proper motion, annual aberration, IAU 2006 precession, compact nutation, and
   atmospheric refraction;
-- Sun, Moon, Mercury through Neptune, moon phase / eclipse darkening, daylight
-  and twilight sky colour;
+- Sun, Moon, Mercury through Neptune, moon phase, the unified eclipse /
+  occultation pipeline (`V-51`, with solar eclipses shipped: analytic
+  Moon-on-Sun mask + Koomen 1952 daylight darkening + Baumbach 1937
+  corona), daylight and twilight sky colour;
 - web planning helpers for rise / transit / set and twilight intervals;
 - perspective plus Mollweide, Aitoff, and Hammer full-sky projections;
 - out-of-Earth `galactic-north` and `custom-external` viewpoints that render

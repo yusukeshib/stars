@@ -8,6 +8,7 @@
 
 use glam::Vec3;
 
+use crate::occultation::{obscuration_fraction, ApparentDisk};
 use crate::{lmst_radians, Observer, J2000_JD};
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 /// Astronomical Unit in kilometres, IAU 2012 Resolution B2 exact definition.
@@ -199,11 +200,6 @@ fn angular_separation_f64(a: [f64; 3], b: [f64; 3]) -> f64 {
     ((a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (ad * bd))
         .clamp(-1.0, 1.0)
         .acos()
-}
-
-fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
-    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
 }
 
 /// Mean obliquity of the ecliptic for the low-precision Sun/Moon renderer.
@@ -411,19 +407,25 @@ pub fn apparent_moon(julian_date: f64) -> MoonApparent {
     let phase_angle_rad = (std::f64::consts::PI - elongation).clamp(0.0, std::f64::consts::PI);
     let illuminated_fraction = 0.5 * (1.0 + phase_angle_rad.cos());
 
-    // Visual lunar-eclipse aid: Earth's umbral cone radius at the Moon is the
-    // geocentric Earth radius minus the Sun's apparent cone over one lunar
-    // distance. Smooth the contact over one lunar radius so partial eclipses
-    // transition gradually instead of blinking.
+    // Visual lunar-eclipse aid (V-36): the Earth's umbra at the Moon's
+    // distance is an apparent disk centred on the antisolar point with
+    // angular radius equal to the geocentric Earth radius minus the
+    // Sun's apparent radius, both expressed as angles at one lunar
+    // distance. Reuse the V-51a pair-wise obscuration helper so the
+    // umbra-occults-Moon geometry collapses into the same path used by
+    // every other eclipse / occultation pair.
     let anti_sun = [-sun_dir[0], -sun_dir[1], -sun_dir[2]];
-    let shadow_sep = angular_separation_f64(moon_dir, anti_sun);
     let umbra_radius = (EARTH_EQUATORIAL_RADIUS_KM / distance_km).asin() - sun.angular_radius_rad;
     let earth_shadow_fraction = if umbra_radius > 0.0 {
-        1.0 - smoothstep(
-            (umbra_radius - angular_radius_rad).max(0.0),
-            umbra_radius + angular_radius_rad,
-            shadow_sep,
-        )
+        let umbra = ApparentDisk::new(
+            Vec3::new(anti_sun[0] as f32, anti_sun[1] as f32, anti_sun[2] as f32),
+            umbra_radius,
+        );
+        let moon_disk = ApparentDisk::new(
+            Vec3::new(moon_dir[0] as f32, moon_dir[1] as f32, moon_dir[2] as f32),
+            angular_radius_rad,
+        );
+        obscuration_fraction(umbra, moon_disk) as f64
     } else {
         0.0
     };

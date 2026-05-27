@@ -71,6 +71,13 @@ struct CameraUniform {
     // The skyglow pass does not consume it; declared only to keep the WGSL
     // view of CameraUniform aligned with the host struct.
     scintillation_params: vec4<f32>,
+    // V-51c solar-eclipse state: [kind_code, obscuration, totality_weight,
+    // partial_weight]. kind_code mirrors `SolarEclipseKind::shader_code`:
+    // 0=none, 1=partial, 2=annular, 3=total. The renderer reads it to
+    // subtract the Sun source term inside the lunar disk (analytic mask),
+    // apply the Koomen 1952 daylight falloff during obscuration, and gate
+    // the Baumbach 1937 corona term during totality.
+    solar_eclipse_state: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -264,6 +271,31 @@ fn hosek_wilkie_sky_luminance_rgb(ray_dir: vec3<f32>, sin_alt: f32) -> vec3<f32>
 // than a dim star-atlas background; stars naturally lose contrast in daylight.
 const SUNLIT_SKY_EXPOSURE: f32 = 1.0;
 
+// V-51c Koomen 1952 daylight darkening during a solar eclipse. The total-
+// eclipse limit drops to roughly 1e-4 of normal daylight at maximum
+// obscuration; partial phases fall off smoothly with the fraction of the
+// solar disk hidden. Smoothed across the totality envelope so C2 and C3
+// do not produce a step in sky luminance.
+//
+// Reference: Koomen, M. J., Lock, C., Packer, D. M., Scolnik, R., Tousey,
+// R. & Hulburt, E. O. 1952, J. Opt. Soc. Am. 42, 353, "Measurements of
+// the Brightness of the Twilight Sky."
+fn solar_eclipse_daylight_factor() -> f32 {
+    let kind_code = camera.solar_eclipse_state.x;
+    if kind_code < 0.5 {
+        return 1.0;
+    }
+    let obscuration = clamp(camera.solar_eclipse_state.y, 0.0, 1.0);
+    let totality_weight = clamp(camera.solar_eclipse_state.z, 0.0, 1.0);
+    // Linear falloff with obscuration for the partial / annular phase.
+    // Annular limit ~ 1 - 0.94 obs because some sky stays lit through
+    // the residual annulus; partial uses the same factor.
+    let partial = max(1.0 - obscuration, 1.0e-4);
+    // Totality limit: ~1e-4 of normal daylight (Koomen et al. 1952).
+    let total = 1.0e-4;
+    return mix(partial, total, totality_weight);
+}
+
 fn sunlit_scattering_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> vec3<f32> {
     // Sky-only fragments below the geometric horizon are still skipped;
     // the daylight ↔ twilight blend lives inside
@@ -273,7 +305,8 @@ fn sunlit_scattering_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) 
         return vec3<f32>(0.0);
     }
     return hdr_flux_from_cd_m2(hosek_wilkie_sky_luminance_rgb(ray_dir, sin_alt), zeropoint)
-        * SUNLIT_SKY_EXPOSURE;
+        * SUNLIT_SKY_EXPOSURE
+        * solar_eclipse_daylight_factor();
 }
 
 fn disk_mask(ray_dir: vec3<f32>, center_dir: vec3<f32>, radius_rad: f32, pixel_sr: f32) -> f32 {
@@ -313,24 +346,77 @@ fn lunar_phase_lambert(ray_dir: vec3<f32>, moon_dir: vec3<f32>, sun_dir: vec3<f3
     return clamp(dot(normal, sun_dir), 0.0, 1.0);
 }
 
+// V-51c Baumbach 1937 coronal brightness law in units of mean solar disk
+// brightness. `r` is the projected radius in solar radii (`r >= 1` is
+// outside the solar limb). Coefficients follow Allen 1973 / Astrophysical
+// Quantities §14: a r^-2.5 + b r^-7 + c r^-17 with an overall 10^-6
+// normalisation so the inner corona is at the canonical ~10^-6 of the
+// solar disk. Evaluated only inside a 2° scissor and gated by
+// `solar_eclipse_state.z` (totality weight).
+fn baumbach_corona(r_solar: f32) -> f32 {
+    let r = max(r_solar, 1.0);
+    let inv = 1.0 / r;
+    let r2 = inv * inv;
+    let r25 = r2 * sqrt(inv);
+    let r7 = r2 * r2 * r2 * inv;
+    let r17 = r7 * r7 * r2 * inv;
+    return 1.0e-6 * (2.10 * r25 + 8.65 * r7 + 4.40 * r17);
+}
+
 fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_sr: f32) -> vec3<f32> {
     if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
         return vec3<f32>(0.0);
     }
 
     let sun_dir = normalize(camera.sun_eq_radius.xyz);
+    let moon_dir = normalize(camera.moon_eq_illuminance.xyz);
+    let sun_radius = max(camera.sun_eq_radius.w, 1e-6);
+    let moon_radius = max(camera.moon_disk.x, 1e-6);
+
+    // V-51c analytic Moon-on-Sun mask. The Moon mask multiplies the Sun's
+    // source term by `(1 - moon_mask)` so the lunar disk subtracts the
+    // Sun radiance pixel-locally; no depth or stencil pass is needed. The
+    // mask is reused below for the corona scissor and totality gate.
+    let kind_code = camera.solar_eclipse_state.x;
+    let totality_weight = clamp(camera.solar_eclipse_state.z, 0.0, 1.0);
+    let moon_in_front_of_sun = kind_code > 0.5;
+    let sun_moon_sep = acos(clamp(dot(sun_dir, moon_dir), -1.0, 1.0));
+    let moon_mask = select(
+        0.0,
+        disk_mask(ray_dir, moon_dir, moon_radius, pixel_sr),
+        moon_in_front_of_sun,
+    );
+
     var rgb = vec3<f32>(0.0);
     if dot(sun_dir, camera.zenith_eq.xyz) > 0.0 {
-        let sun_radius = max(camera.sun_eq_radius.w, 1e-6);
         let sun_solid_angle = PI * sun_radius * sun_radius;
         let sun_luminance = max(camera.atmosphere_params.z, 0.0) / max(sun_solid_angle, 1e-8);
-        rgb += hdr_flux_from_cd_m2(camera.solar_rgb.xyz * sun_luminance, zeropoint)
+        let sun_disk_term = hdr_flux_from_cd_m2(camera.solar_rgb.xyz * sun_luminance, zeropoint)
             * disk_mask(ray_dir, sun_dir, sun_radius, pixel_sr);
+        rgb += sun_disk_term * (1.0 - moon_mask);
+
+        // V-51c Baumbach corona: evaluate only during totality, inside a
+        // ~2° scissor centred on the Sun. The corona radiance scales with
+        // the mean solar disk luminance so it stays calibrated against
+        // whatever `solar_illuminance_lux` the host supplies.
+        if totality_weight > 0.0 {
+            let view_sun_sep = acos(clamp(dot(ray_dir, sun_dir), -1.0, 1.0));
+            let scissor = 2.0 * DEG_TO_RAD;
+            if view_sun_sep < scissor {
+                let r_solar = max(view_sun_sep / sun_radius, 1.0);
+                let inside_moon = step(view_sun_sep, moon_radius) * step(sun_moon_sep, moon_radius);
+                let corona_brightness = baumbach_corona(r_solar);
+                // K-corona is slightly cool-white in broadband visible.
+                let corona_tint = vec3<f32>(0.90, 0.95, 1.05);
+                rgb += hdr_flux_from_cd_m2(
+                    corona_tint * sun_luminance * corona_brightness,
+                    zeropoint,
+                ) * totality_weight * (1.0 - 0.5 * inside_moon);
+            }
+        }
     }
 
-    let moon_dir = normalize(camera.moon_eq_illuminance.xyz);
     if dot(moon_dir, camera.zenith_eq.xyz) > 0.0 {
-        let moon_radius = max(camera.moon_disk.x, 1e-6);
         let moon_solid_angle = PI * moon_radius * moon_radius;
         let moon_luminance = max(camera.moon_eq_illuminance.w, 0.0) / max(moon_solid_angle, 1e-8);
         let phase = lunar_phase_lambert(ray_dir, moon_dir, sun_dir, moon_radius);
@@ -462,7 +548,7 @@ fn twilight_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> ve
     let ozone = clamp(camera.atmosphere_optics.x, 0.0, 600.0) / 300.0;
     let ozone_transmission = exp(-0.025 * ozone * view_airmass * vec3<f32>(0.25, 0.58, 0.16));
     let rgb_luminance = camera.solar_rgb.xyz * luminance * blue_loss * ozone_transmission;
-    return hdr_flux_from_cd_m2(rgb_luminance, zeropoint);
+    return hdr_flux_from_cd_m2(rgb_luminance, zeropoint) * solar_eclipse_daylight_factor();
 }
 
 fn diffuse_sky_mag_per_arcsec2(l_rad: f32, b_rad: f32, beta_rad: f32, sun_rel_lon_rad: f32) -> f32 {
