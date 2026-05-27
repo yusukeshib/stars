@@ -290,6 +290,20 @@ pub(crate) struct CameraUniform {
     pub occluder_params: [f32; 4],
 }
 
+/// Lower bound of the V-51c totality smoothstep on obscuration.
+///
+/// The Baumbach 1937 corona term in `shaders/skyglow.wgsl` is gated by
+/// `totality_weight`. Below ~97 % obscuration there is still a bright
+/// crescent on the solar limb whose stray light would wash out the
+/// inner corona, so the smoothstep starts at this floor.
+const TOTALITY_ENVELOPE_LOW: f32 = 0.97;
+/// Upper bound of the same smoothstep — deep totality
+/// (Moon-larger-than-Sun core). `0.998` lifts the gate fully a few
+/// arcseconds inside C2 / before C3, matching the timescale on which the
+/// corona becomes naked-eye visible in the Mazatlán 2024-04-08
+/// validation render.
+const TOTALITY_ENVELOPE_HIGH: f32 = 0.998;
+
 pub(crate) const HW_COEFFS_PER_CHANNEL: usize = 9;
 pub(crate) type HosekWilkieCoefficientsUniform = [[f32; 4]; HW_COEFFS_PER_CHANNEL];
 
@@ -1403,11 +1417,12 @@ impl Camera {
             if self.atmosphere.sunlit_scattering && !self.viewpoint.is_external() {
                 let state = solar_eclipse_state(self.observer);
                 let totality_weight = if matches!(state.kind, SolarEclipseKind::Total) {
-                    // smoothstep((0.97, 0.998), obs): the totality envelope only
-                    // turns the corona on inside the Moon-larger-than-Sun core,
-                    // not during deep partial phases that still leave a bright
-                    // crescent (which would wash out the corona term).
-                    let t = ((state.obscuration as f32 - 0.97) / 0.028).clamp(0.0, 1.0);
+                    // smoothstep(TOTALITY_ENVELOPE_LOW, TOTALITY_ENVELOPE_HIGH, obs):
+                    // the totality envelope only turns the corona on inside the
+                    // Moon-larger-than-Sun core, not during deep partial phases
+                    // that still leave a bright crescent.
+                    let span = TOTALITY_ENVELOPE_HIGH - TOTALITY_ENVELOPE_LOW;
+                    let t = ((state.obscuration - TOTALITY_ENVELOPE_LOW) / span).clamp(0.0, 1.0);
                     t * t * (3.0 - 2.0 * t)
                 } else {
                     0.0
