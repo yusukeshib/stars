@@ -92,6 +92,10 @@ struct CameraUniform {
 // Stable shader codes for `OccluderTarget` (mirrors Rust).
 const OCCLUDER_TARGET_SUN: i32 = 0;
 const OCCLUDER_TARGET_MOON: i32 = 1;
+// V-51d planet codes: `Planet(i)` packs as `2 + i` for i in 0..=6
+// (Mercury..Neptune), matching `Planet::ALL` and the renderer's
+// `planet_eq_radius[i]` ordering.
+const OCCLUDER_TARGET_PLANET_BASE: i32 = 2;
 const MAX_OCCLUDERS: u32 = 16u;
 
 @group(0) @binding(0)
@@ -501,9 +505,16 @@ fn planet_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_
         // visible and anti-aliased without pretending the physical radius is larger.
         let visual_radius = max(angular_radius, pixel_radius * 1.25);
         let footprint_pixels = max(PI * visual_radius * visual_radius / max(pixel_sr, 1e-12), 1.0);
+        // V-51d: subtract any active front-disk occluder pointed at this
+        // planet (Moon-on-Planet from `active_occluders`). Off-event the
+        // producer emits no entry, the loop short-circuits, and the
+        // result is bit-identical to the pre-V-51d render.
+        let occluder_target = OCCLUDER_TARGET_PLANET_BASE + i32(i);
+        let subtract = occluder_subtract_mask(ray_dir, occluder_target, pixel_sr);
         let flux = magnitude_to_flux(camera.planet_rgb_magnitude[i].w, zeropoint);
         let mask = disk_mask(ray_dir, dir, visual_radius, pixel_sr);
-        rgb += camera.planet_rgb_magnitude[i].xyz * flux * mask / footprint_pixels;
+        rgb +=
+            camera.planet_rgb_magnitude[i].xyz * flux * mask * (1.0 - subtract) / footprint_pixels;
     }
     return rgb;
 }

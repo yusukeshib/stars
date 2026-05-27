@@ -1762,13 +1762,16 @@ mod tests {
         assert_eq!(off.scintillation_params[0], 0.0);
     }
 
-    /// V-51b: the analytic-mask uniform must contain exactly one Sun-
-    /// targeted occluder during the Mazatlán 2024-04-08 totality
-    /// preset, its direction must equal `moon_eq_illuminance.xyz`
-    /// (bit-identical J2000-and-refracted), and its radius must equal
-    /// `moon_disk.x`. Anything else would let the analytic mask drift
-    /// away from the V-51c photometric falloff and break the golden
-    /// frame committed in `docs/assets/validation/solar-eclipse.png`.
+    /// V-51b: the analytic-mask uniform must contain a Sun-targeted
+    /// occluder during the Mazatlán 2024-04-08 totality preset, its
+    /// direction must equal `moon_eq_illuminance.xyz` (bit-identical
+    /// J2000-and-refracted), and its radius must equal `moon_disk.x`.
+    /// Anything else would let the analytic mask drift away from the
+    /// V-51c photometric falloff and break the golden frame committed
+    /// in `docs/assets/validation/solar-eclipse.png`. V-51d adds a
+    /// second Stars-target entry (Moon-on-Stars cull) at every frame;
+    /// the Sun entry sits in slot 0 because the producer emits it
+    /// first.
     #[test]
     fn occluder_uniform_matches_moon_state_at_mazatlan_peak() {
         // 2024-04-08T18:13:00Z, the SolarEclipse scene-preset epoch.
@@ -1777,11 +1780,14 @@ mod tests {
         let cam = Camera::new(observer, LocalView::default(), 1.0);
         let uniform = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
 
+        // V-51c Moon-on-Sun + V-51d Moon-on-Stars cull entry are both
+        // emitted at totality (the Stars entry is unconditional).
         assert_eq!(
-            uniform.occluder_params[0], 1.0,
-            "exactly one Moon-on-Sun occluder must be active at greatest eclipse"
+            uniform.occluder_params[0], 2.0,
+            "Moon-on-Sun + Moon-on-Stars entries must both be active at greatest eclipse"
         );
-        // First entry: front-disk direction (xyz) + radius (w).
+        // Sun entry is emitted first by `active_occluders`, so it lives
+        // in slot 0; the V-51d Stars cull entry is in slot 1.
         let dir = &uniform.occluders[0];
         let target_kind = &uniform.occluders[1];
         let moon_dir = &uniform.moon_eq_illuminance;
@@ -1799,8 +1805,17 @@ mod tests {
         assert_eq!(target_kind[1], 1.0);
         // Obscuration must mirror `solar_eclipse_state.y` exactly.
         assert!((target_kind[2] - uniform.solar_eclipse_state[1]).abs() < 1e-6);
+        // V-51d Stars cull entry sits in slot 1 with the same Moon
+        // front-disk geometry as the Sun entry (one shared producer).
+        let stars_dir = &uniform.occluders[2];
+        let stars_kind = &uniform.occluders[3];
+        assert_eq!(stars_dir[0], moon_dir[0]);
+        assert_eq!(stars_dir[1], moon_dir[1]);
+        assert_eq!(stars_dir[2], moon_dir[2]);
+        assert_eq!(stars_dir[3], moon_radius);
+        assert_eq!(stars_kind[0], -1.0, "Stars target code must be -1");
         // Padded entries stay zero so the shader's loop never reads junk.
-        for i in 1..MAX_OCCLUDERS {
+        for i in 2..MAX_OCCLUDERS {
             assert_eq!(uniform.occluders[i * 2], [0.0; 4]);
             assert_eq!(uniform.occluders[i * 2 + 1], [0.0; 4]);
         }
@@ -1827,16 +1842,23 @@ mod tests {
         assert_eq!(external.occluder_params[0], 0.0);
     }
 
-    /// V-51b: at an off-eclipse epoch the list must be empty so the
-    /// shader short-circuits on `count == 0`. Mirrors
-    /// `astronomy::planning::active_occluders_is_empty_off_eclipse`.
+    /// V-51d: at an off-eclipse epoch the producer emits only the
+    /// Moon-on-Stars cull entry (always present), and no Sun / planet
+    /// occluders. The renderer must pack exactly that one entry so the
+    /// star vertex shader can iterate it without reading padded rows.
+    /// Mirrors `astronomy::planning::active_occluders_off_eclipse_emits_only_moon_on_stars`.
     #[test]
-    fn occluder_uniform_empty_off_eclipse() {
+    fn occluder_uniform_off_eclipse_emits_only_moon_on_stars() {
         let jd_utc = astronomy::julian_date_from_unix_seconds(1_751_328_000.0); // 2025-07-01T00:00Z
         let observer = Observer::from_degrees(35.68, 139.69, jd_utc);
         let cam = Camera::new(observer, LocalView::default(), 1.0);
         let uniform = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
-        assert_eq!(uniform.occluder_params[0], 0.0);
+        assert_eq!(uniform.occluder_params[0], 1.0);
+        // Slot 0 carries the Stars-target cull entry (target code = -1).
+        assert_eq!(uniform.occluders[1][0], -1.0);
+        // Front radius must equal the Moon apparent semidiameter.
+        let moon_radius = uniform.moon_disk[0];
+        assert!((uniform.occluders[0][3] - moon_radius).abs() < 1.0e-6);
     }
 
     #[test]

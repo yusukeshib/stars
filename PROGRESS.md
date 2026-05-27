@@ -534,11 +534,10 @@ Shipped capabilities (`V-51b`):
   exactly one Sun-targeted occluder whose obscuration agrees with
   `solar_eclipse_state` to within 1e-6.
 
-Deliberately out of scope for this slice (deferred to `V-51d`/`e`/`f`):
-lunar occultation of stars and planets, Mercury / Venus transit of
-the Sun, and mutual planetary occultation. The `MAX_OCCLUDERS = 16`
-rails and the `OccluderTarget` enum are in place, so each follow-up
-item only needs to add its producer.
+Deliberately out of scope for this slice (deferred to `V-51e`/`f`):
+Mercury / Venus transit of the Sun and mutual planetary occultation.
+The `MAX_OCCLUDERS = 16` rails and the `OccluderTarget` enum are in
+place, so each follow-up item only needs to add its producer.
 
 Documented limit. With the current VSOP87 / ELP2000 + WGS84
 parallax ephemeris stack the apparent Moon and Sun radii at the
@@ -548,6 +547,94 @@ located the deepest sample. Sub-30-second P1–P4 accuracy against
 NASA TP-2006-214141 requires the DE440 upgrade tracked as `L-06`;
 the current contact times agree to within a few minutes, which is
 adequate for the analytic-mask + Koomen + corona contract.
+
+### Lunar occultation of stars and planets (`V-51d`)
+
+Fourth slice of `V-51`: the Moon now occults catalog stars and the
+seven rendered planets when its apparent disk falls in front of them.
+The V-51b general `MAX_OCCLUDERS = 16` analytic-mask array and the
+`OccluderTarget::{Stars, Planet}` codes were already in place, so this
+slice is the producer + the two consumer hookups (planet disk
+subtract + star vertex cull).
+
+Primary implementation areas:
+
+- `crates/astronomy/src/planning.rs` (`active_occluders` extended to
+  emit Moon → Stars + Moon → Planet entries; new
+  `find_lunar_occultation` planning helper with `LunarOccultedBody`
+  and `LunarOccultationEvent` types).
+- `crates/renderer/src/shaders/skyglow.wgsl` (`planet_disk_radiance`
+  multiplies each per-planet contribution by `(1 - occluder_subtract_mask(...))`
+  for the matching `OCCLUDER_TARGET_PLANET_BASE + i` target).
+- `crates/renderer/src/shaders/star.wgsl` (vertex stage iterates the
+  `OCCLUDER_TARGET_STARS = -1` entries and collapses occluded sprites
+  to a degenerate clip-space quad behind the camera so the rasterizer
+  drops the primitive before the fragment stage runs).
+
+Shipped capabilities:
+
+- `active_occluders` now emits up to nine entries per frame
+  (Moon → Sun + Moon → Stars + Moon → each of the 7 planets when in
+  contact). The Moon → Stars cull entry is emitted *unconditionally*
+  so the star vertex shader can hide sprites behind the Moon every
+  frame; off-occultation frames stay bit-identical to the pre-V-51d
+  render because no catalog star sits inside the lunar disk except
+  during an actual event. Moon → Planet entries are emitted only
+  when the pair classifies as non-`None`, keeping the analytic-mask
+  cost at zero off-event.
+- `find_lunar_occultation(observer, body, start, end) ->
+  Option<LunarOccultationEvent>` is the planning-side entry point.
+  `body` is `LunarOccultedBody::{ Star { dir_date_eq }, Planet(p) }`;
+  the helper drives a 1-minute scan to locate the closest approach
+  and refines P1–P4 via the V-51a `contact_times` bisection.
+- Star vertex shader cull: one normalised dot product + one
+  `cos(radius)` comparison per active occluder per star vertex. Off
+  any lunar occultation that’s one dot product per visible star per
+  frame (the count = 1 Stars cull entry is always present); well
+  inside the V-51 “no measurable fps regression” contract.
+- Planet disk shader subtract: identical to the V-51c Sun path, just
+  routed to the planet target codes. Mutual planetary occlusion is
+  still gated on V-51f (which will plug a planet front-disk producer
+  into the same uniform).
+
+Validation (pinned in `VALIDATION.md`):
+
+- `planning::tests::find_lunar_occultation_returns_none_off_event`
+  guards against false-positive detection.
+- `planning::tests::find_lunar_occultation_detects_synthetic_point_source`
+  drives the helper with a fixed point source aligned to the Sun at
+  the 2024-04-08 Mazatlán totality so the Moon disk covers it across
+  the central phase, then pins central classification, contact-time
+  bracketing, and the closest-approach geometry against the lunar
+  apparent radius.
+- `planning::tests::active_occluders_off_eclipse_emits_only_moon_on_stars`
+  pins the producer side: off any solar / planet event the list
+  contains exactly the one always-on `OccluderTarget::Stars` entry,
+  with the lunar apparent disk as its front.
+- `camera::tests::occluder_uniform_off_eclipse_emits_only_moon_on_stars`
+  pins the renderer-side counterpart: the uniform carries exactly
+  one entry (target code `-1`) with the lunar apparent radius.
+- `camera::tests::occluder_uniform_matches_moon_state_at_mazatlan_peak`
+  was extended to assert both the V-51c Sun entry (slot 0) *and* the
+  V-51d Stars entry (slot 1) at greatest eclipse.
+
+Deliberately out of scope for this slice (deferred to `V-51e`/`f`):
+Mercury / Venus transit of the Sun, and mutual planetary
+occulation. Sub-second IOTA contact-time validation against
+published occultation predictions stays gated on `L-06` (the DE440
+ephemeris upgrade); the current VSOP87 / ELP2000 stack pins
+detection and classification but not microsecond IOTA accuracy.
+
+Note on the V-51 performance contract. The ROADMAP originally
+phrased the star occlusion as a “CPU-side cull” (`10⁴ × 10 ≈ 0.1 ms`
+in the planner block). The star-instance buffer is uploaded once at
+renderer construction, so a per-frame CPU re-upload would force a
+~2 MB GPU write each frame just to flip a handful of bits. The
+shader-side discard runs in the same vertex pass that already reads
+`corrected_j2000`, costs one dot + one compare per visible star per
+active occluder, and matches the same “no measurable fps regression”
+outcome the CPU formulation aimed for. The ROADMAP entry is updated
+to reflect this in the same PR.
 
 ### Solar / lunar illuminants and physical sky colour
 

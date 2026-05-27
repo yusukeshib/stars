@@ -56,7 +56,24 @@ struct CameraUniform {
     // seed_as_f32, time_seconds_mod_day]. `sigma_sq_zenith == 0` disables
     // the per-star modulation in the vertex shader.
     scintillation_params: vec4<f32>,
+    // V-51c solar-eclipse state. Unused by the star pass (the Sun
+    // doesn't occult catalog stars); kept here so the struct layout
+    // matches the Rust-side `CameraUniform`.
+    solar_eclipse_state_pad: vec4<f32>,
+    // V-51b/d analytic-mask occluder array. Same layout as in
+    // `shaders/skyglow.wgsl`: two `vec4` rows per entry, packed by
+    // `CameraUniform::occluders` and counted by
+    // `occluder_params.x`. The star pass iterates entries whose
+    // target code is `OCCLUDER_TARGET_STARS` (-1) and discards
+    // sprites whose direction falls inside the front disk
+    // (V-51d lunar occultation of catalog stars).
+    occluders: array<vec4<f32>, 32>,
+    occluder_params: vec4<f32>,
 };
+
+// Mirrors `astronomy::occultation::OccluderTarget::Stars.shader_code()`.
+const OCCLUDER_TARGET_STARS: i32 = -1;
+const MAX_STAR_OCCLUDERS: u32 = 16u;
 
 fn viewport_size() -> vec2<f32> {
     return camera.viewport_pixel_sr_zeropoint.xy;
@@ -295,6 +312,44 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     let k_rgb = camera.extinction_k_rgb.xyz;
     let atmosphere_active = (camera.viewpoint_params.x < 0.5) && (k_rgb.x + k_rgb.y + k_rgb.z > 0.0);
     let corrected_j2000 = corrected_j2000_direction(input.star_pos, input.proper_motion);
+
+    // V-51d: lunar occultation of catalog stars. Iterate the active
+    // analytic-mask occluder list for any entry targeting stars (the
+    // Moon's apparent disk is the only producer today). If this star's
+    // direction lies inside one of those front disks, collapse the
+    // sprite to a degenerate point at the camera plane so the
+    // fragment stage never lights it. Off-occultation frames stay
+    // bit-identical because the producer emits one inert front disk
+    // and the `cos(angle) > cos(radius)` test trivially fails for any
+    // star outside the lunar disc.
+    //
+    // The producer side runs in the Earth-centred path only (the
+    // external galactic viewpoint skips `active_occluders`), so this
+    // gate is correct for both viewpoints: external renders see an
+    // all-zero occluder list and short-circuit on `count == 0`.
+    var occluded: bool = false;
+    let occluder_count = u32(max(camera.occluder_params.x, 0.0));
+    if occluder_count > 0u && camera.viewpoint_params.x < 0.5 {
+        for (var i: u32 = 0u; i < MAX_STAR_OCCLUDERS; i = i + 1u) {
+            if i >= occluder_count {
+                break;
+            }
+            let dr = camera.occluders[i * 2u];
+            let tk = camera.occluders[i * 2u + 1u];
+            if i32(tk.x) != OCCLUDER_TARGET_STARS {
+                continue;
+            }
+            let front_dir = normalize(dr.xyz);
+            let cos_sep = clamp(dot(corrected_j2000, front_dir), -1.0, 1.0);
+            // `cos(sep) > cos(radius)` <=> sep < radius. Use the closed
+            // form (no acos) so the check is one dot product plus one
+            // comparison per active occluder.
+            if cos_sep > cos(max(dr.w, 0.0)) {
+                occluded = true;
+                break;
+            }
+        }
+    }
     var clip: vec4<f32>;
     if camera.viewpoint_params.x > 0.5 {
         let distance_pc = max(input.distance_pc, 0.0);
@@ -330,6 +385,22 @@ fn vs_main(input: VertexInput) -> VertexOutput {
         // exactly the airmass input scintillation needs, so we reuse it.
         attenuated_color = attenuated_color
             * scintillation_modulation(input.instance_idx, alt_rad);
+    }
+
+    if occluded {
+        // V-51d: pack the sprite into a degenerate quad behind the
+        // camera so the rasterizer culls it. Setting the clip vector
+        // to `(0, 0, -w, -w)` puts every vertex of the quad outside
+        // the `[-w, w]` clip cube; the GPU drops the primitive before
+        // the fragment stage runs, matching the V-51 "no measurable
+        // fps regression" contract (per-star cost is one dot + one
+        // branch).
+        out.clip_position = vec4<f32>(0.0, 0.0, -1.0, -1.0);
+        out.uv = vec2<f32>(0.0, 0.0);
+        out.color = vec3<f32>(0.0);
+        out.brightness = 0.0;
+        out.sprite_half_px = 0.0;
+        return out;
     }
 
     out.uv = input.quad_pos;
