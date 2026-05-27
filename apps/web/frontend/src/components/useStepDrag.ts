@@ -84,28 +84,41 @@ const CURSOR_BRIGHT = "#f5f7fb";
 const CURSOR_DIM = "rgba(245, 247, 251, 0.35)";
 const CURSOR_STROKE = "#0a0c16";
 
+/// Cursor / indicator dimensions. Sized so the chevrons are unmistakable
+/// even at a glance. The actual arrowheads take most of the width — the
+/// connecting bar is intentionally a thin sliver so the user reads the
+/// shape as "two big triangles" rather than "one little stretched icon".
+const CURSOR_WIDTH = 48;
+const CURSOR_HEIGHT = 28;
+const CURSOR_HOTSPOT_X = 24;
+const CURSOR_HOTSPOT_Y = 14;
+
 function cursorSvg(highlight: CursorHighlight): string {
-  const leftFill = highlight === "right" ? CURSOR_DIM : CURSOR_BRIGHT;
-  const rightFill = highlight === "left" ? CURSOR_DIM : CURSOR_BRIGHT;
+  const leftStroke = highlight === "right" ? CURSOR_DIM : CURSOR_BRIGHT;
+  const rightStroke = highlight === "left" ? CURSOR_DIM : CURSOR_BRIGHT;
+  // Two simple chevrons (‹  ›). The black "halo" stroke underneath keeps
+  // the shape legible against any sky colour without the noise of a full
+  // boxed icon. No connecting bar; the gap in the middle is the
+  // "this is a horizontal scrubber" hint.
   return (
-    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="14" viewBox="0 0 24 14">' +
-    // Left arrowhead.
-    `<path d="M 1 7 L 6 3 L 6 11 Z" fill="${leftFill}" stroke="${CURSOR_STROKE}" stroke-width="1" stroke-linejoin="round"/>` +
-    // Connecting bar (always bright — keeps the shape readable).
-    `<path d="M 6 6 L 18 6 L 18 8 L 6 8 Z" fill="${CURSOR_BRIGHT}" stroke="${CURSOR_STROKE}" stroke-width="1" stroke-linejoin="round"/>` +
-    // Right arrowhead.
-    `<path d="M 23 7 L 18 3 L 18 11 Z" fill="${rightFill}" stroke="${CURSOR_STROKE}" stroke-width="1" stroke-linejoin="round"/>` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${CURSOR_WIDTH}" height="${CURSOR_HEIGHT}" viewBox="0 0 ${CURSOR_WIDTH} ${CURSOR_HEIGHT}">` +
+    // Halo: same paths drawn first with a thicker dark stroke.
+    `<path d="M 16 5 L 5 14 L 16 23 M 32 5 L 43 14 L 32 23" fill="none" stroke="${CURSOR_STROKE}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>` +
+    // Left chevron on top of the halo.
+    `<path d="M 16 5 L 5 14 L 16 23" fill="none" stroke="${leftStroke}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` +
+    // Right chevron on top of the halo.
+    `<path d="M 32 5 L 43 14 L 32 23" fill="none" stroke="${rightStroke}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` +
     "</svg>"
   );
 }
 
 /// CSS `cursor` value using the neutral SVG (both arrows bright), with the
-/// hotspot at the arrow centre (12, 7). Falls back to the system
-/// `ew-resize` cursor if the data-URL form is rejected (very old browsers,
-/// CSP rules that block `data:` URLs for cursors, etc.).
+/// hotspot at the arrow centre. Falls back to the system `ew-resize`
+/// cursor if the data-URL form is rejected (very old browsers, CSP rules
+/// that block `data:` URLs for cursors, etc.).
 export const STEP_DRAG_CURSOR = `url('data:image/svg+xml;utf8,${encodeURIComponent(
   cursorSvg("none"),
-)}') 12 7, ew-resize`;
+)}') ${CURSOR_HOTSPOT_X} ${CURSOR_HOTSPOT_Y}, ew-resize`;
 
 function createCursorIndicator(
   clientX: number,
@@ -116,10 +129,10 @@ function createCursorIndicator(
   el.setAttribute("aria-hidden", "true");
   el.style.cssText = [
     "position: fixed",
-    `left: ${clientX - 12}px`,
-    `top: ${clientY - 7}px`,
-    "width: 24px",
-    "height: 14px",
+    `left: ${clientX - CURSOR_HOTSPOT_X}px`,
+    `top: ${clientY - CURSOR_HOTSPOT_Y}px`,
+    `width: ${CURSOR_WIDTH}px`,
+    `height: ${CURSOR_HEIGHT}px`,
     "pointer-events: none",
     "z-index: 2147483647",
     "filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55))",
