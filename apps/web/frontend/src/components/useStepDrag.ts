@@ -94,20 +94,18 @@ const CURSOR_HOTSPOT_X = 24;
 const CURSOR_HOTSPOT_Y = 14;
 
 function cursorSvg(highlight: CursorHighlight): string {
-  const leftStroke = highlight === "right" ? CURSOR_DIM : CURSOR_BRIGHT;
-  const rightStroke = highlight === "left" ? CURSOR_DIM : CURSOR_BRIGHT;
-  // Two simple chevrons (‹  ›). The black "halo" stroke underneath keeps
-  // the shape legible against any sky colour without the noise of a full
-  // boxed icon. No connecting bar; the gap in the middle is the
-  // "this is a horizontal scrubber" hint.
+  const leftFill = highlight === "right" ? CURSOR_DIM : CURSOR_BRIGHT;
+  const rightFill = highlight === "left" ? CURSOR_DIM : CURSOR_BRIGHT;
+  // Two filled triangles (◀  ▶). The dark stroke around each triangle
+  // acts as a halo so the shape stays legible against any sky colour.
+  // No connecting bar; the gap in the middle reads as the
+  // "horizontal scrubber" affordance.
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${CURSOR_WIDTH}" height="${CURSOR_HEIGHT}" viewBox="0 0 ${CURSOR_WIDTH} ${CURSOR_HEIGHT}">` +
-    // Halo: same paths drawn first with a thicker dark stroke.
-    `<path d="M 16 5 L 5 14 L 16 23 M 32 5 L 43 14 L 32 23" fill="none" stroke="${CURSOR_STROKE}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>` +
-    // Left chevron on top of the halo.
-    `<path d="M 16 5 L 5 14 L 16 23" fill="none" stroke="${leftStroke}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` +
-    // Right chevron on top of the halo.
-    `<path d="M 32 5 L 43 14 L 32 23" fill="none" stroke="${rightStroke}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` +
+    // Left triangle (apex at the left edge).
+    `<path d="M 4 14 L 20 4 L 20 24 Z" fill="${leftFill}" stroke="${CURSOR_STROKE}" stroke-width="1.5" stroke-linejoin="round"/>` +
+    // Right triangle (apex at the right edge).
+    `<path d="M 44 14 L 28 4 L 28 24 Z" fill="${rightFill}" stroke="${CURSOR_STROKE}" stroke-width="1.5" stroke-linejoin="round"/>` +
     "</svg>"
   );
 }
