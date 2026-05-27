@@ -121,11 +121,11 @@ features (`V-45`–`V-50`), and rare phenomena (`V-47`–`V-49`).
 occultations, planetary rings and moons, resolved star clusters, double
 stars, artificial satellites, and object search / GoTo / info panel) —
 these surface existing engine capability that the current UI hides. The
-first three slices of `V-51` (common occultation primitives, the
-general N≤16 occluder uniform array, and the solar-eclipse renderer
-path — `V-51a` + `V-51b` + `V-51c`) have shipped; `V-51d`/`e`/`f` (lunar
-occultation + planetary transit + mutual planetary occultation) are
-next.
+first four slices of `V-51` (common occultation primitives, the general
+N≤16 occluder uniform array, the solar-eclipse renderer path, and
+lunar occultation of stars and planets — `V-51a` + `V-51b` + `V-51c` +
+`V-51d`) have shipped; `V-51e`/`f` (planetary transit + mutual
+planetary occultation) are next.
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
@@ -195,7 +195,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-48` | **Aurora display** | ⬜ |
 | `V-49` | **Comet rendering** | ⬜ |
 | `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ⬜ |
-| `V-51` | **Unified eclipse / occultation pass** (`a` + `b` + `c` done; `d`/`e`/`f` open) | ⏳ |
+| `V-51` | **Unified eclipse / occultation pass** (`a` + `b` + `c` + `d` done; `e`/`f` open) | ⏳ |
 | `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** | ⬜ |
 | `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** | ⬜ |
 | `V-54` | **Double / binary star resolution** | ⬜ |
@@ -1633,7 +1633,7 @@ management is a post-gamut matrix + transfer-function swap.
 
 ## Solar system geometry — eclipses and occultations
 
-### `V-51` Unified eclipse / occultation pass — ⏳ (`V-51a` + `V-51b` + `V-51c` shipped)
+### `V-51` Unified eclipse / occultation pass — ⏳ (`V-51a` + `V-51b` + `V-51c` + `V-51d` shipped)
 
 **Item.** Today only the lunar eclipse is modelled (`V-36`: Earth's umbra
 darkening the Moon). Every other foreground/background pair where one
@@ -1732,9 +1732,17 @@ benchmark scenes.
   `find_solar_eclipse(observer, start, end)` exposes peak +
   contacts to planning hosts.
 - **`V-51d` Lunar occultation of stars and planets (Moon → star/planet).**
-  CPU-side cull of HYG catalog sprites and planet sprites whose
-  topocentric direction lies inside the Moon's disk. Disappearance /
-  reappearance contact times exposed via `planning.rs`.
+  ✅ Shipped. `astronomy::active_occluders` emits an always-on Moon →
+  Stars cull entry (`OccluderTarget::Stars`, code `-1`) plus per-pair
+  Moon → Planet entries (`OccluderTarget::Planet(i)`, code `2 + i`)
+  whenever the Moon and a planet disk are in contact.
+  `shaders/star.wgsl::vs_main` iterates the star-target entries (one
+  normalised dot + one `cos(radius)` compare each) and hides the
+  catalog sprite when inside the lunar disk; the existing analytic
+  `disk_mask` keeps off-occultation frames bit-identical to the pre-
+  V-51d render. Planning side: `find_lunar_occultation(observer,
+  body, start, end)` with `LunarOccultedBody::{ Star { dir_date_eq },
+  Planet(p) }` returns P1–P4 via the shared V-51a bisection refine.
 - **`V-51e` Mercury / Venus transit of the Sun (planet → Sun).** Planet
   apparent disk drawn as a black sub-circle inside the Sun sprite via
   the same subtract path; partial / interior contact times exposed.
