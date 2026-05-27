@@ -91,7 +91,8 @@ function loadAtmosphereFromUrl(params?: URLSearchParams): AtmosphereConfig | nul
     !params.has("observerAltitudeM") &&
     !params.has("ozoneDu") &&
     !params.has("pressureHpa") &&
-    !params.has("temperatureC")
+    !params.has("temperatureC") &&
+    !params.has("surfaceAlbedo")
   ) {
     return null;
   }
@@ -119,6 +120,13 @@ function loadAtmosphereFromUrl(params?: URLSearchParams): AtmosphereConfig | nul
       DEFAULT_ATMOSPHERE_CONFIG.temperatureC,
       -80,
       60,
+    ),
+    surfaceAlbedo: numberParam(
+      params,
+      "surfaceAlbedo",
+      DEFAULT_ATMOSPHERE_CONFIG.surfaceAlbedo,
+      0,
+      1,
     ),
   };
 }
@@ -151,6 +159,7 @@ function loadSessionFromUrl(): UrlSession | null {
     "ozoneDu",
     "pressureHpa",
     "temperatureC",
+    "surfaceAlbedo",
     "eyepiece",
     "otaApertureMm",
     "otaFocalMm",
@@ -268,6 +277,7 @@ function sessionUrl({ observer, view, overlays, atmosphere, planets, projection,
   url.searchParams.set("ozoneDu", String(Math.round(atmosphere.ozoneDu)));
   url.searchParams.set("pressureHpa", String(Math.round(atmosphere.pressureHpa)));
   url.searchParams.set("temperatureC", atmosphere.temperatureC.toFixed(0));
+  url.searchParams.set("surfaceAlbedo", atmosphere.surfaceAlbedo.toFixed(2));
   url.searchParams.set("eyepiece", eyepiece.enabled ? "on" : "off");
   url.searchParams.set("otaApertureMm", eyepiece.apertureMm.toFixed(0));
   url.searchParams.set("otaFocalMm", eyepiece.focalLengthMm.toFixed(0));

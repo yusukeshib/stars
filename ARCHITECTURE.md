@@ -155,8 +155,10 @@ All crates should preserve these conventions:
 
 ## Session files
 
-Portable scene state uses schema-versioned JSON with top-level
-`schemaVersion: 1`. The native representation lives in
+Portable scene state uses schema-versioned JSON with the current top-level
+`schemaVersion: 3` (v2 unified the spectral extinction state via `V-37`; v3
+added `surfaceAlbedo` for the Hošek-Wilkie daylight model in `V-38`). The
+native representation lives in
 `stars_host_common::session`; the web frontend keeps a TypeScript mirror in
 `apps/web/frontend/src/session.ts`. Field names are stable host-facing names
 (camel-case objects and kebab-case enum values), with degrees for UI-facing
