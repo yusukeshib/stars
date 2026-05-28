@@ -271,13 +271,13 @@ fn angular_separation_f64(a: [f64; 3], b: [f64; 3]) -> f64 {
 /// from J2000). It is adequate for the current visual VSOP87/FK5 + lunar
 /// series inputs, but it is **not** the full standards-grade ephemeris stack
 /// tracked in ROADMAP Phase 3.
-pub(crate) fn mean_obliquity_rad(julian_date: f64) -> f64 {
+fn mean_obliquity_rad(julian_date: f64) -> f64 {
     let t = (julian_date - J2000_JD) / 36_525.0;
     let mean_obliquity_arcsec = 21.448 - t * (46.8150 + t * (0.00059 - t * 0.001813));
     (23.0 + (26.0 + mean_obliquity_arcsec / 60.0) / 60.0) * DEG_TO_RAD
 }
 
-pub(crate) fn ecliptic_to_equatorial_vector(
+fn ecliptic_to_equatorial_vector(
     longitude_rad: f64,
     latitude_rad: f64,
     radius: f64,

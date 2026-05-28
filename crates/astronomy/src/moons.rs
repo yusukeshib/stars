@@ -200,8 +200,7 @@ fn galilean_moons_from_jupiter(
     let r_j_km = JUPITER_EQUATORIAL_RADIUS_KM;
     let log_term = (jupiter_heliocentric_distance_au * jupiter_distance_au).log10();
 
-    let mut out: [Option<GalileanMoonApparent>; 4] = [None, None, None, None];
-    for (slot, moon) in GalileanMoon::ALL.iter().enumerate() {
+    GalileanMoon::ALL.map(|moon| {
         // Meeus's `apprnt_rect_coords`:
         //   * X positive **west** of Jupiter (i.e. opposite the direction of
         //     increasing RA);
@@ -227,25 +226,18 @@ fn galilean_moons_from_jupiter(
         let (right_ascension_rad, declination_rad, distance_km) =
             ra_dec_from_equatorial_vector(pos_km);
         let distance_au = distance_km / ASTRONOMICAL_UNIT_KM;
-        let radius_km = moon.radius_km();
-        let angular_radius_rad = (radius_km / distance_km).atan();
+        let angular_radius_rad = (moon.radius_km() / distance_km).atan();
         let magnitude = moon.reduced_magnitude() + 5.0 * log_term;
 
-        out[slot] = Some(GalileanMoonApparent {
-            moon: *moon,
+        GalileanMoonApparent {
+            moon,
             right_ascension_rad,
             declination_rad,
             distance_au,
             angular_radius_rad,
             magnitude,
-        });
-    }
-    [
-        out[0].unwrap(),
-        out[1].unwrap(),
-        out[2].unwrap(),
-        out[3].unwrap(),
-    ]
+        }
+    })
 }
 
 fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
