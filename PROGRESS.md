@@ -414,16 +414,85 @@ gibbous appears as a ~24 % waning crescent). The sign is now `-moon_dir`,
 matching the geometric convention that `moon_dir` points from the observer to
 the Moon.
 
-### Unified eclipse / occultation pass (`V-51a` + `V-51b` + `V-51c` + `V-51d` + `V-51e`)
+### Mutual planetary occultation (`V-51f`)
 
-First five slices of `V-51` (unified eclipse / occultation pass):
-common occultation primitives (`V-51a`), the general `MAX_OCCLUDERS
-= 16` analytic-mask uniform array (`V-51b`), the solar-eclipse
-renderer wiring (Moon → Sun pair, `V-51c`), lunar occultation of
-stars and planets (`V-51d`), and Mercury / Venus transit of the Sun
-(`V-51e`). The mutual planetary occultation slice (`V-51f`) plugs a
-planet-on-planet producer into the same `active_occluders` list and
-ships in a follow-up PR.
+Sixth slice of `V-51` and the last open producer in the unified
+eclipse / occultation pass: the seven rendered planets now occult each
+other when one planet's apparent disk passes in front of another's.
+The V-51b general `MAX_OCCLUDERS = 16` analytic-mask array and the
+`OccluderTarget::Planet(i)` shader path were already wired by V-51d
+(Moon-on-Planet), so this slice is a producer-side change plus a
+new planning-side helper. Mutual planetary occultations are rare in
+practice (the next visible event is 2065-11-22 Venus occults Jupiter),
+so historical-event positive-detection validation is deferred until
+the `L-06` DE440 upgrade lands; producer-contract and same-planet /
+off-event rejection are pinned today.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/planning.rs` (`active_occluders` extended
+  with a Planet-on-Planet sub-producer; new
+  `find_mutual_planetary_occultation` planning helper +
+  `MutualPlanetaryOccultationEvent` type).
+- `crates/astronomy/src/lib.rs` (re-exports for the new helper and
+  event type).
+- `crates/renderer/src/shaders/skyglow.wgsl` (comment updates only —
+  the analytic-mask path is unchanged because the V-51d
+  `OCCLUDER_TARGET_PLANET_BASE + i` lookup already subtracts any
+  Planet-targeted occluder from planet `i`'s disk).
+
+Shipped capabilities:
+
+- `active_occluders` now precomputes the seven apparent planet disks
+  once per call, then iterates unordered planet pairs `(i, j)` with
+  `i < j`. For each pair the closer planet (smaller `distance_au`) is
+  assigned as the front disk and the farther as the back; the pair is
+  classified via the V-51a `classify_disks` primitive, and on contact
+  the producer pushes one `Occluder { target: Planet(back), front_dir,
+  front_radius, kind, obscuration }` into the bounded list. Off-event
+  the inner double loop costs 21 dot products and pushes zero entries,
+  inside the analytic-mask "zero cost off-event" contract.
+- `find_mutual_planetary_occultation(observer, planet_a, planet_b,
+  start_jd_utc, end_jd_utc) -> Option<MutualPlanetaryOccultationEvent>`
+  mirrors `find_lunar_occultation`: it rejects same-planet pairs up
+  front, drives a 1-minute scan to locate the closest approach (and
+  re-evaluates the front / back assignment at peak), then refines
+  P1–P4 via the shared `contact_times` bisection. The event carries
+  `front`, `back`, `kind`, `min_separation_rad`, `peak_obscuration`,
+  `peak_jd_utc`, and `contacts`.
+
+Validation (pinned in `VALIDATION.md`):
+
+- `planning::tests::find_mutual_planetary_occultation_rejects_same_planet`
+  guards the degenerate self-pair contract.
+- `planning::tests::find_mutual_planetary_occultation_returns_none_off_event`
+  asserts no false-positive event detection across Venus-Jupiter,
+  Mercury-Mars, and Mars-Saturn on a quiet day (2025-07-01 Tokyo).
+- `planning::tests::active_occluders_emit_no_planet_on_planet_off_event`
+  pins the producer contract: on a normal day no occluder carries a
+  `Planet(_)` target with a non-lunar front-disk radius. V-51d
+  Moon-on-Planet entries (front radius = lunar apparent radius) are
+  discriminated by the front-disk radius, two orders of magnitude
+  larger than any planet's apparent radius.
+
+Documented limit. Historical-event positive-detection validation
+against the next visible mutual planetary occultation (2065-11-22
+Venus occults Jupiter) is deferred until the DE440 upgrade tracked as
+`L-06` lands; the current VSOP87 stack drifts a few minutes at that
+epoch, which is acceptable for the producer contract but not for
+sub-30 s P1–P4 matching against the historical canon.
+
+### Unified eclipse / occultation pass (`V-51a` + `V-51b` + `V-51c` + `V-51d` + `V-51e` + `V-51f`)
+
+All six slices of `V-51` (unified eclipse / occultation pass) have
+shipped: common occultation primitives (`V-51a`), the general
+`MAX_OCCLUDERS = 16` analytic-mask uniform array (`V-51b`), the
+solar-eclipse renderer wiring (Moon → Sun pair, `V-51c`), lunar
+occultation of stars and planets (`V-51d`), Mercury / Venus transit
+of the Sun (`V-51e`), and mutual planetary occultation (`V-51f`). The
+V-51f slice is documented in its own section above; the entry below
+covers the V-51a / V-51b / V-51c primitive + uniform + renderer
+foundation that the other slices build on.
 
 Primary implementation areas:
 

@@ -456,11 +456,12 @@ pub fn solar_eclipse_state(observer: Observer) -> SolarEclipseState {
 ///   Sun (inferior-conjunction side); a superior conjunction places
 ///   the planet behind the Sun, where the pure-geometry classifier
 ///   would otherwise spuriously fire.
-///
-/// Open producers (TODO):
-///
-/// * `V-51f` — mutual planetary occultation
-///   ([`OccluderTarget::Planet`] backed by another planet disk).
+/// * **V-51f** — mutual planetary occultation
+///   ([`OccluderTarget::Planet`] backed by another planet disk). For
+///   each unordered pair the closer planet is the front disk; the
+///   producer emits one entry per pair currently in contact, with the
+///   target index pointing at the farther planet so the analytic-mask
+///   shader path subtracts the front disk from the back planet's disk.
 ///
 /// The list is bounded by [`crate::occultation::MAX_OCCLUDERS`]; pushes
 /// past capacity are silently dropped rather than allocated.
@@ -506,14 +507,24 @@ pub fn active_occluders(observer: Observer) -> ActiveOccluders {
         obscuration: 0.0,
     });
 
-    // V-51d Moon-on-Planet and V-51e Planet-on-Sun share the same
-    // per-planet ephemeris call, so the two producers fuse into one pass
-    // over `Planet::ALL`. The indexing follows `Planet::ALL`, which is
-    // also the order the renderer packs into `planet_eq_radius[i]`, so
-    // the shader's `OCCLUDER_TARGET_PLANET_BASE + i` lookup matches.
+    // V-51d Moon-on-Planet, V-51e Planet-on-Sun, and V-51f
+    // Planet-on-Planet all need the per-planet apparent disk. Compute
+    // each one once up-front so the three producers share the work; the
+    // indexing follows `Planet::ALL`, which is also the order the
+    // renderer packs into `planet_eq_radius[i]`, so the shader's
+    // `OCCLUDER_TARGET_PLANET_BASE + i` lookup matches.
+    let planet_apparents: [_; 7] =
+        core::array::from_fn(|i| apparent_planet_topocentric(observer, Planet::ALL[i]));
+    let planet_disks: [ApparentDisk; 7] = core::array::from_fn(|i| {
+        ApparentDisk::new(
+            planet_apparents[i].direction_equatorial(),
+            planet_apparents[i].angular_radius_rad,
+        )
+    });
+
     for (i, &planet) in Planet::ALL.iter().enumerate() {
-        let p = apparent_planet_topocentric(observer, planet);
-        let p_disk = ApparentDisk::new(p.direction_equatorial(), p.angular_radius_rad);
+        let p = planet_apparents[i];
+        let p_disk = planet_disks[i];
 
         // V-51d Moon-on-Planet: classify each pair, push only the active
         // ones so the analytic-mask path stays at zero cost off-event.
@@ -555,6 +566,40 @@ pub fn active_occluders(observer: Observer) -> ActiveOccluders {
             kind: planet_sun_kind,
             obscuration: planet_obscuration,
         });
+    }
+
+    // V-51f Planet-on-Planet. Iterate unordered pairs once; for each
+    // pair pick the closer planet as the front disk (the classifier is
+    // pure geometry, so the distance test is what stops a far planet
+    // sitting behind a near planet from spuriously masking it). Mutual
+    // planetary occultations are rare enough (~once per few decades)
+    // that the inner double loop costs ~21 dot products off-event and
+    // pushes zero entries, well inside the analytic-mask "zero cost
+    // off-event" contract.
+    for i in 0..Planet::ALL.len() {
+        for j in (i + 1)..Planet::ALL.len() {
+            let (front_idx, back_idx) =
+                if planet_apparents[i].distance_au <= planet_apparents[j].distance_au {
+                    (i, j)
+                } else {
+                    (j, i)
+                };
+            let front_disk = planet_disks[front_idx];
+            let back_disk = planet_disks[back_idx];
+            let kind = classify_disks(front_disk, back_disk);
+            if matches!(kind, OccultationKind::None) {
+                continue;
+            }
+            let front_dir = planet_apparents[front_idx].direction_equatorial();
+            let obscuration = obscuration_fraction(front_disk, back_disk) as f64;
+            let _ = out.push(Occluder {
+                front_dir_eq: [front_dir.x as f64, front_dir.y as f64, front_dir.z as f64],
+                front_radius_rad: planet_apparents[front_idx].angular_radius_rad,
+                target: OccluderTarget::Planet(back_idx as u8),
+                kind,
+                obscuration,
+            });
+        }
     }
 
     out
@@ -864,6 +909,133 @@ pub fn find_planet_transit(
     Some(PlanetTransitEvent {
         planet,
         kind: peak_kind,
+        peak_obscuration,
+        peak_jd_utc: peak_jd,
+        contacts,
+    })
+}
+
+/// One mutual planetary occultation event located inside a planning
+/// window (V-51f).
+#[derive(Debug, Clone, Copy)]
+pub struct MutualPlanetaryOccultationEvent {
+    /// Planet whose disk is in front at peak (closer to the observer).
+    pub front: Planet,
+    /// Planet whose disk is being occulted at peak (farther from the
+    /// observer).
+    pub back: Planet,
+    /// Deepest geometry reached inside the window. Mutual planetary
+    /// occultations span the full classifier range: a near miss is
+    /// [`OccultationKind::Partial`], a small-on-large overlap such as
+    /// Mercury behind Jupiter is [`OccultationKind::AnnularOrTransit`],
+    /// and a large-on-small overlap such as Venus in front of Mars is
+    /// [`OccultationKind::Total`].
+    pub kind: OccultationKind,
+    /// Minimum apparent separation between the two planet centres in
+    /// radians anywhere in the window.
+    pub min_separation_rad: f64,
+    /// Peak obscuration fraction of the back disk in `[0, 1]`. Saturates
+    /// at 1 for total events.
+    pub peak_obscuration: f32,
+    /// Julian Date (UTC) of minimum separation.
+    pub peak_jd_utc: f64,
+    /// Canonical P1..P4 contact times (UTC Julian Dates). `P2`/`P3` are
+    /// `None` for purely grazing partial events.
+    pub contacts: ContactTimes,
+}
+
+impl MutualPlanetaryOccultationEvent {
+    /// `true` if the event entered a central phase (the smaller disk
+    /// fully inside the larger, or the larger fully covering the
+    /// smaller).
+    pub fn is_central(&self) -> bool {
+        self.kind.is_central()
+    }
+}
+
+/// Search `[start_jd_utc, end_jd_utc]` for a mutual planetary
+/// occultation of `planet_a` and `planet_b` visible from `observer`
+/// (V-51f).
+///
+/// Returns `None` when the two planets are the same, when the window
+/// is malformed, or when the apparent separation never falls below
+/// `r_a + r_b` inside the window. The classifier is pure geometry, so
+/// the helper assigns the closer planet at peak as the front disk and
+/// the farther one as the back; the same assignment then drives the
+/// `contact_times` bisection so `front`/`back` and the P1–P4 instants
+/// agree.
+///
+/// Like [`find_solar_eclipse`] this is meant to be called once per
+/// known event date with a ~12 h bracket; it does not try to enumerate
+/// every mutual occultation in a long window.
+pub fn find_mutual_planetary_occultation(
+    observer: Observer,
+    planet_a: Planet,
+    planet_b: Planet,
+    start_jd_utc: f64,
+    end_jd_utc: f64,
+) -> Option<MutualPlanetaryOccultationEvent> {
+    if planet_a == planet_b {
+        return None;
+    }
+    if !(start_jd_utc.is_finite() && end_jd_utc.is_finite()) || end_jd_utc <= start_jd_utc {
+        return None;
+    }
+    // Per-sample apparent disks + the foreground decision. The closer
+    // planet is the front disk; this drives both the producer ordering
+    // and the obscuration-fraction direction.
+    let probe = |jd: f64| -> (ApparentDisk, ApparentDisk, Planet, Planet) {
+        let obs = observer_at(observer, jd);
+        let a = apparent_planet_topocentric(obs, planet_a);
+        let b = apparent_planet_topocentric(obs, planet_b);
+        let a_disk = ApparentDisk::new(a.direction_equatorial(), a.angular_radius_rad);
+        let b_disk = ApparentDisk::new(b.direction_equatorial(), b.angular_radius_rad);
+        if a.distance_au <= b.distance_au {
+            (a_disk, b_disk, planet_a, planet_b)
+        } else {
+            (b_disk, a_disk, planet_b, planet_a)
+        }
+    };
+    // 1-minute scan: mutual planetary occultations have ingress / egress
+    // widths of order a few minutes (the planets' apparent diameters
+    // are tens of arcseconds and the slower of the two sweeps a few
+    // arcsec / minute), so 1 minute is dense enough to bracket all four
+    // contacts. The lunar-occultation helper uses the same cadence.
+    let scan_step = 1.0 / (24.0 * 60.0);
+    let mut peak_jd = start_jd_utc;
+    let mut min_sep = f64::INFINITY;
+    let mut peak_kind = OccultationKind::None;
+    let mut peak_obscuration = 0.0_f32;
+    let mut peak_front = planet_a;
+    let mut peak_back = planet_b;
+    let mut t = start_jd_utc;
+    while t <= end_jd_utc + 1e-12 {
+        let t_clamped = t.min(end_jd_utc);
+        let (front, back, front_p, back_p) = probe(t_clamped);
+        let sep = front.separation_rad(back);
+        if sep.is_finite() && sep < min_sep {
+            min_sep = sep;
+            peak_jd = t_clamped;
+            peak_kind = classify_disks(front, back);
+            peak_obscuration = obscuration_fraction(front, back);
+            peak_front = front_p;
+            peak_back = back_p;
+        }
+        t += scan_step;
+    }
+    if matches!(peak_kind, OccultationKind::None) {
+        return None;
+    }
+    let disks = |jd: f64| -> (ApparentDisk, ApparentDisk) {
+        let (front, back, _, _) = probe(jd);
+        (front, back)
+    };
+    let contacts = contact_times(start_jd_utc, end_jd_utc, disks);
+    Some(MutualPlanetaryOccultationEvent {
+        front: peak_front,
+        back: peak_back,
+        kind: peak_kind,
+        min_separation_rad: min_sep,
         peak_obscuration,
         peak_jd_utc: peak_jd,
         contacts,
@@ -1228,6 +1400,69 @@ mod tests {
         // this code to skip the Koomen falloff / corona that only the
         // Moon-on-Sun pair triggers.
         assert_eq!(occ.kind, OccultationKind::AnnularOrTransit);
+    }
+
+    #[test]
+    fn find_mutual_planetary_occultation_rejects_same_planet() {
+        // V-51f: identical front and back collapses to a degenerate
+        // self-pair; the helper must refuse without scanning.
+        let start = jd_utc_from_iso_hours(2025, 7, 1, 0.0);
+        let end = jd_utc_from_iso_hours(2025, 7, 1, 24.0);
+        let observer = Observer::from_degrees(35.68, 139.69, 0.5 * (start + end));
+        assert!(find_mutual_planetary_occultation(
+            observer,
+            Planet::Venus,
+            Planet::Venus,
+            start,
+            end,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn find_mutual_planetary_occultation_returns_none_off_event() {
+        // 2025-07-01 Tokyo: Venus and Jupiter are several tens of
+        // degrees apart all day, so no pair occults any other pair.
+        let start = jd_utc_from_iso_hours(2025, 7, 1, 0.0);
+        let end = jd_utc_from_iso_hours(2025, 7, 1, 24.0);
+        let observer = Observer::from_degrees(35.68, 139.69, 0.5 * (start + end));
+        for (a, b) in [
+            (Planet::Venus, Planet::Jupiter),
+            (Planet::Mercury, Planet::Mars),
+            (Planet::Mars, Planet::Saturn),
+        ] {
+            assert!(
+                find_mutual_planetary_occultation(observer, a, b, start, end).is_none(),
+                "unexpected mutual occultation between {a:?} and {b:?} on 2025-07-01"
+            );
+        }
+    }
+
+    #[test]
+    fn active_occluders_emit_no_planet_on_planet_off_event() {
+        // V-51f producer contract off-event: no occluder with both a
+        // Planet target *and* a front disk matching one of the seven
+        // apparent planet disks. The Moon-on-Stars cull entry plus any
+        // Moon-on-Planet entries are unaffected by this assertion.
+        let start = jd_utc_from_iso_hours(2025, 7, 1, 0.0);
+        let end = jd_utc_from_iso_hours(2025, 7, 1, 24.0);
+        let observer = Observer::from_degrees(35.68, 139.69, 0.5 * (start + end));
+        let list = active_occluders(observer);
+        let moon = apparent_moon_topocentric(observer);
+        for occ in list.as_slice() {
+            if !matches!(occ.target, OccluderTarget::Planet(_)) {
+                continue;
+            }
+            // V-51d Moon-on-Planet entries carry the lunar apparent
+            // radius; V-51f Planet-on-Planet entries carry a planet's
+            // apparent radius (~arcseconds, two orders of magnitude
+            // smaller). The two are easy to discriminate without
+            // re-running the producer logic.
+            assert!(
+                (occ.front_radius_rad - moon.angular_radius_rad).abs() < 1.0e-9,
+                "unexpected Planet-on-Planet occluder off-event: {occ:?}",
+            );
+        }
     }
 
     #[test]

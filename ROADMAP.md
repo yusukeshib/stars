@@ -121,11 +121,12 @@ features (`V-45`–`V-50`), and rare phenomena (`V-47`–`V-49`).
 occultations, planetary rings and moons, resolved star clusters, double
 stars, artificial satellites, and object search / GoTo / info panel) —
 these surface existing engine capability that the current UI hides. The
-first five slices of `V-51` (common occultation primitives, the general
-N≤16 occluder uniform array, the solar-eclipse renderer path, lunar
-occultation of stars and planets, and Mercury / Venus transits of the
-Sun — `V-51a` + `V-51b` + `V-51c` + `V-51d` + `V-51e`) have shipped;
-`V-51f` (mutual planetary occultation) is next.
+unified eclipse / occultation pass `V-51` has now shipped end-to-end:
+common occultation primitives (`V-51a`), the general N≤16 occluder
+uniform array (`V-51b`), the solar-eclipse renderer path (`V-51c`),
+lunar occultation of stars and planets (`V-51d`), Mercury / Venus
+transits of the Sun (`V-51e`), and mutual planetary occultation
+(`V-51f`).
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
@@ -195,7 +196,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-48` | **Aurora display** | ⬜ |
 | `V-49` | **Comet rendering** | ⬜ |
 | `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ⬜ |
-| `V-51` | **Unified eclipse / occultation pass** (`a` + `b` + `c` + `d` + `e` done; `f` open) | ⏳ |
+| `V-51` | **Unified eclipse / occultation pass** (`a` + `b` + `c` + `d` + `e` + `f` done) | ✅ |
 | `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** | ⬜ |
 | `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** | ⬜ |
 | `V-54` | **Double / binary star resolution** | ⬜ |
@@ -1633,7 +1634,7 @@ management is a post-gamut matrix + transfer-function swap.
 
 ## Solar system geometry — eclipses and occultations
 
-### `V-51` Unified eclipse / occultation pass — ⏳ (`V-51a` + `V-51b` + `V-51c` + `V-51d` + `V-51e` shipped)
+### `V-51` Unified eclipse / occultation pass — ✅ (`V-51a` + `V-51b` + `V-51c` + `V-51d` + `V-51e` + `V-51f` shipped)
 
 **Item.** Today only the lunar eclipse is modelled (`V-36`: Earth's umbra
 darkening the Moon). Every other foreground/background pair where one
@@ -1761,10 +1762,24 @@ benchmark scenes.
   P1–P4 via the shared V-51a bisection refine. New `VenusTransit`
   scene preset (2012-06-06, Tokyo, az ≈ 113°, alt ≈ 55°, 2° FoV)
   frames the only transit in the validation canon until 2117.
-- **`V-51f` Mutual planetary occultation (planet → planet).** Same
-  classify + mask path applied to the planet ↔ planet pairs. Rare in
-  practice; validated only at known historical events (e.g. Venus
-  occults Jupiter 1818-01-03).
+- **`V-51f` Mutual planetary occultation (planet → planet).** ✅ Shipped.
+  `active_occluders` now iterates every unordered planet pair, assigns
+  the closer planet as the front disk, and emits one
+  `OccluderTarget::Planet(back)` entry per pair currently in contact;
+  the renderer's analytic-mask path (already generic over
+  `OccluderTarget::Planet(i)` for `V-51d` Moon-on-Planet) subtracts the
+  front disk from the back planet's source term without any shader
+  churn. Planning side: `find_mutual_planetary_occultation(observer,
+  planet_a, planet_b, start, end)` mirrors `find_lunar_occultation` —
+  1-minute scan for the peak, shared `contact_times` bisection for
+  P1–P4, and a `MutualPlanetaryOccultationEvent` carrying the front /
+  back assignment, kind, peak obscuration, and contact times. Mutual
+  planetary occultations are rare in practice (next visible event
+  2065-11-22 Venus-Jupiter); a historical-event positive-detection
+  test is deferred until the `L-06` DE440 upgrade lands, with current
+  validation pinned to off-event `None`, same-planet rejection, and
+  the producer contract that no Planet-on-Planet entries are emitted
+  on a normal day.
 
 **Implementation scope.**
 - `crates/astronomy/src/occultation.rs` (new): pair-wise classifier,

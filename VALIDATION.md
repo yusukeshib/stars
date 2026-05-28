@@ -132,14 +132,16 @@ Current implementation:
 - `planning::active_occluders` is the V-51b producer that builds the
   bounded analytic-mask list (`MAX_OCCLUDERS = 16`) consumed by the
   renderer's `CameraUniform::occluders` array. With V-51c + V-51d +
-  V-51e shipped it emits up to eleven entries per frame: a
-  Sun-targeted entry (Moon → Sun) when a solar eclipse is in contact,
-  an always-on Stars-targeted entry (Moon → catalog stars; the star
-  vertex shader culls sprites whose direction falls inside the front
-  disk), one Planet-targeted entry per Moon ↔ planet pair currently
-  in contact, and a Sun-targeted entry per inner planet (Mercury,
-  Venus) currently transiting the solar disk. V-51f extends the
-  producer without touching the shader contract.
+  V-51e + V-51f shipped it emits one Sun-targeted entry (Moon → Sun)
+  when a solar eclipse is in contact, an always-on Stars-targeted
+  entry (Moon → catalog stars; the star vertex shader culls sprites
+  whose direction falls inside the front disk), one Planet-targeted
+  entry per Moon ↔ planet pair currently in contact, a Sun-targeted
+  entry per inner planet (Mercury, Venus) currently transiting the
+  solar disk, and one Planet-targeted entry per planet ↔ planet pair
+  currently in contact (V-51f assigns the closer planet as the front
+  disk and the farther as the back; the same `OccluderTarget::Planet`
+  variant the renderer already consumes for Moon-on-Planet).
 - `planning::find_lunar_occultation(observer, body, start, end)` is
   the planning-side entry point for `V-51d` lunar occultations of
   stars and planets. `body` is
@@ -153,6 +155,15 @@ Current implementation:
   pure-geometry classifier never confuses a superior-conjunction
   near-alignment with a true transit), and refines P1–P4 via the
   shared `contact_times` bisection.
+- `planning::find_mutual_planetary_occultation(observer, planet_a,
+  planet_b, start, end)` is the planning-side entry point for `V-51f`
+  mutual planetary occultation. The helper rejects same-planet pairs
+  up front, drives a 1-minute scan for the peak (assigning the closer
+  planet at peak as the front disk and the farther as the back), and
+  refines P1–P4 via the shared `contact_times` bisection. The
+  resulting `MutualPlanetaryOccultationEvent` carries the
+  `front`/`back` planet identities, `kind`, `min_separation_rad`,
+  `peak_obscuration`, `peak_jd_utc`, and `contacts`.
 
 Validation expectation:
 
@@ -191,10 +202,23 @@ Current limitation:
   contact times agree only to within a few minutes.
 - V-51 currently ships the Moon-on-Sun pair (`V-51c`), lunar
   occultation of catalog stars + the seven rendered planets
-  (`V-51d`), and Mercury / Venus transits across the Sun (`V-51e`).
-  Mutual planetary occultation (`V-51f`) reuses the same primitives
-  but is not yet validated against the historical canon. The V-51b/d
-  analytic-mask uniform path is pinned by
+  (`V-51d`), Mercury / Venus transits across the Sun (`V-51e`), and
+  mutual planetary occultation (`V-51f`). The V-51f slice reuses the
+  V-51a/b primitives end-to-end; its producer contract is pinned by
+  `planning::tests::active_occluders_emit_no_planet_on_planet_off_event`
+  (no Planet-on-Planet entries on a normal day, discriminated from
+  V-51d Moon-on-Planet entries by the front-disk radius) and the
+  planning helper by
+  `planning::tests::find_mutual_planetary_occultation_rejects_same_planet`
+  and
+  `planning::tests::find_mutual_planetary_occultation_returns_none_off_event`.
+  Historical-event positive-detection validation against the next
+  visible mutual occultation (2065-11-22 Venus occults Jupiter) is
+  deferred until the DE440 ephemeris upgrade tracked as `L-06` lands;
+  the current VSOP87 stack drifts a few minutes at that epoch, which
+  is acceptable for the producer contract but not for sub-30 s P1–P4
+  matching against the historical canon. The V-51b/d/f analytic-mask
+  uniform path is pinned by
   `camera::tests::occluder_uniform_matches_moon_state_at_mazatlan_peak`
   (Sun-targeted entry in slot 0 + Stars-targeted entry in slot 1, both
   with direction equal to `moon_eq_illuminance.xyz` and radius equal
