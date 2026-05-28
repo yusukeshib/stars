@@ -126,9 +126,11 @@ common occultation primitives (`V-51a`), the general N≤16 occluder
 uniform array (`V-51b`), the solar-eclipse renderer path (`V-51c`),
 lunar occultation of stars and planets (`V-51d`), Mercury / Venus
 transits of the Sun (`V-51e`), and mutual planetary occultation
-(`V-51f`). The first rung of `V-52` — the Saturn ring system (`V-52a`)
-— has also shipped; `V-52b`/`c`/`d` (Galilean moons, Titan, shadow
-transits) remain open.
+(`V-51f`). Two rungs of `V-52` are now done: the Saturn ring system
+(`V-52a`) and the Galilean moons at Meeus-grade accuracy (`V-52b`).
+The remaining rungs are `V-52b-E5` (the Lieske 1998 full-series
+precision upgrade to ~5″ / ±100 yr), `V-52c` (Titan), and `V-52d`
+(Galilean shadow / occultation transits).
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
@@ -199,7 +201,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-49` | **Comet rendering** | ⬜ |
 | `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ⬜ |
 | `V-51` | **Unified eclipse / occultation pass** (`a` + `b` + `c` + `d` + `e` + `f` done) | ✅ |
-| `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** (`a` done) | ⏳ |
+| `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** (`a` + `b` done) | ⏳ |
 | `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** | ⬜ |
 | `V-54` | **Double / binary star resolution** | ⬜ |
 | `V-55` | **Artificial satellites (TLE / SGP4)** | ⬜ |
@@ -1851,7 +1853,8 @@ can land in isolation:
 | Sub | Scope | Status |
 |---|---|---|
 | `V-52a` | Saturn ring system (geometry, ring-plane shader, body-on-ring shadow) | ✅ done |
-| `V-52b` | Galilean moons (Io / Europa / Ganymede / Callisto) | ⬜ |
+| `V-52b` | Galilean moons (Io / Europa / Ganymede / Callisto), Meeus-grade | ⏳ in progress |
+| `V-52b-E5` | Galilean moons precision upgrade — full Lieske 1998 E5 (~5″ / ±100 yr) | ⬜ |
 | `V-52c` | Titan | ⬜ |
 | `V-52d` | Galilean shadow / occultation transits on Jupiter (reuses `V-51b`) | ⬜ |
 
@@ -1927,27 +1930,107 @@ round-trip tests can be bumped together.
 
 ---
 
-### `V-52b` Galilean moons — ⬜
+### `V-52b` Galilean moons — ⏳ in progress
 
 **Item.** Io, Europa, Ganymede, Callisto as point sources next to
-Jupiter, with topocentric Jovicentric positions accurate to ~5″ over
-the ±100-year budget.
+Jupiter. Shipped via the Meeus 1998 ch. 44 simplification of
+Lieske's E5 theory (the same algorithm family the `astro` crate's
+`apprnt_rect_coords` is built around); reaches roughly arcminute-grade
+accuracy at the edges of the ROADMAP ±100-yr budget — enough for
+naked-eye / small-eyepiece identification, **not enough** for the full
+~5″ precision gate. The latter is tracked as `V-52b-E5`.
 
-**Scientific basis.** Lieske 1998 E5 theory.
+**Scientific basis.** Meeus 1998 *Astronomical Algorithms* ch. 44
+("Positions of the Satellites of Jupiter"), itself a low-precision
+reduction of Lieske 1977 / Lieske 1998 E5 theory.
+
+**References.**
+- Meeus, J. 1998, *Astronomical Algorithms*, 2nd ed., ch. 44.
+- Lieske, J. H. 1977, A&A 56, 333 (E2 theory, foundation of E5).
+- Archinal, B. A. et al. 2018, CMDA 130, 22 (Galilean radii & rotation).
+
+**Implementation.**
+- `crates/astronomy/src/moons.rs` (new): `GalileanMoon` enum,
+  `GalileanMoonApparent { RA, Dec, distance_au, angular_radius_rad,
+  magnitude }`, `apparent_galilean_moons{,_topocentric}` API mirroring
+  the planet / Saturn-ring shape. Magnitudes use Meeus 1998 table 41.A
+  reduced `V(1,0)` values plus the standard `5·log10(r·Δ)` distance
+  term where `r`, `Δ` are Jupiter's heliocentric and geocentric
+  distances in AU.
+- `crates/renderer/src/camera.rs`: extends the planet uniform with a
+  `galilean_eq_radius[4]`, `galilean_rgb_magnitude[4]`, `galilean_params`
+  block. Gated by the same `planets_enabled` flag so Galilean moons
+  share one host control with Jupiter itself.
+- `crates/renderer/src/shaders/skyglow.wgsl`: new
+  `galilean_disk_radiance` evaluator routes the four moons through the
+  existing point-light + magnitude-to-flux pipeline.
+- `crates/renderer/src/text.rs`: `GALILEAN_LABELS` registered behind
+  the existing planet-labels overlay layer.
+
+**Tests / validation (Meeus-grade).**
+- Unit: `GalileanMoon::ALL` ordering matches `[Io, Europa, Ganymede,
+  Callisto]` (canonical Lieske ordering).
+- Unit: every moon stays within its maximum tabulated elongation from
+  Jupiter at J2000.
+- Unit: pairwise angular separations are > 1″ at J2000 (none of the
+  four collapse onto each other in the renderer-visible projection).
+- Unit: apparent V magnitudes near the 2000 Jupiter opposition land
+  within 0.4 mag of the tabulated values `[5.0, 5.3, 4.6, 5.7]`.
+- Unit: Io's sky-plane offset reverses across half its 1.77-day orbital
+  period.
+- Unit: topocentric and geocentric APIs agree to within ≈10″
+  (Earth-radius parallax bound at Jupiter's mean distance).
+
+**Deliberately out of scope for this rung.**
+- `~5″ / ±100-yr` accuracy gate against JPL Horizons — tracked by
+  `V-52b-E5`.
+- `jupiter-eyepiece` validation-gallery scene preset — deferred to a
+  follow-up PR so the preset JSON-export pipeline and its round-trip
+  tests bump together, mirroring the `saturn-eyepiece` deferral from
+  `V-52a`.
+- Shadow / occultation transits on the Jovian disk — `V-52d` consumes
+  the geometry produced here and re-uses the `V-51b` occluder array.
+
+**Hosts wired.** CLI / viewer / web (all driven by the shared
+`planets_enabled` flag; no new host knob).
+
+---
+
+### `V-52b-E5` Galilean moons — Lieske 1998 E5 precision upgrade — ⬜
+
+**Item.** Replace the Meeus-grade Galilean-moon backend from `V-52b`
+with the full Lieske 1998 E5 trigonometric series so apparent
+Jovicentric positions stay within ~5″ of JPL Horizons over the ROADMAP
+±100-yr budget.
+
+**Scientific basis.** Lieske 1998 E5 theory (full series, all
+perturbation terms — not the Meeus ch. 44 truncation).
 
 **References.**
 - Lieske, J. H. 1998, A&AS 129, 205 (E5 theory of Galilean moons).
+- Lieske, J. H. 1977, A&A 56, 333 (E2 theory).
 
 **Implementation scope.**
-- `crates/astronomy/src/moons.rs` (new): `apparent_galilean_moons`
-  returning topocentric `(RA, Dec, magnitude)` for each of the four.
-- `crates/renderer`: moon sprites as point lights with their own glare
-  through the existing star-pass PSF.
+- `crates/astronomy/src/moons.rs`: introduce a `lieske_e5` submodule
+  carrying the full coefficient tables transcribed from Lieske 1998.
+  Replace the body of `apparent_galilean_moons` to call it; keep the
+  public API unchanged so renderer and hosts pick up the upgrade
+  transparently.
+- A pinned Horizons reference fixture (CSV in `data/`) for at least 3
+  epochs spanning ±100 years, with the regeneration command and
+  SHA-256 captured in `data/manifest.toml`.
 
-**Tests / validation.** Configurations at known epochs within 5″ of JPL
-Horizons; one deterministic eyepiece render of Jupiter + 4 moons.
+**Tests / validation.** Per-moon angular separation between the model
+and the pinned Horizons fixture stays < 5″ at every reference epoch.
 
-**Hosts wired.** CLI / viewer / web.
+**Hosts wired.** Already CLI / viewer / web through `V-52b` —
+the precision upgrade is a drop-in.
+
+**Why split.** The Lieske E5 coefficient tables are not currently
+available in machine-readable form; transcribing them from the Lieske
+1998 paper without typo regression requires its own dedicated PR with
+a complete Horizons-comparison validation matrix, separate from the
+user-facing engine plumbing that `V-52b` provides.
 
 ---
 

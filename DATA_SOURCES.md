@@ -407,7 +407,8 @@ Used for:
 - nutation;
 - annual aberration;
 - atmospheric refraction;
-- apparent Sun / Moon / planet positions.
+- apparent Sun / Moon / planet positions;
+- apparent Galilean-moon positions and magnitudes (V-52b).
 
 References / standards named in roadmap:
 
@@ -416,13 +417,21 @@ References / standards named in roadmap:
 - Saemundsson 1986 refraction style;
 - VSOP87 / FK5 Sun approximation;
 - ELP2000-style Moon approximation;
-- WGS84 topocentric parallax.
+- WGS84 topocentric parallax;
+- Meeus 1998 *Astronomical Algorithms* ch. 44 / table 41.A for
+  Galilean-moon sky-plane offsets and reduced `V(1,0)` magnitudes
+  (low-precision Lieske reduction, V-52b);
+- Lieske 1977 / Lieske 1998 E5 theory — ROADMAP target for the
+  `V-52b-E5` precision upgrade;
+- Archinal et al. 2018 CMDA 130, 22 for Galilean physical radii and
+  IAU WGCCRE rotation parameters.
 
 Implementation areas:
 
 - `crates/astronomy/src/time.rs`
 - `crates/astronomy/src/corrections.rs`
 - `crates/astronomy/src/ephemeris.rs`
+- `crates/astronomy/src/moons.rs` (V-52b Galilean satellites)
 - `crates/astronomy/src/observer.rs`
 - `crates/renderer/src/camera.rs`
 

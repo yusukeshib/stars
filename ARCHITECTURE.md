@@ -54,7 +54,8 @@ Owns scientific and geometric models:
 - equatorial-to-horizontal transforms;
 - proper-motion epoch math, annual aberration, IAU 2006 precession, compact
   IAU-2000-style nutation, and atmospheric refraction;
-- Sun, Moon, and planet apparent/topocentric helpers;
+- Sun, Moon, planet, Saturn-ring, and Galilean-moon apparent /
+  topocentric helpers (`ephemeris.rs`, `moons.rs`);
 - photometry, illuminants, atmosphere, twilight, and skyglow reference models;
 - planning helpers such as rise / transit / set and twilight bands.
 

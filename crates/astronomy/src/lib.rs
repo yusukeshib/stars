@@ -11,6 +11,7 @@ pub mod corrections;
 mod ephemeris;
 mod horizontal;
 pub mod illuminants;
+pub mod moons;
 mod observer;
 pub mod occultation;
 pub mod photometry;
@@ -31,6 +32,10 @@ pub use ephemeris::{
     SaturnRingApparent, SunApparent, SunMoonApparent,
 };
 pub use horizontal::{equatorial_to_horizontal, equatorial_to_horizontal_matrix, AltAz};
+pub use moons::{
+    apparent_galilean_moons, apparent_galilean_moons_topocentric, GalileanMoon,
+    GalileanMoonApparent,
+};
 pub use observer::Observer;
 pub use occultation::{
     classify_disks, contact_times, obscuration_fraction, ActiveOccluders, ApparentDisk,

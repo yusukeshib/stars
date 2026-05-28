@@ -12,7 +12,7 @@ use crate::occultation::{obscuration_fraction, ApparentDisk};
 use crate::{lmst_radians, Observer, J2000_JD};
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 /// Astronomical Unit in kilometres, IAU 2012 Resolution B2 exact definition.
-const ASTRONOMICAL_UNIT_KM: f64 = 149_597_870.7;
+pub(crate) const ASTRONOMICAL_UNIT_KM: f64 = 149_597_870.7;
 /// WGS84 semi-major axis in kilometres (NGA.STND.0036 / EPSG:7030). Used with
 /// geodetic observer latitude for first-order topocentric parallax.
 const EARTH_EQUATORIAL_RADIUS_KM: f64 = 6_378.137;
@@ -240,13 +240,16 @@ fn equatorial_unit_vector(right_ascension_rad: f64, declination_rad: f64) -> Vec
     Vec3::new(x as f32, y as f32, z as f32)
 }
 
-fn equatorial_unit_vector_f64(right_ascension_rad: f64, declination_rad: f64) -> [f64; 3] {
+pub(crate) fn equatorial_unit_vector_f64(
+    right_ascension_rad: f64,
+    declination_rad: f64,
+) -> [f64; 3] {
     let (sin_ra, cos_ra) = right_ascension_rad.sin_cos();
     let (sin_dec, cos_dec) = declination_rad.sin_cos();
     [cos_dec * cos_ra, cos_dec * sin_ra, sin_dec]
 }
 
-fn ra_dec_from_equatorial_vector(v: [f64; 3]) -> (f64, f64, f64) {
+pub(crate) fn ra_dec_from_equatorial_vector(v: [f64; 3]) -> (f64, f64, f64) {
     let distance = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
     let right_ascension_rad = v[1].atan2(v[0]).rem_euclid(std::f64::consts::TAU);
     let declination_rad = (v[2] / distance).clamp(-1.0, 1.0).asin();
@@ -293,7 +296,7 @@ fn ecliptic_to_equatorial_vector(
     ]
 }
 
-fn observer_equatorial_position_km(observer: Observer) -> [f64; 3] {
+pub(crate) fn observer_equatorial_position_km(observer: Observer) -> [f64; 3] {
     let lst = lmst_radians(observer.time.jd_ut1, observer.longitude_rad);
     let (sin_lat, cos_lat) = observer.latitude_rad.sin_cos();
     let (sin_lst, cos_lst) = lst.sin_cos();

@@ -66,6 +66,14 @@ struct CameraUniform {
     // V-52a Saturn ring photometric state:
     // [sin_b_sun, enabled, reserved, reserved].
     saturn_ring_state: vec4<f32>,
+    // V-52b Galilean moons (Io, Europa, Ganymede, Callisto):
+    // xyz = J2000-equatorial unit direction, w = angular radius in radians.
+    galilean_eq_radius: array<vec4<f32>, 4>,
+    // V-52b Galilean moons: xyz = display colour (linear RGB),
+    // w = apparent visual magnitude.
+    galilean_rgb_magnitude: array<vec4<f32>, 4>,
+    // V-52b Galilean moons header: [count, enabled, reserved, reserved].
+    galilean_params: vec4<f32>,
     // Hošek-Wilkie 2012 RGB sky-dome coefficients (V-38). Nine vec4s; row i
     // holds the per-channel i-th analytic coefficient (A..I) as (R, G, B, _).
     // Pre-cooked on the CPU each frame from (turbidity, albedo, sun_elev).
@@ -664,6 +672,47 @@ fn planet_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_
     return rgb;
 }
 
+// V-52b Galilean moons. Renders Io / Europa / Ganymede / Callisto as point
+// sources next to Jupiter. Mirrors `planet_disk_radiance` but skips the
+// occluder array (no V-51b target codes are reserved for Galilean moons in
+// this rung; V-52d will add them when shadow / occultation transits ship)
+// and the Saturn-ring tail. Each moon contributes one pixel-footprint flux
+// at its catalogued magnitude, attenuated by the standard above-horizon gate.
+fn galilean_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_sr: f32) -> vec3<f32> {
+    if camera.galilean_params.y <= 0.0 || sin_alt <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    if camera.planet_params.y <= 0.0 {
+        // Gate the moons on the global planets toggle so they share one host
+        // control with Jupiter itself; if planets are off, the moons also go.
+        return vec3<f32>(0.0);
+    }
+
+    var rgb = vec3<f32>(0.0);
+    let pixel_radius = sqrt(max(pixel_sr, 1e-12));
+    for (var i = 0; i < 4; i = i + 1) {
+        if f32(i) >= camera.galilean_params.x {
+            break;
+        }
+        let dir = normalize(camera.galilean_eq_radius[i].xyz);
+        if dot(dir, camera.zenith_eq.xyz) <= 0.0 {
+            continue;
+        }
+        let angular_radius = max(camera.galilean_eq_radius[i].w, 1e-7);
+        // The Galilean moons are < 2" across, well below the per-pixel angle
+        // at every naked-eye / small-eyepiece FoV, so the visual radius is the
+        // pixel radius. The shader still computes a footprint area so the
+        // per-pixel HDR contribution stays scale-invariant the same way the
+        // planet path does.
+        let visual_radius = max(pixel_radius, angular_radius);
+        let footprint_pixels = max((visual_radius * visual_radius) / max(pixel_sr, 1e-12), 1.0);
+        let flux = magnitude_to_flux(camera.galilean_rgb_magnitude[i].w, zeropoint);
+        let mask = disk_mask(ray_dir, dir, visual_radius, pixel_sr);
+        rgb += camera.galilean_rgb_magnitude[i].xyz * flux * mask / footprint_pixels;
+    }
+    return rgb;
+}
+
 fn henyey_greenstein(cos_angle: f32, g: f32) -> f32 {
     let gg = g * g;
     let denom = pow(max(1.0 + gg - 2.0 * g * cos_angle, 1e-3), 1.5);
@@ -1021,5 +1070,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let day_radiance = sunlit_scattering_radiance(ray_dir, sin_alt, zeropoint);
     let disk_radiance = sun_moon_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
     let planet_radiance = planet_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
-    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance + planet_radiance, 1.0);
+    let galilean_radiance = galilean_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
+    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance + planet_radiance + galilean_radiance, 1.0);
 }
