@@ -732,6 +732,130 @@ Hosts wired: unchanged — already CLI / viewer / web through `V-52b`.
 
 ---
 
+### Galilean shadow transits on Jupiter (`V-52d`)
+
+Fourth slice of `V-52` (planetary rings and moons): each Galilean
+moon's silhouette now casts a dark spot on the Jovian disk during
+shadow transits, and a moon disappears whenever it sits behind
+Jupiter from the observer's line of sight. The shadow geometry reuses
+the V-51b analytic-mask occluder array end-to-end — no new shader
+target was needed; the same Planet-on-Planet path the V-51d / V-51f
+slices ship already routes the dark front-disk into Jupiter's pixel
+source term.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/jupiter_shadows.rs` (new): re-implements the
+  Meeus 1998 ch. 44 truncated series to expose **3D Jovicentric
+  rectangular coordinates** of each Galilean moon — once from the
+  Earth's line of sight (`earth_xyz_r_j`) and once from the Sun's
+  (`sun_xyz_r_j`) — in units of Jupiter's equatorial radius. The
+  Earth view drives moon-behind-Jupiter / moon-in-front-of-Jupiter
+  classification; the Sun view drives shadow projection onto the
+  Jovian disk. `galilean_shadow_disks_at` returns the ready-to-pack
+  analytic disks for the V-51b occluder array, with each shadow's
+  apparent radius = `moon.radius_km / earth_jupiter_distance_km`
+  (the moon's silhouette spans the same physical extent on Jupiter
+  as the moon itself, so its apparent size from Earth is just the
+  moon's physical radius at the Jupiter range).
+- `crates/astronomy/src/planning.rs`: `active_occluders` emits one
+  `OccluderTarget::Planet(3)` (Jupiter) entry per active shadow,
+  using `OccultationKind::AnnularOrTransit` (the front disk is
+  always strictly smaller than the back disk). Off-event the
+  producer pushes zero entries, so frames far from any Galilean
+  transit stay bit-identical to the pre-V-52d render.
+- `crates/renderer/src/camera.rs`: when a Galilean moon currently
+  sits behind Jupiter from the observer, the renderer packs a
+  **negative** angular-radius sentinel into the V-52b
+  `galilean_eq_radius[i].w` slot. The shader treats negative radii
+  as the "hidden" cull. Naked-eye-FoV frames whose moons are all
+  outside Jupiter's silhouette stay bit-identical.
+- `crates/renderer/src/shaders/skyglow.wgsl`:
+  `galilean_disk_radiance` short-circuits on the negative-radius
+  sentinel so a moon's point sprite disappears while it transits
+  behind Jupiter. The V-51b `planet_disk_radiance` path that
+  already subtracts front disks from Jupiter handles the shadow
+  spot itself with no shader change.
+- Scene preset: `jupiter-shadow-transit`
+  (`docs/presets/sessions/jupiter-shadow-transit.json`) frames the
+  2008-12-20 14:00 UT Io shadow transit from Roque de los
+  Muchachos (Canary Islands, where Jupiter rides ~39° up at the
+  pinned epoch) with a 0.05° eyepiece field, so Io's silhouette
+  is the dominant pixel feature.
+
+Shipped capabilities:
+
+- Per-moon Jovicentric 3D state from both Earth and Sun
+  perspectives, with closed-form predicates for "shadow on
+  Jupiter", "moon in front of Jupiter", and "moon behind Jupiter"
+  (`crates/astronomy/src/jupiter_shadows.rs::GalileanShadowState`).
+- V-52d shadow transit drawn as one analytic-mask occluder per
+  active moon, routed through the same V-51b uniform path as
+  V-51d / V-51e / V-51f.
+- Moon-behind-Jupiter sprite cull driven from the same producer.
+
+Validation (Meeus-grade):
+
+- `io_shadow_ingress_within_five_minutes_of_horizons_2008_12_20`
+  pins the 2008-12-20 Io shadow-transit ingress within ±5 min of
+  the geocentric PHEMU09 / JPL Horizons reference (13:14 UT). The
+  V-52d roadmap test gate is "within 5 min of JPL Horizons".
+- `earth_xy_matches_astro_apprnt_rect_coords_at_j2000` and
+  `earth_xy_matches_apparent_galilean_moons_at_j2000` lock the
+  Earth-view geometry against the V-52b renderer ephemeris path
+  (no drift between shadow producer and moon sprite).
+- `shadow_radius_matches_moon_radius_at_jupiter_distance` checks
+  the shadow disk's angular radius matches `R_moon / Δ_Jupiter`
+  exactly.
+- `shadow_disk_direction_close_to_jupiter` confirms an active
+  shadow's sky-plane direction stays inside one Jovian apparent
+  radius of Jupiter's centre during the pinned mid-transit.
+- `planning::active_occluders_emit_io_shadow_at_2008_12_20_transit`
+  pins the V-52d producer's push of exactly one Planet(Jupiter)
+  entry at the 2008-12-20 14:00 UT epoch with the right radius
+  scale, kind code, and obscuration ratio.
+- `planning::active_occluders_emit_no_galilean_shadow_off_event`
+  pins the off-event producer contract on a quiet date (no
+  Planet(Jupiter) entries with Galilean-sized front-disk radii).
+- `camera::occluder_uniform_emits_io_shadow_at_2008_12_20_transit`
+  pins the renderer uniform path: target code = 5 (Planet(3)),
+  unit-length direction, plausible Io silhouette radius, and the
+  `AnnularOrTransit` kind code.
+
+Deliberately out of scope for this slice:
+
+- Moon ↔ moon mutual occultation (a moon hiding another moon).
+  The V-51b `OccluderTarget` enum reserves codes only for the
+  Sun, the Moon, the seven planets, and the star cull; encoding
+  the four Galilean moons individually would require either a
+  new target enum or a per-moon analytic-mask extension in
+  `shaders/skyglow.wgsl`. PHEMU-cadence moon ↔ moon events are
+  rare (≲ once per year, mostly outside opposition) so the
+  deferral keeps the V-52d shadow / behind-Jupiter scope clean.
+  The 3D `earth_xyz_r_j` state needed to drive moon-on-moon
+  classification is already produced by
+  `galilean_shadow_states`, so the future slice only needs the
+  occluder-target plumbing.
+- The ROADMAP `~5″ / ±100-yr` accuracy gate — still owned by
+  `V-52b-E5`, which will swap in the full Lieske 1998 series
+  for both the moon and shadow positions without changing the
+  host-facing API.
+
+References (also pinned in ROADMAP `V-52d`):
+
+- Meeus, J. 1998, *Astronomical Algorithms*, 2nd ed., ch. 44
+  ("Positions of the Satellites of Jupiter"), eq. 44.1–44.10 +
+  the shadow-projection note.
+- Lieske, J. H. 1998, A&AS 129, 205 (E5 theory — ROADMAP target
+  for the `V-52b-E5` precision upgrade).
+- IMCCE PHEMU09 working group for the 2008–2009 mutual-event
+  campaign tables used to pin the ingress test gate.
+
+Hosts wired: CLI / viewer / web (all driven by the shared
+`planets_enabled` flag — same gate as Jupiter itself).
+
+---
+
 ### Galilean moons (`V-52b`)
 
 Second slice of `V-52` (planetary rings and moons): Io, Europa,

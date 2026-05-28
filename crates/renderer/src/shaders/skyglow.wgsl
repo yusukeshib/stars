@@ -818,10 +818,12 @@ fn planet_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_
 
 // V-52b Galilean moons. Renders Io / Europa / Ganymede / Callisto as point
 // sources next to Jupiter. Mirrors `planet_disk_radiance` but skips the
-// occluder array (no V-51b target codes are reserved for Galilean moons in
-// this rung; V-52d will add them when shadow / occultation transits ship)
-// and the Saturn-ring tail. Each moon contributes one pixel-footprint flux
-// at its catalogued magnitude, attenuated by the standard above-horizon gate.
+// occluder array (V-52d culls behind-Jupiter moons via the
+// `galilean_eq_radius[i].w < 0.0` sentinel below; mutual moon-on-moon
+// occultation is tracked separately as a follow-up because the V-51b
+// occluder target enum does not currently reserve a per-moon code) and the
+// Saturn-ring tail. Each moon contributes one pixel-footprint flux at its
+// catalogued magnitude, attenuated by the standard above-horizon gate.
 fn galilean_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_sr: f32) -> vec3<f32> {
     if camera.galilean_params.y <= 0.0 || sin_alt <= 0.0 {
         return vec3<f32>(0.0);
@@ -840,6 +842,14 @@ fn galilean_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixe
         }
         let dir = normalize(camera.galilean_eq_radius[i].xyz);
         if dot(dir, camera.zenith_eq.xyz) <= 0.0 {
+            continue;
+        }
+        // V-52d: a negative radius is the host-side cull sentinel for
+        // "moon currently hidden behind Jupiter's apparent disk".
+        // Skip the moon's contribution entirely — without this gate
+        // the moon sprite would render as if Jupiter were not in the
+        // way, which is the bug the V-52d roadmap entry calls out.
+        if camera.galilean_eq_radius[i].w < 0.0 {
             continue;
         }
         let angular_radius = max(camera.galilean_eq_radius[i].w, 1e-7);

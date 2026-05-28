@@ -46,6 +46,7 @@ panel, or attached to a report.
 | `eclipse-aid` | Narrow Moon-oriented scene near a lunar-eclipse date. | Moon phase and Earth-shadow aid path. |
 | `solar-eclipse` | 2024-04-08 total solar eclipse from Mazatlán at greatest eclipse (V-51c). | Analytic Moon-on-Sun mask, Koomen 1952 daylight darkening, Baumbach 1937 corona. |
 | `venus-transit` | 2012-06-06 Venus transit observed from Tokyo near greatest transit (V-51e). | Planet-on-Sun analytic-mask occluder, daylight-band sky unchanged outside the disk. |
+| `jupiter-shadow-transit` | 2008-12-20 ~14:00 UT Io shadow transit on Jupiter from Roque de los Muchachos (V-52d). | Galilean-shadow analytic-mask occluder on the Jovian disk via the V-51b Planet-on-Planet path; V-52b moon sprites unaffected outside Jupiter. |
 | `all-sky-hammer` | Full-sky Hammer map. | Hammer projection and full-sky overlay clipping. |
 | `all-sky-mollweide` | Full-sky Mollweide map. | Equal-area map and Milky Way / coordinate-grid continuity. |
 | `galactic-north` | Built-in external top-down Milky Way view. | External viewpoint, HYG distances, analytic Milky Way disk. |

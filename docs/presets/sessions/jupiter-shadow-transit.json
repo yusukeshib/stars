@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 5,
+  "appVersion": "0.1.0",
+  "createdBy": "stars-cli",
+  "observer": {
+    "latitudeDeg": 28.76,
+    "longitudeDeg": -17.89
+  },
+  "time": {
+    "jdUtc": 2454821.0833333335,
+    "jdUt1": 2454821.0833333335,
+    "jdTai": 2454821.0837152777,
+    "jdTt": 2454821.084087778,
+    "jdTdb": 2454821.084087773,
+    "taiMinusUtcSeconds": 33.0,
+    "dut1Seconds": 0.0
+  },
+  "view": {
+    "azimuthDeg": 162.10000610351562,
+    "altitudeDeg": 38.70000076293945,
+    "fovDeg": 0.05000000074505806
+  },
+  "overlays": {
+    "layers": [
+      "cardinal-labels",
+      "degree-labels"
+    ],
+    "gridStepDeg": 15.0,
+    "opacity": 0.6,
+    "deepSkyMagnitudeLimit": 7.0
+  },
+  "projection": {
+    "projection": "perspective",
+    "viewpoint": "earth",
+    "external": {
+      "originPc": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 30000.0
+      },
+      "targetPc": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "up": {
+        "x": 0.0,
+        "y": 1.0,
+        "z": 0.0
+      }
+    }
+  },
+  "atmosphere": {
+    "enabled": true,
+    "preset": "high-altitude",
+    "aerosolBeta": 0.04,
+    "aerosolAlpha": 1.3,
+    "observerAltitudeM": 2500.0,
+    "ozoneDu": 275.0,
+    "pressureHpa": 750.0,
+    "temperatureC": 0.0,
+    "surfaceAlbedo": 0.3
+  },
+  "lightPollution": {
+    "kind": "bortle",
+    "bortle": 1
+  },
+  "scintillation": {
+    "enabled": true,
+    "cN2Scale": 1.0,
+    "seed": 1544909063
+  },
+  "planets": {
+    "enabled": true
+  },
+  "eyepiece": {
+    "enabled": false,
+    "apertureMm": 200.0,
+    "focalLengthMm": 2000.0,
+    "eyepieceFocalLengthMm": 25.0,
+    "apparentFovDeg": 50.0,
+    "fieldStopMm": 21.0
+  },
+  "catalog": {
+    "backend": "hyg-csv",
+    "source": "HYG",
+    "version": "4.2",
+    "path": "crates/catalog/data/hyg_v42.csv",
+    "hash": null,
+    "limitingMagnitude": 7.5
+  },
+  "corrections": {
+    "timeScales": true,
+    "precession": true,
+    "nutation": true,
+    "annualAberration": true,
+    "properMotion": true,
+    "atmosphericRefraction": true,
+    "topocentricSolarSystem": true
+  }
+}

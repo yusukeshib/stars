@@ -127,13 +127,12 @@ common occultation primitives (`V-51a`), the general N≤16 occluder
 uniform array (`V-51b`), the solar-eclipse renderer path (`V-51c`),
 lunar occultation of stars and planets (`V-51d`), Mercury / Venus
 transits of the Sun (`V-51e`), and mutual planetary occultation
-(`V-51f`). Three rungs of `V-52` are now done at Meeus-grade
-accuracy: the Saturn ring system (`V-52a`), the Galilean moons
-(`V-52b`), and Titan (`V-52c`). The remaining rungs are `V-52b-E5`
-(the Lieske 1998 full-series precision upgrade to ~5″ / ±100 yr for
-the Galilean moons), `V-52c-TASS17` (the analogous TASS1.7 precision
-upgrade for Titan), and `V-52d` (Galilean shadow / occultation
-transits).
+(`V-51f`). Four rungs of `V-52` are now done at Meeus-grade accuracy:
+the Saturn ring system (`V-52a`), the Galilean moons (`V-52b`), Titan
+(`V-52c`), and Galilean shadow transits + moon-behind-Jupiter culling
+(`V-52d`). The remaining rungs are `V-52b-E5` (the Lieske 1998 full-
+series precision upgrade to ~5″ / ±100 yr for the Galilean moons) and
+`V-52c-TASS17` (the analogous TASS1.7 precision upgrade for Titan).
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
@@ -1885,7 +1884,7 @@ can land in isolation:
 | `V-52b-E5` | Galilean moons precision upgrade — full Lieske 1998 E5 (~5″ / ±100 yr) | ⏳ in progress |
 | `V-52c` | Titan, Meeus-grade | ⏳ Meeus-grade shipped |
 | `V-52c-TASS17` | Titan precision upgrade — full TASS1.7 (~5″ / ±100 yr) | ⬜ |
-| `V-52d` | Galilean shadow / occultation transits on Jupiter (reuses `V-51b`) | ⬜ |
+| `V-52d` | Galilean shadow / occultation transits on Jupiter (reuses `V-51b`) | ✅ done |
 
 **Deliberate non-goal scope.** No irregular moons of any planet, no
 Neptunian / Uranian rings (faint, requires deep-field telescope sim),
@@ -2189,19 +2188,65 @@ shader / label pipelines untouched.
 
 ---
 
-### `V-52d` Galilean shadow / occultation transits on Jupiter — ⬜
+### `V-52d` Galilean shadow / occultation transits on Jupiter — ✅ done
 
 **Item.** Reuses the `V-51b` analytic-mask occluder array to draw the
 shadows of Io / Europa / Ganymede / Callisto crossing the Jovian disk,
-and to occult each moon when it passes behind another moon or Jupiter.
+and to occult each moon when it passes behind Jupiter (moon ↔ moon
+mutual occultation is deferred — see follow-up below).
 
 **Dependencies.** Requires `V-52b` for the Jovicentric geometry. Reuses
 `V-51a` (occultation primitives) and `V-51b` (analytic-mask occluder
 uniform array).
 
+**Implementation.**
+- `crates/astronomy/src/jupiter_shadows.rs` (new): exposes the 3D
+  Jovicentric rectangular coordinates of each Galilean moon — once
+  from the Earth's line of sight and once from the Sun's — using the
+  Meeus 1998 ch. 44 truncated series. Predicates
+  `shadow_on_jupiter`, `moon_in_front_of_jupiter`, and
+  `moon_behind_jupiter` close the geometry; `galilean_shadow_disks_at`
+  returns the ready-to-pack analytic disks for the V-51b occluder
+  array, with shadow radius = `moon.radius_km / Δ_Jupiter` (the
+  silhouette spans the same physical extent on Jupiter as the moon
+  itself).
+- `crates/astronomy/src/planning.rs`: `active_occluders` emits one
+  `OccluderTarget::Planet(3)` (= Jupiter) entry per active shadow,
+  reusing the V-51d / V-51e / V-51f pipeline.
+- `crates/renderer/src/camera.rs`: the V-52b Galilean uniform now
+  packs a negative-radius sentinel for moons currently behind Jupiter
+  from the observer; `shaders/skyglow.wgsl`'s `galilean_disk_radiance`
+  skips those sprites so a moon disappears while it sits inside
+  Jupiter's silhouette.
+- Scene preset: `jupiter-shadow-transit` (`docs/presets/sessions/jupiter-shadow-transit.json`),
+  pinned to the 2008-12-20 14:00 UT Io transit from Roque de los
+  Muchachos.
+
 **Tests / validation.** Shadow transit ingress times at known epochs
 within 5 minutes of JPL Horizons; one deterministic eyepiece render of
 a Galilean shadow-transit configuration.
+- Pinned ingress: 2008-12-20 13:14 UT Io shadow transit, geocentric
+  (PHEMU09 reference), within 5 min
+  (`jupiter_shadows::tests::io_shadow_ingress_within_five_minutes_of_horizons_2008_12_20`).
+- Producer contract: V-52d shadow disk appears in `active_occluders`
+  exactly when the geometry says so, and only at the moon's
+  silhouette extent
+  (`planning::tests::active_occluders_emit_io_shadow_at_2008_12_20_transit`,
+  `planning::tests::active_occluders_emit_no_galilean_shadow_off_event`).
+- Renderer uniform contract: the analytic-mask uniform carries a
+  Planet(Jupiter)-targeted entry at the 2008-12-20 14:00 UT epoch,
+  with the right kind code, unit-length direction, and a radius
+  inside the Io-silhouette range
+  (`camera::tests::occluder_uniform_emits_io_shadow_at_2008_12_20_transit`).
+
+**Follow-up.** Moon ↔ moon mutual occultation (a moon hiding another
+moon) is intentionally deferred. The V-51b `OccluderTarget` enum
+reserves codes only for the Sun, the Moon, the seven planets, and the
+star cull; encoding the four Galilean moons individually would
+require either a new target enum or a per-moon analytic-mask
+extension in `shaders/skyglow.wgsl`. PHEMU-cadence moon ↔ moon events
+are rare (≲ once per year, mostly outside opposition) so the deferral
+keeps the V-52d shadow / behind-Jupiter scope clean.
 
 **Hosts wired.** CLI / viewer / web.
 

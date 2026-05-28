@@ -11,6 +11,7 @@ pub mod corrections;
 mod ephemeris;
 mod horizontal;
 pub mod illuminants;
+pub mod jupiter_shadows;
 pub mod moons;
 mod observer;
 pub mod occultation;
@@ -34,6 +35,10 @@ pub use ephemeris::{
     SaturnRingApparent, SunApparent, SunMoonApparent,
 };
 pub use horizontal::{equatorial_to_horizontal, equatorial_to_horizontal_matrix, AltAz};
+pub use jupiter_shadows::{
+    galilean_shadow_disks, galilean_shadow_disks_at, galilean_shadow_states, GalileanShadowDisk,
+    GalileanShadowState, JUPITER_OCCLUDER_TARGET, JUPITER_PLANET_INDEX, SHADOW_TRANSIT_KIND,
+};
 pub use moons::{
     apparent_galilean_moons, apparent_galilean_moons_topocentric, apparent_titan,
     apparent_titan_topocentric, GalileanMoon, GalileanMoonApparent, TitanApparent,
