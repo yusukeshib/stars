@@ -141,10 +141,16 @@ Current limitation:
   to ≈5″.
 - The Titan backend ships at Meeus 1998 ch. 45 accuracy (V-52c) — the
   same simplification of the TASS theory of Vienne & Duriez 1995 that
-  the `astro` crate implements — with the same accuracy posture as the
-  Meeus-grade Galilean backend. The full TASS1.7 precision upgrade
-  with a Horizons-anchored ~5″ gate is tracked as the dedicated rung
-  `V-52c-TASS17`.
+  the `astro` crate implements. The pinned Horizons fixture
+  (`data/horizons_titan.csv`, manifest id `horizons-titan-fixture`)
+  at 1900 / 2000 / 2100 epochs shows the Kronocentric sky-plane offset
+  error stays under ≈60″ across ±100 yr (vs. the ≈10–60″ the ch. 45
+  truncation is documented to produce). The full TASS1.7 precision
+  upgrade tightens this budget to ~5″ at every fixture epoch and is
+  tracked as the dedicated rung `V-52c-TASS17` — that PR replaces the
+  body of `tass17::titan_offset` and edits the single constant
+  `TASS17_MAX_OFFSET_ERR_ARCSEC` in `moons::tests` from 100″ down to
+  ≈5″.
 
 ### Eclipse / occultation geometry (`V-51`)
 
