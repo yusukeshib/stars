@@ -1,9 +1,9 @@
 use astronomy::{
     active_occluders, apparent_galilean_moons_topocentric, apparent_planets_topocentric,
     apparent_saturn_ring_topocentric, apparent_titan_topocentric, earth_velocity_over_c_j2000,
-    equation_of_equinoxes, equatorial_to_horizontal_matrix, illuminants, lmst_radians,
-    precession_nutation_matrix, solar_eclipse_state, years_since_j2000, GalileanMoon, Observer,
-    Planet, SolarEclipseKind, SunMoonApparent, MAX_OCCLUDERS,
+    equation_of_equinoxes, equatorial_to_horizontal_matrix, galilean_shadow_states, illuminants,
+    lmst_radians, precession_nutation_matrix, solar_eclipse_state, years_since_j2000, GalileanMoon,
+    Observer, Planet, SolarEclipseKind, SunMoonApparent, MAX_OCCLUDERS,
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -1332,8 +1332,23 @@ impl Camera {
         // as the planets so refraction near the horizon stays consistent with
         // Jupiter, and so the shader-side direction lands in the J2000 frame
         // the camera uniform already publishes.
+        //
+        // V-52d: when a Galilean moon sits behind Jupiter from Earth's
+        // perspective the renderer should hide its point sprite. The
+        // jovicentric 3D `earth_xyz_r_j` state from `galilean_shadow_states`
+        // exposes both the sky-plane offset and the line-of-sight depth, so
+        // the cull is closed-form. A moon is hidden when its sky-plane
+        // offset falls inside Jupiter's (R_J = 1) disk *and* its
+        // line-of-sight depth is positive (moon is on the far side of
+        // Jupiter's centre from the observer). We flag hidden moons by
+        // packing a negative angular-radius sentinel into
+        // `galilean_eq_radius[i].w`; the shader treats negative radii as
+        // "hidden" and emits zero flux, leaving naked-eye-FoV frames
+        // bit-identical to the pre-V-52d render whenever every moon is
+        // outside Jupiter's silhouette.
         let mut galilean_eq_radius = [[0.0; 4]; GALILEAN_UNIFORM_COUNT];
         let mut galilean_rgb_magnitude = [[0.0; 4]; GALILEAN_UNIFORM_COUNT];
+        let galilean_shadow = galilean_shadow_states(self.observer.time.jd_tdb);
         for (idx, moon) in apparent_galilean_moons_topocentric(self.observer)
             .iter()
             .enumerate()
@@ -1348,7 +1363,18 @@ impl Camera {
                 date_to_j2000,
             );
             let rgb = galilean_linear_rgb(moon.moon);
-            galilean_eq_radius[idx] = [dir.x, dir.y, dir.z, moon.angular_radius_rad as f32];
+            // V-52d cull: a moon hidden behind Jupiter contributes no
+            // flux. Encode the cull as a negative radius — the shader
+            // gates rendering on `radius > 0` already (the safety
+            // `max(.., 1e-7)` clamp is preserved, but the multiplicative
+            // disk mask returns zero outside `[0, radius]`).
+            let hidden_behind_jupiter = galilean_shadow[idx].moon_behind_jupiter();
+            let radius_signed = if hidden_behind_jupiter {
+                -(moon.angular_radius_rad as f32)
+            } else {
+                moon.angular_radius_rad as f32
+            };
+            galilean_eq_radius[idx] = [dir.x, dir.y, dir.z, radius_signed];
             galilean_rgb_magnitude[idx] = [rgb[0], rgb[1], rgb[2], moon.magnitude as f32];
         }
         let galilean_params = [GALILEAN_UNIFORM_COUNT as f32, 1.0, 0.0, 0.0];
@@ -2252,6 +2278,59 @@ mod tests {
         // Front radius must equal the Moon apparent semidiameter.
         let moon_radius = uniform.moon_disk[0];
         assert!((uniform.occluders[0][3] - moon_radius).abs() < 1.0e-6);
+    }
+
+    /// V-52d: at the 2008-12-20 14:00 UT Io shadow-transit configuration
+    /// (the same epoch pinned by
+    /// `astronomy::jupiter_shadows::tests::io_shadow_ingress_within_five_minutes_of_horizons_2008_12_20`),
+    /// the occluder uniform must include an entry whose target is
+    /// Jupiter (`OccluderTarget::Planet(3)`.shader_code() = 5) and whose
+    /// front radius matches Io's silhouette extent at the Earth-
+    /// Jupiter range. The renderer needs this entry to render the
+    /// dark shadow spot on the Jovian disk through the V-51b
+    /// analytic-mask subtract path.
+    #[test]
+    fn occluder_uniform_emits_io_shadow_at_2008_12_20_transit() {
+        // 2008-12-20T14:00:00Z, ~45 min past Io shadow ingress.
+        let jd_utc = astronomy::julian_date_from_unix_seconds(1_229_781_600.0);
+        let observer = Observer::from_degrees(35.68, 139.69, jd_utc);
+        let cam = Camera::new(observer, LocalView::default(), 1.0);
+        let uniform = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
+        // The V-52d shadow uses the Planet(Jupiter) target code,
+        // which is `OccluderTarget::Planet(3).shader_code()` = 2 + 3 = 5.
+        const PLANET_JUPITER_SHADER_CODE: f32 = 5.0;
+        let count = uniform.occluder_params[0] as usize;
+        let mut io_shadow_idx: Option<usize> = None;
+        for i in 0..count {
+            let kind = &uniform.occluders[2 * i + 1];
+            if (kind[0] - PLANET_JUPITER_SHADER_CODE).abs() < 1.0e-3 {
+                io_shadow_idx = Some(i);
+                break;
+            }
+        }
+        let i = io_shadow_idx.expect(
+            "Io shadow transit must emit a Planet(Jupiter)-targeted occluder at the 2008-12-20 14:00 UT epoch",
+        );
+        let dir = &uniform.occluders[2 * i];
+        let kind = &uniform.occluders[2 * i + 1];
+        // Direction unit-length round-trip.
+        let len = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
+        assert!(
+            (len - 1.0).abs() < 1.0e-3,
+            "shadow direction not unit length: {len}"
+        );
+        // Front-disk angular radius must match Io's silhouette on
+        // Jupiter (≈ `R_Io / Δ_Jupiter`). At 4.6 AU this is roughly
+        // 1.8 × 10⁻⁶ rad (≈ 0.4″).
+        assert!(
+            (1.0e-7..1.0e-5).contains(&(dir[3] as f64)),
+            "Io shadow radius out of plausible range: {}",
+            dir[3],
+        );
+        // Annular/transit kind code (`OccultationKind::AnnularOrTransit` → 2.0).
+        assert_eq!(kind[1], 2.0);
+        // Obscuration is a small area-ratio number, in (0, 1).
+        assert!(kind[2] > 0.0 && kind[2] < 1.0);
     }
 
     #[test]

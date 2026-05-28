@@ -1,5 +1,9 @@
 //! Observation-planning helpers: twilight states and rise/transit/set tables.
 
+use crate::ephemeris::ASTRONOMICAL_UNIT_KM;
+use crate::jupiter_shadows::{
+    galilean_shadow_disks_at, JUPITER_OCCLUDER_TARGET, SHADOW_TRANSIT_KIND,
+};
 use crate::occultation::{
     classify_disks, contact_times, obscuration_fraction, ActiveOccluders, ApparentDisk,
     ContactTimes, Occluder, OccluderTarget, OccultationKind,
@@ -462,6 +466,15 @@ pub fn solar_eclipse_state(observer: Observer) -> SolarEclipseState {
 ///   producer emits one entry per pair currently in contact, with the
 ///   target index pointing at the farther planet so the analytic-mask
 ///   shader path subtracts the front disk from the back planet's disk.
+/// * **V-52d** — Galilean shadow transit on Jupiter
+///   ([`OccluderTarget::Planet`]`(3)` = Jupiter). For each of Io /
+///   Europa / Ganymede / Callisto, if the moon's Sun-projected
+///   position falls inside Jupiter's apparent disk the producer
+///   pushes one front-disk entry whose radius equals the moon's
+///   physical radius divided by the Earth-Jupiter distance (the
+///   silhouette extent). Off-event frames emit zero V-52d entries
+///   and the analytic-mask shader path stays bit-identical to the
+///   pre-V-52d render.
 ///
 /// The list is bounded by [`crate::occultation::MAX_OCCLUDERS`]; pushes
 /// past capacity are silently dropped rather than allocated.
@@ -566,6 +579,46 @@ pub fn active_occluders(observer: Observer) -> ActiveOccluders {
             kind: planet_sun_kind,
             obscuration: planet_obscuration,
         });
+    }
+
+    // V-52d Galilean shadow transits on Jupiter. The producer is
+    // `galilean_shadow_disks_at`; we feed it the same Jupiter direction
+    // / observer distance the renderer's planet-disk path uses so the
+    // analytic mask sits exactly on the Jovian sky-plane pixels. Each
+    // active shadow becomes one front disk targeting the Planet(3) =
+    // Jupiter back disk. The producer returns `None` for moons whose
+    // Sun-line projection misses Jupiter's disk, so off-event frames
+    // emit zero entries and the V-51b shader short-circuits as
+    // before.
+    let jupiter_idx = JUPITER_OCCLUDER_TARGET;
+    debug_assert!(matches!(jupiter_idx, OccluderTarget::Planet(3)));
+    {
+        let jupiter = &planet_apparents[3];
+        let jupiter_dir_eq = jupiter.direction_equatorial();
+        let jupiter_dir_f64 = [
+            jupiter_dir_eq.x as f64,
+            jupiter_dir_eq.y as f64,
+            jupiter_dir_eq.z as f64,
+        ];
+        let jupiter_distance_km = jupiter.distance_au * ASTRONOMICAL_UNIT_KM;
+        let shadows =
+            galilean_shadow_disks_at(observer.time.jd_tdb, jupiter_dir_f64, jupiter_distance_km);
+        for slot in shadows.iter().flatten() {
+            // The shadow's apparent disk is the moon's silhouette on
+            // Jupiter; its angular extent matches `moon.radius_km() /
+            // Δ_jupiter`. Approximate obscuration is the area ratio
+            // (front / back) — same closed form as V-51e Planet-on-Sun.
+            let r_front = slot.angular_radius_rad;
+            let r_back = jupiter.angular_radius_rad.max(1.0e-12);
+            let area_ratio = ((r_front / r_back).powi(2) as f64).clamp(0.0, 1.0);
+            let _ = out.push(Occluder {
+                front_dir_eq: slot.direction_eq,
+                front_radius_rad: r_front,
+                target: jupiter_idx,
+                kind: SHADOW_TRANSIT_KIND,
+                obscuration: area_ratio,
+            });
+        }
     }
 
     // V-51f Planet-on-Planet. Iterate unordered pairs once; for each
@@ -1484,6 +1537,82 @@ mod tests {
                 .iter()
                 .all(|o| o.target != OccluderTarget::Sun),
             "no Sun-targeted occluder must be emitted at Mercury superior conjunction, got {:?}",
+            list.as_slice(),
+        );
+    }
+
+    #[test]
+    fn active_occluders_emit_no_galilean_shadow_off_event() {
+        // V-52d producer contract off-event: on a quiet date with
+        // Jupiter visible, the producer must emit zero Planet(Jupiter)
+        // entries whose front-disk radius matches a Galilean moon's
+        // shadow extent. The Moon-on-Stars cull entry plus any
+        // V-51d/f planet-targeted entries are unaffected by this
+        // assertion; only the Galilean-sized shadows are gated here.
+        let start = jd_utc_from_iso_hours(2025, 7, 1, 0.0);
+        let end = jd_utc_from_iso_hours(2025, 7, 1, 24.0);
+        let observer = Observer::from_degrees(35.68, 139.69, 0.5 * (start + end));
+        let list = active_occluders(observer);
+        let jupiter = apparent_planet_topocentric(observer, Planet::Jupiter);
+        for occ in list.as_slice() {
+            if occ.target != OccluderTarget::Planet(3) {
+                continue;
+            }
+            // A Galilean shadow's apparent radius is the moon's
+            // physical radius divided by the Earth-Jupiter distance
+            // (a few hundredths of a Jovian apparent radius). V-51d
+            // Moon-on-Jupiter entries are roughly the Moon's apparent
+            // radius (≈ 1000″) — three orders of magnitude bigger.
+            // The two are easy to discriminate without re-running the
+            // producer logic.
+            let jupiter_radius = jupiter.angular_radius_rad;
+            assert!(
+                occ.front_radius_rad > jupiter_radius / 8.0,
+                "unexpected Galilean shadow occluder off-event: {occ:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn active_occluders_emit_io_shadow_at_2008_12_20_transit() {
+        // V-52d positive contract: at 2008-Dec-20 14:00 UT the Io
+        // shadow sits well inside the Jovian disk (its 13:14 UT
+        // ingress is pinned by
+        // `jupiter_shadows::tests::io_shadow_ingress_within_five_minutes_of_horizons_2008_12_20`).
+        // The producer must emit one Planet(Jupiter) entry whose
+        // front-disk angular radius matches Io's `radius / Δ` extent.
+        let observer =
+            Observer::from_degrees(35.68, 139.69, jd_utc_from_iso_hours(2008, 12, 20, 14.0));
+        let list = active_occluders(observer);
+        let jupiter_planet_target = OccluderTarget::Planet(3);
+        let jupiter = apparent_planet_topocentric(observer, Planet::Jupiter);
+        let io_radius_km = crate::moons::GalileanMoon::Io.radius_km();
+        let earth_jupiter_km = jupiter.distance_au * crate::ephemeris::ASTRONOMICAL_UNIT_KM;
+        let io_shadow_radius_expected = (io_radius_km / earth_jupiter_km).atan();
+        let mut found = false;
+        for occ in list.as_slice() {
+            if occ.target != jupiter_planet_target {
+                continue;
+            }
+            // Discriminate from any V-51d Moon-on-Jupiter / V-51f
+            // Planet-on-Jupiter entries by matching the radius to
+            // Io's silhouette extent on Jupiter (a few percent of the
+            // Jovian apparent radius).
+            if (occ.front_radius_rad - io_shadow_radius_expected).abs()
+                < 0.1 * io_shadow_radius_expected
+            {
+                found = true;
+                assert_eq!(occ.kind, OccultationKind::AnnularOrTransit);
+                // Obscuration at the area-ratio is small (≪ 1) for a
+                // moon shadow against the Jovian disk; pin the
+                // ordering rather than the magnitude.
+                assert!(occ.obscuration < 1.0);
+                assert!(occ.obscuration > 0.0);
+            }
+        }
+        assert!(
+            found,
+            "Io shadow disk must appear in active_occluders during the 2008-12-20 transit, got {:?}",
             list.as_slice(),
         );
     }

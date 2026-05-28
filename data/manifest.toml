@@ -483,6 +483,17 @@ preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md"]
 
 [[artifact]]
+id = "scene-preset-session-jupiter-shadow-transit"
+description = "Scene preset JSON: 2008-12-20 14:00 UT Io shadow transit on Jupiter from Roque de los Muchachos (V-52d)."
+kind = "generated"
+path = "docs/presets/sessions/jupiter-shadow-transit.json"
+sha256 = "627eee93d2fb8196c2e0590a055268af431d643d274b3d72c01e5ee7bdc4f113"
+bytes = 2070
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md"]
+
+[[artifact]]
 id = "scene-preset-session-all-sky-mollweide"
 description = "Scene preset JSON: all-sky Mollweide projection."
 kind = "generated"

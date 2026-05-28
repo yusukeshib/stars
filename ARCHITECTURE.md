@@ -258,8 +258,13 @@ The exact pass layout can change, but responsibilities should stay separated:
   frame from `astronomy::active_occluders(observer)` and mapped through the
   same `apparent_disk_direction_j2000` pipeline as the bare Sun and Moon
   directions — so any front-disk on back-disk pair (solar eclipse, planetary
-  transit, mutual planetary occultation) is one shader uniform write away
-  with no depth or stencil attachments. The lunar disk fragment composes a
+  transit, mutual planetary occultation, Galilean shadow transit on
+  Jupiter) is one shader uniform write away with no depth or stencil
+  attachments. The V-52d Galilean-shadow producer
+  (`astronomy::galilean_shadow_disks_at`) feeds the same uniform; it
+  also drives a CPU-side "moon behind Jupiter" cull on the V-52b
+  Galilean-moon sprite path via a negative-radius sentinel in
+  `CameraUniform::galilean_eq_radius[i].w`. The lunar disk fragment composes a
   Lambertian lit-side term and a Lambertian dark-side earthshine term
   additively (V-26, "Da Vinci glow"); the dark-side luminance is the
   closed-form Goode/Danjon anchor in

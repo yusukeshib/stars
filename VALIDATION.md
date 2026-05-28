@@ -122,20 +122,23 @@ Current limitation:
 
 - `L-06` still tracks higher-precision DE440 / publication-grade ephemeris
   work. Do not describe the current stack as final research-grade ephemerides.
-- The Galilean-moon backend ships at Meeus 1998 ch. 44 accuracy (V-52b):
-  good for naked-eye / small-eyepiece identification near J2000. The
-  pinned Horizons fixture (`data/horizons_galilean_moons.csv`,
-  manifest id `horizons-galilean-moons-fixture`) at 1900 / 2000 /
-  2100 epochs shows the in-plane RA-component offset error stays
-  below ≈45″ across ±100 yr, while the out-of-plane Dec component
-  rises to ≈180″ for Callisto at 2100 (the Meeus simplification
-  drops the orbital inclination tilt, which dominates the weak
-  axis). The full Lieske 1998 E5 precision upgrade tightens this
-  budget to ~5″ across all four moons at every fixture epoch and is
-  tracked as the dedicated rung `V-52b-E5` — that PR replaces the
-  body of `lieske_e5::jovicentric_offset` and edits the single
-  constant `MEEUS_GRADE_MAX_OFFSET_ERR_ARCSEC` in
-  `moons::tests` from 200″ down to ≈5″.
+- The Galilean-moon backend ships at Meeus 1998 ch. 44 accuracy (V-52b
+  for moon positions, V-52d for shadow projection): good for naked-eye /
+  small-eyepiece identification near J2000. The pinned Horizons fixture
+  (`data/horizons_galilean_moons.csv`, manifest id
+  `horizons-galilean-moons-fixture`) at 1900 / 2000 / 2100 epochs shows
+  the in-plane RA-component offset error stays below ≈45″ across
+  ±100 yr, while the out-of-plane Dec component rises to ≈180″ for
+  Callisto at 2100 (the Meeus simplification drops the orbital
+  inclination tilt, which dominates the weak axis). The same truncation
+  drives V-52d's 5-minute shadow-ingress gate against JPL Horizons
+  (pinned for 2008-12-20 Io shadow ingress). The full Lieske 1998 E5
+  precision upgrade tightens this budget to ~5″ across all four moons
+  at every fixture epoch and is tracked as the dedicated rung
+  `V-52b-E5` — that PR replaces the body of
+  `lieske_e5::jovicentric_offset` and edits the single constant
+  `MEEUS_GRADE_MAX_OFFSET_ERR_ARCSEC` in `moons::tests` from 200″ down
+  to ≈5″.
 - The Titan backend ships at Meeus 1998 ch. 45 accuracy (V-52c) — the
   same simplification of the TASS theory of Vienne & Duriez 1995 that
   the `astro` crate implements — with the same accuracy posture as the
@@ -229,8 +232,26 @@ Current limitation:
 - V-51 currently ships the Moon-on-Sun pair (`V-51c`), lunar
   occultation of catalog stars + the seven rendered planets
   (`V-51d`), Mercury / Venus transits across the Sun (`V-51e`), and
-  mutual planetary occultation (`V-51f`). The V-51f slice reuses the
-  V-51a/b primitives end-to-end; its producer contract is pinned by
+  mutual planetary occultation (`V-51f`). The Galilean shadow-
+  transit producer (`V-52d`) reuses the same V-51b path, emitting
+  one [`OccluderTarget::Planet`]`(3)` (Jupiter) entry per Galilean
+  moon whose Sun-line projection currently crosses Jupiter's disk;
+  its 5-minute ingress gate against JPL Horizons / PHEMU09 is
+  pinned by
+  `jupiter_shadows::tests::io_shadow_ingress_within_five_minutes_of_horizons_2008_12_20`
+  (Io shadow ingress at 2008-12-20 13:14 UT geocentric), and its
+  producer / renderer contracts are pinned by
+  `planning::tests::active_occluders_emit_io_shadow_at_2008_12_20_transit`
+  and
+  `camera::tests::occluder_uniform_emits_io_shadow_at_2008_12_20_transit`.
+  Moon ↔ moon mutual occultation is intentionally deferred: the
+  V-51b `OccluderTarget` enum does not reserve per-Galilean codes
+  today, and PHEMU-cadence mutual events are rare; the underlying
+  3D `earth_xyz_r_j` state is already published by
+  `crate::jupiter_shadows::galilean_shadow_states` so the future
+  slice only needs the occluder-target plumbing. The V-51f slice
+  reuses the V-51a/b primitives end-to-end; its producer contract
+  is pinned by
   `planning::tests::active_occluders_emit_no_planet_on_planet_off_event`
   (no Planet-on-Planet entries on a normal day, discriminated from
   V-51d Moon-on-Planet entries by the front-disk radius) and the

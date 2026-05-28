@@ -41,6 +41,7 @@ pub enum ScenePresetArg {
     EclipseAid,
     SolarEclipse,
     VenusTransit,
+    JupiterShadowTransit,
     AllSkyHammer,
     AllSkyMollweide,
     GalacticNorth,
@@ -63,6 +64,7 @@ impl ScenePresetArg {
         Self::EclipseAid,
         Self::SolarEclipse,
         Self::VenusTransit,
+        Self::JupiterShadowTransit,
         Self::AllSkyHammer,
         Self::AllSkyMollweide,
         Self::GalacticNorth,
@@ -85,6 +87,7 @@ impl ScenePresetArg {
             Self::EclipseAid => "eclipse-aid",
             Self::SolarEclipse => "solar-eclipse",
             Self::VenusTransit => "venus-transit",
+            Self::JupiterShadowTransit => "jupiter-shadow-transit",
             Self::AllSkyHammer => "all-sky-hammer",
             Self::AllSkyMollweide => "all-sky-mollweide",
             Self::GalacticNorth => "galactic-north",
@@ -192,6 +195,12 @@ pub const SCENE_PRESET_INFOS: &[ScenePresetInfo] = &[
         title: "Venus transit of the Sun",
         description: "2012-06-06 Venus transit observed from Tokyo near greatest transit. Wires V-51e planet-on-Sun analytic-mask occluder against the only Venus transit in the validation canon until 2117.",
         validation_focus: "V-51e planet-on-Sun pipeline: planet apparent disk as analytic mask inside the solar disk, daylight-band sky unchanged outside the disk",
+    },
+    ScenePresetInfo {
+        id: ScenePresetArg::JupiterShadowTransit,
+        title: "Jupiter Galilean shadow transit",
+        description: "2008-12-20 ~14:00 UT Io shadow transit on Jupiter observed from Roque de los Muchachos, Canary Islands (Io ingress at 13:14 UT, mid-transit ~14:30 UT; Jupiter rides at altitude ~39° SE from this site). Wires the V-52d Galilean-shadow producer onto the V-51b analytic-mask Planet-on-Planet path so Io's silhouette darkens the Jovian disk inside the eyepiece field.",
+        validation_focus: "V-52d Galilean-shadow pipeline: Sun-projected moon position emits a small Planet(Jupiter)-targeted occluder; V-52b moon sprites unaffected outside Jupiter's disk",
     },
     ScenePresetInfo {
         id: ScenePresetArg::AllSkyHammer,
@@ -494,6 +503,28 @@ pub fn scene_from_preset(
                 OverlayKind::DegreeLabels,
             ]),
             AtmospherePreset::ClearRural,
+            catalog,
+        )?,
+        // V-52d validation scene: 2008-12-20 ~14:00 UT Io shadow
+        // transit on Jupiter. The Io shadow's first contact with the
+        // Jovian limb (PHEMU09 canon) is 2008-12-20 13:14 UT; ~45 min
+        // later the shadow sits well inside the disk. Tokyo has
+        // Jupiter below the horizon at that UT, so the preset frames
+        // the event from Roque de los Muchachos (Canary Islands,
+        // 28.76°N / 17.89°W) where Jupiter rides ~39° up in the SE.
+        // A 0.05° eyepiece field zooms in tight on the Jovian disk so
+        // Io's silhouette is the dominant pixel feature; the V-51b
+        // analytic-mask Planet-on-Planet subtract path draws the
+        // dark shadow spot directly.
+        ScenePresetArg::JupiterShadowTransit => earth_scene(
+            28.76,
+            -17.89,
+            "2008-12-20T14:00:00Z",
+            162.1,
+            38.7,
+            0.05,
+            overlay_config(&[OverlayKind::CardinalLabels, OverlayKind::DegreeLabels]),
+            AtmospherePreset::HighAltitude,
             catalog,
         )?,
         ScenePresetArg::AllSkyHammer => {
