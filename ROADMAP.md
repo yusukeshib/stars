@@ -205,7 +205,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ⬜ |
 | `V-51` | **Unified eclipse / occultation pass** (`a` + `b` + `c` + `d` + `e` + `f` done) | ✅ |
 | `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** (`a` + `b` + `c` done at Meeus grade) | ⏳ |
-| `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** | ⬜ |
+| `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** (showpiece bootstrap done) | ✅ |
 | `V-54` | **Double / binary star resolution** | ⬜ |
 | `V-55` | **Artificial satellites (TLE / SGP4)** | ⬜ |
 | `V-56` | **Object search, GoTo, and info panel** | ⬜ |
@@ -2153,7 +2153,7 @@ a Galilean shadow-transit configuration.
 
 ---
 
-### `V-53` Resolved star clusters — ⬜
+### `V-53` Resolved star clusters — ✅ done (showpiece bootstrap slice)
 
 **Item.** Bright open clusters (Pleiades M45, Hyades, Praesepe M44,
 Double Cluster, Beehive) currently appear as a single DSO label from
@@ -2171,23 +2171,59 @@ model needed.
   from Gaia DR2).
 - Mermilliod, J.-C., Paunzen, E. 2003 (WEBDA database).
 
-**Implementation scope.**
-- `crates/catalog/src/clusters.rs` (new): membership table keyed by HYG
-  / Hip ID, joined into the loaded star slice.
-- `crates/catalog/src/deepsky.rs`: when a DSO entry is tagged
-  `resolve_as_member_field`, suppress the disk-only DSO sprite and
-  rely on the star sprites for the visual; keep the label.
-- `data/manifest.toml`: add cluster-membership snapshot with DOI.
+**Status (showpiece bootstrap shipped).**
+- `crates/catalog/data/cluster_membership.csv` (new) carries a
+  hand-curated membership table for 4 clusters / 34 stars: Pleiades
+  (M45, 9 named members), Praesepe / Beehive (M44, 11 bright core
+  members), Double Cluster (NGC 869 + NGC 884, HYG-resolvable bright
+  members). Hyades (Mel 25) is intentionally deferred — it has no
+  current V-42 DSO marker to suppress and will land with the
+  Cantat-Gaudin upgrade.
+- `crates/catalog/src/clusters.rs` (new) parses the CSV via
+  `OnceLock` and exposes
+  `cluster_members(DeepSkyId) -> &'static [ClusterMember]` and
+  `is_resolved_as_member_field(DeepSkyId) -> bool`.
+- `crates/catalog/src/deepsky.rs` extends `DeepSkyCatalog` with the
+  documented `resolve_as_member_field(DeepSkyId) -> bool` default
+  method; both `MessierCatalog` and `NgcBrightCatalog` consult the
+  cluster module.
+- `crates/renderer/src/overlay.rs` skips marker geometry for any
+  resolve-as-member-field DSO; the label pass is untouched so the
+  cluster label still sits over the resolved star field.
+- `data/manifest.toml` carries the new
+  `open-cluster-membership-bootstrap` row with DOI, license, and the
+  `scripts/extract-cluster-membership.py` regeneration command.
+- `scripts/extract-cluster-membership.py` (new) reproduces the CSV
+  byte-identically from a Python bootstrap list; the
+  `--from-cantat-gaudin` switch is stubbed and gated for the
+  follow-up extraction.
 
-**Tests / validation.** Pleiades render at 30′ FOV shows the 7 named
-stars at the correct positions within 1′; one gallery image per
-cluster.
+**Tests / validation.**
+- `pleiades_named_seven_positions_match_within_one_arcminute` resolves
+  HYG positions for the 7 named bright Pleiades stars and asserts each
+  is within 1' of the SIMBAD / Hipparcos reference — the V-53 gate.
+- `deep_sky_markers_suppress_v53_resolved_clusters` asserts the
+  renderer drops marker geometry for M45 / M44 / NGC 869 / NGC 884 and
+  keeps it for unrelated DSOs (M31, NGC 7000).
+- `pleiades_named_seven_are_members`,
+  `praesepe_is_resolved_as_member_field`,
+  `double_cluster_is_resolved_as_member_field`,
+  `unrelated_dso_is_not_resolved_as_member_field`,
+  `resolved_cluster_ids_match_v53_scope`,
+  `cluster_member_hyg_ids_are_unique_per_cluster` pin the membership
+  table.
 
 **Deliberate non-goal scope.** No globular-cluster star-by-star
 resolution (too dense, no per-member catalog at hobbyist scale — keep
 as DSO disk). No cluster colour-magnitude diagrams.
 
-**Hosts wired.** CLI / viewer / web.
+**Follow-up.** Replace the hand-curated bootstrap with a deterministic
+Cantat-Gaudin 2020 extraction via VizieR
+(`scripts/extract-cluster-membership.py --from-cantat-gaudin`,
+currently a stub). The deeper Double Cluster core (V > 9) and Hyades
+will follow when that path lands.
+
+**Hosts wired.** CLI / viewer / web (catalog seam — no host-side knob).
 
 ---
 

@@ -1,0 +1,76 @@
+# Open-cluster membership: showpiece bootstrap slice (V-53).
+#
+# Membership table that joins HYG / Hipparcos IDs to a parent open cluster's
+# deep-sky catalogue ID. The renderer uses this to flag clusters that should
+# be drawn as a *resolved field of stars* rather than a single DSO marker:
+# the Messier / NGC marker geometry is suppressed for tagged clusters while
+# the label is kept, and the underlying HYG stars carry the visible.
+#
+# Scope (deliberate, see PR V-53):
+#   - Pleiades (M45):       9 named members (Alcyone, Atlas, Electra, Maia,
+#                           Merope, Taygeta, Pleione, Asterope, Celaeno).
+#   - Praesepe (M44):       11 brightest core members at V <= 6.9.
+#   - Double Cluster:       NGC 869 (h Per) and NGC 884 (chi Per) bright
+#                           members in HYG (HYG only resolves these clusters
+#                           down to ~ mag 8.5 because the photometric core
+#                           is fainter than HYG's V <= 9 cut). Split by RA:
+#                           RA < 2.345 -> NGC 869, RA >= 2.345 -> NGC 884.
+#   - Hyades (Mel 25) is intentionally deferred: it has no current V-42 DSO
+#     marker to suppress (no Messier number, not in openngc_bright). The
+#     Cantat-Gaudin follow-up will add it once a Hyades label asset lands.
+#
+# Provenance:
+#   The 4 showpiece clusters here are bootstrapped from each cluster's
+#   well-documented bright-named-member list (HYG ID + Bayer / common name)
+#   so the deliverable for V-53 lands without a VizieR download dependency.
+#   A follow-up PR will replace this hand-curated slice with a deterministic
+#   extraction from the Cantat-Gaudin 2020 (A&A 633, A99) Gaia DR2/DR3
+#   membership catalog; see scripts/extract-cluster-membership.py for the
+#   stub that future extraction will fill in.
+#
+# Columns:
+#   cluster_id - DSO identifier in `M<N>` / `NGC<N>` / `IC<N>` form. Must
+#                match a row in messier.csv or openngc_bright.csv (whichever
+#                catalogue owns the cluster's marker geometry today).
+#   hyg_id     - HYG v4.2 `id` column. Required.
+#   hip_id     - Hipparcos catalogue number when present in HYG. Empty when
+#                the star has no Hipparcos cross-id. Used by future
+#                Cantat-Gaudin joins that key on HIP.
+#   name       - Human-readable common / Bayer / Flamsteed name. Empty when
+#                HYG carries no name. Informational only; the renderer does
+#                not use it.
+cluster_id,hyg_id,hip_id,name
+M45,17447,17489,Celaeno
+M45,17457,17499,Electra
+M45,17489,17531,Taygeta
+M45,17532,17573,Maia
+M45,17537,17579,Asterope
+M45,17566,17608,Merope
+M45,17661,17702,Alcyone
+M45,17805,17847,Atlas
+M45,17809,17851,Pleione
+M44,42208,42327,
+M44,42366,42485,
+M44,42377,42497,
+M44,42397,42516,39 Cnc
+M44,42404,42523,40 Cnc
+M44,42423,42542,
+M44,42429,42549,
+M44,42437,42556,Meleph
+M44,42459,42578,42 Cnc
+M44,42481,42600,
+M44,42554,42673,
+NGC869,10591,10615,
+NGC869,10600,10624,
+NGC869,10609,10633,
+NGC869,10617,10641,
+NGC869,10678,10704,
+NGC869,10703,10729,
+NGC869,10779,10805,
+NGC869,10790,10816,
+NGC869,10847,10873,
+NGC884,10992,11018,
+NGC884,10994,11020,
+NGC884,11072,11098,
+NGC884,11089,11115,
+NGC884,11119,11146,

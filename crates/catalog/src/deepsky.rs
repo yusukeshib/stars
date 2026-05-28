@@ -89,7 +89,7 @@ impl DeepSkyKind {
 /// expose `Messier(n)`; NGC / IC rows expose `Ngc(n)` or `Ic(n)`. The
 /// identifier-preservation tracked in `L-18` will extend this with optional
 /// secondary IDs (PGC, common names, etc.).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeepSkyId {
     Messier(u16),
     Ngc(u16),
@@ -153,6 +153,21 @@ pub trait DeepSkyCatalog {
     /// past the sentinel value, which matches the renderer's existing
     /// slider-controlled density policy.
     fn objects(&self, magnitude_limit: f32) -> Vec<DeepSkyObject>;
+
+    /// True when `id` should be drawn as a resolved field of HYG / Hipparcos
+    /// stars rather than a DSO marker — the V-53 cluster-resolution policy
+    /// (Pleiades M45, Praesepe M44, Double Cluster NGC 869 / 884, …).
+    ///
+    /// The label pass is intentionally unaffected: a naked-eye observer at
+    /// 30 arcmin FOV reads `M45` over the seven Pleiades sisters, not under
+    /// a phantom diamond marker drawn over the stars.
+    ///
+    /// Default implementation returns `false`; concrete catalogs delegate
+    /// to [`crate::clusters::is_resolved_as_member_field`] when they expose
+    /// a cluster that V-53 tags.
+    fn resolve_as_member_field(&self, _id: DeepSkyId) -> bool {
+        false
+    }
 }
 
 /// Embedded Messier catalogue (110 objects).
@@ -169,6 +184,10 @@ impl DeepSkyCatalog for MessierCatalog {
             .into_iter()
             .filter(|o| o.magnitude <= magnitude_limit)
             .collect()
+    }
+
+    fn resolve_as_member_field(&self, id: DeepSkyId) -> bool {
+        crate::clusters::is_resolved_as_member_field(id)
     }
 }
 
@@ -187,6 +206,10 @@ impl DeepSkyCatalog for NgcBrightCatalog {
             .into_iter()
             .filter(|o| o.magnitude <= magnitude_limit)
             .collect()
+    }
+
+    fn resolve_as_member_field(&self, id: DeepSkyId) -> bool {
+        crate::clusters::is_resolved_as_member_field(id)
     }
 }
 

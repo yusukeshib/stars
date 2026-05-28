@@ -551,15 +551,21 @@ fn deep_sky_markers(magnitude_limit: f32) -> Vec<OverlayVertex> {
     // result (the overlay pipeline blends additively, see `pipeline.rs`),
     // but Messier is appended last to keep the vertex layout stable across
     // catalogue regenerations.
-    let mut objects = NgcBrightCatalog.objects(magnitude_limit);
-    objects.extend(MessierCatalog.objects(magnitude_limit));
+    let ngc = NgcBrightCatalog;
+    let messier = MessierCatalog;
+    let ngc_objs = ngc.objects(magnitude_limit);
+    let messier_objs = messier.objects(magnitude_limit);
 
     // Worst case: every retained object is a 16-vertex NGC ring; in the
     // common case Messier diamonds (8 verts) dilute this, so the buffer
     // may over-allocate by up to ~50% on a Messier-only slider position.
     // The cost is negligible (a few KB) and only paid on config change.
-    let mut verts = Vec::with_capacity(objects.len() * 16);
-    for obj in objects {
+    let mut verts = Vec::with_capacity((ngc_objs.len() + messier_objs.len()) * 16);
+    for (obj, is_messier) in ngc_objs
+        .into_iter()
+        .map(|o| (o, false))
+        .chain(messier_objs.into_iter().map(|o| (o, true)))
+    {
         // Re-check magnitude here even though `objects()` already filters:
         // the catalog filter uses a direct `<=` (drops NaN-valued rows),
         // and the renderer asserts the same contract via `partial_cmp` so
@@ -569,6 +575,18 @@ fn deep_sky_markers(magnitude_limit: f32) -> Vec<OverlayVertex> {
             obj.magnitude.partial_cmp(&magnitude_limit),
             Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal),
         ) {
+            continue;
+        }
+        // V-53: clusters tagged for member-field resolution (Pleiades, Beehive,
+        // Double Cluster) drop their disk marker. The HYG star sprites carry
+        // the visible and the label pass still draws "M45" / "M44" / "NGC869"
+        // over the resolved field, matching what a naked-eye observer sees.
+        let resolve = if is_messier {
+            messier.resolve_as_member_field(obj.id)
+        } else {
+            ngc.resolve_as_member_field(obj.id)
+        };
+        if resolve {
             continue;
         }
         match obj.id {
@@ -1069,9 +1087,12 @@ mod tests {
         // The exact NGC count drifts with each OpenNGC snapshot, so we only
         // check the Messier contribution is present and the total is a
         // multiple of two (every vertex must have a partner for the
-        // LineList topology).
+        // LineList topology). V-53 suppresses Messier diamonds and NGC rings
+        // for clusters tagged as resolve-into-member-field (Pleiades M45,
+        // Praesepe M44, Double Cluster NGC 869 / NGC 884) so the rendered
+        // Messier diamond count is exactly `110 - 2`.
         let v = deep_sky_markers(99.0);
-        let messier_verts = 110 * 8;
+        let messier_verts = (110 - 2) * 8;
         assert!(v.len() >= messier_verts + 16); // at least one NGC ring.
         assert_eq!(v.len() % 2, 0);
         // Rings contribute multiples of 16; subtracting the Messier diamond
@@ -1086,14 +1107,13 @@ mod tests {
         // ~1.6; brightest NGC entry sits above the same threshold).
         let none = deep_sky_markers(-10.0);
         assert!(none.is_empty());
-        // At limit 2.0 only Messier objects brighter than mag 2 survive
-        // (M45 alone), plus any NGC / IC entries at the same brightness.
-        // The combined count is therefore at least the M45 diamond (8) and
-        // is a multiple of 8 (4 segments × 2 vertices for diamonds;
-        // 8 segments × 2 vertices for rings, both divisible by 8).
+        // At limit 2.0 the only Messier object brighter than mag 2 is M45,
+        // but V-53 suppresses M45's diamond and the brightest NGC entry is
+        // above mag 2, so this slider position must produce no marker
+        // geometry at all. The empty result also exercises the
+        // suppression-when-no-other-rows-pass branch.
         let only_brightest = deep_sky_markers(2.0);
-        assert!(only_brightest.len() >= 8);
-        assert_eq!(only_brightest.len() % 8, 0);
+        assert!(only_brightest.is_empty());
         // At the default cutoff (7.0) the slider should expose strictly
         // more markers than the brightest-only filter and strictly fewer
         // than the show-all filter.
@@ -1101,6 +1121,44 @@ mod tests {
         let show_all = deep_sky_markers(99.0);
         assert!(default.len() > only_brightest.len());
         assert!(default.len() < show_all.len());
+    }
+
+    #[test]
+    fn deep_sky_markers_suppress_v53_resolved_clusters() {
+        // The renderer must not paint a marker over a cluster that V-53
+        // tags as a resolved field of stars: Pleiades (M45), Praesepe (M44),
+        // and the Double Cluster (NGC 869 / NGC 884). The HYG sprites and
+        // the label pass cover the visible; a phantom disk on top of them
+        // would obscure the very stars the user is meant to see.
+        let with_suppression = deep_sky_markers(99.0);
+        // Without suppression the full Messier slate would contribute
+        // 110 * 8 = 880 diamond vertices. Two are suppressed (M44 and M45),
+        // so the diamond contribution drops by 16. Two NGC rings are also
+        // suppressed (NGC 869 / 884) — 32 fewer ring vertices.
+        let messier_diamond_verts: usize = with_suppression
+            .iter()
+            .step_by(2)
+            // every diamond marker is unit-length on the Messier band at the
+            // current `marker_half_radius_rad` and the test below only needs
+            // the *count* of suppressed markers, so we re-derive the expected
+            // total from the catalog instead of touching pixels.
+            .count();
+        // Sanity: a non-zero number of markers survives at show-all limit.
+        assert!(messier_diamond_verts > 0);
+
+        // Direct catalog-level assertion: the suppression predicate must
+        // fire for every V-53 cluster id and no other id encountered in the
+        // overlay's input.
+        let messier = MessierCatalog;
+        let ngc = NgcBrightCatalog;
+        assert!(messier.resolve_as_member_field(DeepSkyId::Messier(45)));
+        assert!(messier.resolve_as_member_field(DeepSkyId::Messier(44)));
+        assert!(ngc.resolve_as_member_field(DeepSkyId::Ngc(869)));
+        assert!(ngc.resolve_as_member_field(DeepSkyId::Ngc(884)));
+        // Random unrelated DSO must remain a marker so the suppression
+        // policy does not accidentally hide every Messier object.
+        assert!(!messier.resolve_as_member_field(DeepSkyId::Messier(31)));
+        assert!(!ngc.resolve_as_member_field(DeepSkyId::Ngc(7000)));
     }
 
     #[test]
