@@ -30,10 +30,10 @@ between engine crates and host applications.
                     │  Renderer::render       │
                     └────────────┬────────────┘
                                  │
-          ┌──────────────────────┼──────────────────────┐
-          ▼                      ▼                      ▼
-      apps/cli               apps/viewer             apps/web
-      PNG output             native window           WASM + canvas
+          ┌──────────────┬──────────────┬──────────────┐
+          ▼              ▼              ▼              ▼
+      apps/cli       apps/viewer     apps/server      apps/web
+      PNG output     native window   HTTP / PNG       WASM + canvas
 
                   bindings/python  (read-only PyO3 wrapper, L-21)
                   ▲
@@ -43,9 +43,12 @@ between engine crates and host applications.
 `crates/common` is intentionally outside the engine tier even though it lives
 under `crates/`. It contains native-host glue: `clap` mirrors of renderer enums,
 `chrono` time parsing, schema-versioned JSON session conversion, deterministic
-scene preset construction, atmosphere / overlay argument mapping, and shared
-catalog-to-renderer conversion for CLI and desktop. The web host bypasses it so
-WASM stays free of native-only dependencies.
+scene preset construction, atmosphere / overlay argument mapping, the shared
+catalog-to-renderer conversion for CLI / desktop / server, and — since `L-22`
+— the shared headless GPU render pipeline (`crates::common::render`) that
+the CLI and the HTTP server both call so the two hosts cannot drift on
+device initialisation, readback alignment, or PNG encoding. The web host
+bypasses it so WASM stays free of native-only dependencies.
 
 ## Crate boundaries
 
@@ -122,6 +125,11 @@ Hosts own platform lifecycle:
 - `apps/cli`: create a headless texture, optionally load/write a JSON session
   or built-in preset, render once, copy padded rows back to CPU memory, and
   write PNG;
+- `apps/server`: HTTP host (axum). Routes scene JSON to the shared
+  `stars_host_common::render::render_scene_from_catalog_path` pipeline
+  and streams the PNG bytes back. Endpoints: `GET /healthz`, `GET
+  /presets[/{id}]`, `POST /render?width=&height=&skyglow=`. No engine
+  or render logic of its own.
 - `apps/viewer`: optionally load a JSON session or built-in preset, manage a `winit` event loop,
   surface resize, input, and frame pacing;
 - `apps/web`: expose a WASM `StarView`, keep JS/UI state, load/copy/download

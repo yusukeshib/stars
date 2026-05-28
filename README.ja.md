@@ -81,6 +81,19 @@ Web 版を起動する場合:
 make web
 ```
 
+ヘッドレス HTTP サーバ (`L-22`) を起動する場合 (既定 `127.0.0.1:8787`):
+
+```bash
+make server
+# 別ターミナルから
+curl http://127.0.0.1:8787/healthz
+curl http://127.0.0.1:8787/presets/tokyo-tonight \
+  | curl -X POST --data-binary @- \
+         -H 'Content-Type: application/json' \
+         'http://127.0.0.1:8787/render?width=1280&height=720' \
+         -o tokyo.png
+```
+
 ローカル CI 相当のチェック:
 
 ```bash
@@ -93,8 +106,9 @@ make ci
 crates/astronomy   時刻系、座標変換、補正、天体暦、測光、大気、空の輝き、観測計画
 crates/catalog     HYG カタログ読み込み、色変換、座標変換
 crates/renderer    wgpu レンダラー、カメラ、オーバーレイ、トーンマップ、星インスタンス
-crates/common      CLI / desktop viewer 向けの native host 共通処理
+crates/common      CLI / desktop viewer / server で共有する native host 共通処理
 apps/cli           PNG を出力する headless renderer
+apps/server        ヘッドレス HTTP host (axum)
 apps/viewer        native desktop viewer
 apps/web           WASM engine wrapper と frontend UI
 scripts            カタログ取得・README 画像生成・WASM build helper

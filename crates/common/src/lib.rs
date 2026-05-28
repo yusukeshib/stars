@@ -16,8 +16,11 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 mod presets;
+mod render;
 mod session;
 pub use presets::*;
+pub use render::*;
+pub use renderer::DEFAULT_SCREEN_LIMITING_MAGNITUDE;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation,
     LightPollution, OverlayConfig, OverlayKind, Scintillation, SkyProjection, SkyViewpoint,

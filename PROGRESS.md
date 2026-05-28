@@ -2674,6 +2674,68 @@ Files touched:
 - `Makefile` (`pyo3-check` target, `ci` append).
 - `ROADMAP.md`, `ARCHITECTURE.md`, `PROGRESS.md`.
 
+## Headless HTTP server host (`L-22`)
+
+A new native host, `stars-server` (`apps/server/`), wraps the existing
+render pipeline in an axum HTTP service. Sessions go in as JSON, PNGs
+come out; built-in scene presets are reachable as endpoints. The host
+reuses `stars-host-common` for **every** non-HTTP concern — session
+loading and validation, preset resolution, render-options plumbing,
+and the wgpu device + readback pipeline that previously lived inline
+in `apps/cli/src/main.rs`. The render code now lives in
+`crates/common/src/render.rs` and both the CLI and the server call it,
+so the two hosts cannot drift on the GPU init path or the catalog
+resolution rule.
+
+Shipped capabilities:
+
+- `GET /healthz` — 200 OK with `{ status, service, version }`.
+- `GET /presets` — array of every built-in `ScenePresetInfo`, kebab-id
+  keyed.
+- `GET /presets/{id}` — that preset's effective
+  schema-versioned `StarSession` JSON, exactly equivalent to the
+  files under `docs/presets/sessions/`.
+- `POST /render` (body: session JSON, query: `width`, `height`,
+  `skyglow`) — returns PNG bytes with `Content-Type: image/png`.
+  Resolution is clamped to `[16, 8192]`. The render runs on a
+  `tokio::task::spawn_blocking` worker so the runtime stays
+  responsive while wgpu owns a thread.
+- JSON error envelope: `{ error, detail }` for 400 / 404 / 500.
+- `Makefile` target `make server` runs the binary in release mode
+  with `SERVER_ARGS` overridable (`make server SERVER_ARGS="--port
+  9000"`).
+
+Primary implementation areas:
+
+- `apps/server/src/main.rs`: routes, axum wiring, render handler.
+- `crates/common/src/render.rs`: `RenderOptions`,
+  `render_scene_pixels`, `render_scene_from_catalog_path`, and
+  `encode_png` — the host-tier render glue extracted out of the
+  CLI.
+- `apps/cli/src/main.rs`: now a thin caller of
+  `render_scene_from_catalog_path` (≈130 lines of GPU init removed
+  here, no behaviour change).
+- `crates/common/Cargo.toml`: adds `wgpu`, `pollster`, `image` — the
+  three dependencies that were already on every native host but
+  duplicated per crate; they now live exactly once.
+
+Validation:
+
+- `apps/server/src/main.rs::tests::healthz_and_presets_round_trip`
+  binds an ephemeral port, drives the real `axum::serve` loop, and
+  asserts the JSON shape of `/healthz`, `/presets`, and the 404
+  envelope on an unknown preset id. The `/render` route is
+  intentionally *not* tested here — GPU adapter availability is
+  not guaranteed on every CI lane and the existing `examples` and
+  validation gallery already pin the GPU path.
+- The catalog resolution rule (`scene.catalog.path` → server
+  default) is shared with the CLI through
+  `render_scene_from_catalog_path`, so any catalog-path regression
+  shows up on both hosts.
+
+Hosts wired: server (new), CLI (refactored to reuse shared render),
+viewer / web unchanged.
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:
