@@ -1981,6 +1981,83 @@ References:
 - Qiu, J. et al. 2003, JGR 108, D22 (phase dependence and Bond-albedo
   retrieval).
 
+||||||| parent of 1e9dac4 (V-25: differential atmospheric dispersion)
+## `V-25` Differential atmospheric dispersion
+
+Wavelength-dependent refraction now renders horizon-near point sources as
+short vertical R–G–B streaks (blue end higher, red end lower) and gives
+the setting Sun / Moon a faintly reddened lower limb and bluer upper
+limb. The renderer previously applied one altitude-only refraction value
+to every channel; the dispersion is now baked into the PSF footprint and
+the analytic Sun / Moon disk mask rather than added as a post-process
+tint.
+
+Shipped capabilities:
+
+- `astronomy::corrections::refraction_per_wavelength(true_altitude_rad,
+  pressure_hpa, temperature_c, wavelength_nm)` returns the refraction
+  angle `ρ(λ) = apparent − true` in radians. The broadband Saemundsson
+  apparent-altitude refraction is scaled by the Edlén 1966 refractivity
+  ratio `(n(λ) − 1) / (n(550 nm) − 1)`, so the green channel matches the
+  existing single-wavelength path bit-for-bit and the differential
+  `ρ(B) − ρ(R)` follows the Edlén dispersion shape.
+- `astronomy::RGB_REFERENCE_WAVELENGTHS_NM = [620, 550, 440]` and
+  `EDLEN_REFERENCE_REFRACTIVITY` are now public so renderer and
+  validation code share one source of truth for the R / G / B anchors.
+- `crates/renderer/src/shaders/star.wgsl` projects three apparent
+  directions per star (one per channel) and emits the green-relative
+  pixel offsets for red and blue as a fourth vertex output
+  (`dispersion_px_rb`). The fragment shader samples the radial Spencer
+  PSF at the three offset centres and packs the chromatic intensities
+  into the per-pixel `vec3` RGB output. The ciliary corona and edge
+  apodization stay shared across channels because both are geometric
+  (lens / sprite-window) effects.
+- `crates/renderer/src/shaders/skyglow.wgsl` shifts the Sun and Moon
+  disk centres per channel along the local-vertical great-circle by
+  `ρ_total(alt) · (ratio_X − 1)`, then composes a per-channel disk mask.
+  At high altitudes the three masks coincide and the result reduces to
+  the legacy single-mask render; near the horizon the shifted masks
+  produce the characteristic chromatic limbs.
+- Pressure / temperature flow through the existing
+  `Atmosphere::pressure_hpa` / `Atmosphere::temperature_c`
+  (`V-34` controls). No new host parameters were introduced; the
+  feature is automatically gated off when
+  `Atmosphere::sunlit_scattering = false` (`Atmosphere::OFF` and the
+  external galactic viewpoint).
+
+Tests pinned:
+
+- `crates/astronomy/src/corrections.rs::rgb_dispersion_at_five_degrees_is_arcsecond_scale`
+  asserts `ρ(440 nm) − ρ(620 nm) ∈ [6″, 12″]` at altitude 5°, 1013 hPa,
+  10 °C. The roadmap's original `[1.2″, 2.5″]` target was inconsistent
+  with Edlén + Saemundsson at altitude 5° — the correct value is
+  ≈8.8″, still firmly naked-eye-visible. The roadmap's qualitative
+  criterion (“naked-eye visible on Sirius or the Sun’s lower limb”) is
+  the one that ships; the numeric window has been widened to reflect
+  the physics.
+- `corrections::tests::rgb_dispersion_decreases_with_altitude` pins
+  the monotone falloff with altitude (alt = 5° > 30° > 60°) and the
+  blue-above-red sign.
+- `corrections::tests::edlen_refractivity_brackets_550nm_with_rgb_anchors`
+  asserts `n(620) < n(550) < n(440)` and pins the 550 nm reference
+  constant.
+- `renderer::camera::tests::rgb_dispersion_ratios_agree_with_astronomy`
+  re-parses both `star.wgsl` and `skyglow.wgsl` to assert that each
+  `DISPERSION_RATIO_{R,G,B}` constant equals the corresponding host
+  Edlén ratio, so the renderer cannot silently drift away from the
+  astronomy crate.
+
+References:
+
+- Filippenko, A. V. 1982, PASP 94, 715.
+- Stone, R. C. 1996, PASP 108, 1051.
+- Edlén, B. 1966, Metrologia 2, 71.
+- Cox, A. N., ed. 2000, *Allen's Astrophysical Quantities*, §3.281.
+
+Hosts wired: CLI / viewer / web (all consume the same renderer crate,
+so the dispersion ships through the shared shader pipeline without
+any host-side wiring changes).
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

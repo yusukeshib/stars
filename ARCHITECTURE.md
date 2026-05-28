@@ -283,7 +283,15 @@ The exact pass layout can change, but responsibilities should stay separated:
 - **Star pass**: per-star proper motion, corrections, refraction, extinction,
   projection, PSF/glare, and HDR accumulation. In the external galactic
   viewpoint, atmospheric effects are skipped and stars are projected as parsec
-  positions in the IAU galactic frame.
+  positions in the IAU galactic frame. Refraction is wavelength-dependent
+  (`V-25`): the vertex stage projects three apparent altitudes per star
+  using Edlén 1966 dispersion at R = 620 nm, G = 550 nm, B = 440 nm, and
+  emits green-relative pixel offsets so the fragment stage can sample the
+  radial Spencer PSF at three centres and bake the chromatic streak into
+  the footprint rather than adding it as a post-process tint. The Sun and
+  Moon disk masks in the skyglow pass apply the same per-channel offsets
+  to reproduce the red lower limb / blue upper limb of a horizon-grazing
+  Sun or Moon.
 - **Overlay pass**: reference circles, grids, constellation lines, boundaries,
   projection, and LDR text labels from the shared bitmap font atlas /
   label-placement pass.

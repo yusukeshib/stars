@@ -1732,6 +1732,44 @@ impl Camera {
 mod tests {
     use super::*;
 
+    /// V-25: the per-channel Edlén dispersion ratios are declared as
+    /// `f32` constants in `shaders/star.wgsl` and `shaders/skyglow.wgsl`.
+    /// Each must match the host astronomy module's Edlén refractivity
+    /// ratio relative to the 550 nm reference to within `1e-4`. Drift
+    /// here would desynchronise the chromatic offsets the star pass and
+    /// the Sun/Moon disk shader apply, producing inconsistent fringes.
+    #[test]
+    fn rgb_dispersion_ratios_agree_with_astronomy() {
+        let star_shader = include_str!("shaders/star.wgsl");
+        let sky_shader = include_str!("shaders/skyglow.wgsl");
+        let names = [
+            ("DISPERSION_RATIO_R", 620.0_f64),
+            ("DISPERSION_RATIO_G", 550.0_f64),
+            ("DISPERSION_RATIO_B", 440.0_f64),
+        ];
+        for (name, wavelength_nm) in names.iter() {
+            for (shader_name, shader) in [("star.wgsl", star_shader), ("skyglow.wgsl", sky_shader)]
+            {
+                let needle = format!("const {name}: f32 = ");
+                let start = shader
+                    .find(&needle)
+                    .unwrap_or_else(|| panic!("{shader_name} missing dispersion constant {name}"));
+                let after = &shader[start + needle.len()..];
+                let end = after.find(';').expect("const declaration terminator");
+                let parsed: f32 = after[..end]
+                    .trim()
+                    .parse()
+                    .unwrap_or_else(|err| panic!("{shader_name} {name}: parse error {err}"));
+                let host = (astronomy::edlen_refractivity_standard_air(*wavelength_nm)
+                    / astronomy::EDLEN_REFERENCE_REFRACTIVITY) as f32;
+                assert!(
+                    (parsed - host).abs() < 1.0e-4,
+                    "{shader_name} {name}: shader {parsed} vs host {host}"
+                );
+            }
+        }
+    }
+
     /// V-52a: the Saturn ring band-radius constants live in two places (the
     /// host-side `astronomy::SaturnRingApparent::BAND_RADII_R_S` array and the
     /// WGSL `SATURN_RING_*_R_S` declarations in `shaders/skyglow.wgsl`). They

@@ -358,6 +358,73 @@ fn disk_mask(ray_dir: vec3<f32>, center_dir: vec3<f32>, radius_rad: f32, pixel_s
     return 1.0 - smoothstep01(radius_rad - aa, radius_rad + aa, delta);
 }
 
+// V-25 differential atmospheric dispersion for Sun / Moon limbs.
+//
+// The host uploads `sun_eq_radius.xyz` and `moon_eq_illuminance.xyz` as the
+// broadband (green-channel) refracted directions. To bake the R/G/B
+// chromatic offsets into the disk footprint, we shift the disk centre per
+// channel along the local-vertical great-circle by
+// `ρ_total(alt) * (ratio_X − 1)`, where `ratio_X` is the Edlén refractivity
+// ratio relative to 550 nm. The ratios match the WGSL constants in
+// `star.wgsl` and the host-side `RGB_REFERENCE_WAVELENGTHS_NM` table; a
+// workspace test pins all three views against each other.
+const DISPERSION_RATIO_R: f32 = 0.99589;
+const DISPERSION_RATIO_G: f32 = 1.0;
+const DISPERSION_RATIO_B: f32 = 1.01105;
+
+fn saemundsson_refraction_angle_rad(true_altitude_rad: f32) -> f32 {
+    let alt_deg = true_altitude_rad * RAD_TO_DEG;
+    if alt_deg < -1.0 || alt_deg > 89.9 {
+        return 0.0;
+    }
+    let pressure_scale = max(camera.refraction_params.x, 0.0) / 1010.0;
+    let temp_k = max(273.0 + camera.refraction_params.y, 150.0);
+    let weather_scale = pressure_scale * 283.0 / temp_k;
+    let r_arcmin = 1.02 / tan((alt_deg + 10.3 / (alt_deg + 5.11)) * DEG_TO_RAD) * weather_scale;
+    return (r_arcmin / 60.0) * DEG_TO_RAD;
+}
+
+// Rotate `center_dir` along the local-vertical great-circle by `delta_alt`
+// radians (positive = toward zenith). Used by the V-25 disk-dispersion
+// helper to synthesise per-channel disk centres from the broadband one.
+fn dispersed_disk_dir(center_dir: vec3<f32>, delta_alt: f32) -> vec3<f32> {
+    let zenith = camera.zenith_eq.xyz;
+    let sin_alt = clamp(dot(center_dir, zenith), -1.0, 1.0);
+    let vertical = zenith - sin_alt * center_dir;
+    let vertical_len = length(vertical);
+    if vertical_len < 1.0e-5 || abs(delta_alt) < 1.0e-9 {
+        return center_dir;
+    }
+    let tangent = vertical / vertical_len;
+    return normalize(center_dir + delta_alt * tangent);
+}
+
+// Per-channel disk mask: each channel sees the disk at a slightly different
+// apparent altitude, so the R limb sits below the G limb and the B limb
+// above it. The deltas vanish at zenith and grow toward the horizon,
+// reproducing the reddened lower limb of a setting Sun / Moon.
+fn disk_mask_rgb(
+    ray_dir: vec3<f32>,
+    center_dir: vec3<f32>,
+    radius_rad: f32,
+    pixel_sr: f32,
+) -> vec3<f32> {
+    // `center_dir` is already the green-channel apparent direction. To
+    // recover the *true* altitude we subtract the broadband Saemundsson
+    // lift at the apparent altitude (a self-consistent approximation
+    // accurate to <1″ in the arcsec accuracy budget of V-25). The per-
+    // channel offset is then `rho_total * (ratio_X − 1)`.
+    let sin_alt = clamp(dot(center_dir, camera.zenith_eq.xyz), -1.0, 1.0);
+    let alt_apparent = asin(sin_alt);
+    let rho_total = saemundsson_refraction_angle_rad(alt_apparent);
+    let red_dir = dispersed_disk_dir(center_dir, rho_total * (DISPERSION_RATIO_R - 1.0));
+    let blu_dir = dispersed_disk_dir(center_dir, rho_total * (DISPERSION_RATIO_B - 1.0));
+    let m_r = disk_mask(ray_dir, red_dir, radius_rad, pixel_sr);
+    let m_g = disk_mask(ray_dir, center_dir, radius_rad, pixel_sr);
+    let m_b = disk_mask(ray_dir, blu_dir, radius_rad, pixel_sr);
+    return vec3<f32>(m_r, m_g, m_b);
+}
+
 // V-51b: union mask of every active occluder whose target matches
 // `target_code`. Returns 0 outside any front disk, ramping to 1 inside
 // (with `disk_mask`'s pixel-scaled antialias band). Used by the Sun and
@@ -478,8 +545,12 @@ fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixe
     if dot(sun_dir, camera.zenith_eq.xyz) > 0.0 {
         let sun_solid_angle = PI * sun_radius * sun_radius;
         let sun_luminance = max(camera.atmosphere_params.z, 0.0) / max(sun_solid_angle, 1e-8);
+        // V-25: per-channel disk mask bakes the chromatic refraction into
+        // the footprint. At high Sun altitudes the three masks coincide
+        // and the result reduces to the legacy single-mask render.
+        let sun_mask_rgb = disk_mask_rgb(ray_dir, sun_dir, sun_radius, pixel_sr);
         let sun_disk_term = hdr_flux_from_cd_m2(camera.solar_rgb.xyz * sun_luminance, zeropoint)
-            * disk_mask(ray_dir, sun_dir, sun_radius, pixel_sr);
+            * sun_mask_rgb;
         rgb += sun_disk_term * (1.0 - sun_subtract);
 
         // V-51c Baumbach corona: evaluate only during totality, inside a
@@ -508,7 +579,10 @@ fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixe
         let moon_luminance = max(camera.moon_eq_illuminance.w, 0.0) / max(moon_solid_angle, 1e-8);
         let phase = lunar_phase_lambert(ray_dir, moon_dir, sun_dir, moon_radius);
         let earth_shadow = clamp(camera.moon_disk.w, 0.0, 1.0);
-        let mask = disk_mask(ray_dir, moon_dir, moon_radius, pixel_sr);
+        // V-25: per-channel disk mask reproduces the red lower limb /
+        // blue upper limb of a horizon-grazing Moon, mirroring the Sun
+        // path above.
+        let mask = disk_mask_rgb(ray_dir, moon_dir, moon_radius, pixel_sr);
         // Lit-side Lambertian shading (existing path), tinted slightly
         // warmer than D65 to track the lunar regolith spectrum.
         let lit_rgb = vec3<f32>(1.01, 1.0, 0.82) * moon_luminance * phase;
