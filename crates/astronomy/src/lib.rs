@@ -21,9 +21,11 @@ pub mod skyglow;
 mod time;
 
 pub use corrections::{
-    annual_aberration, earth_velocity_over_c_j2000, equation_of_equinoxes, mean_obliquity_iau2006,
-    nutation_iau2000b_approx, precession_matrix_iau2006, precession_nutation_matrix,
-    refracted_altitude_saemundsson, years_since_j2000, Nutation,
+    annual_aberration, earth_velocity_over_c_j2000, edlen_refractivity_standard_air,
+    equation_of_equinoxes, mean_obliquity_iau2006, nutation_iau2000b_approx,
+    precession_matrix_iau2006, precession_nutation_matrix, refracted_altitude_saemundsson,
+    refraction_per_wavelength, years_since_j2000, Nutation, EDLEN_REFERENCE_REFRACTIVITY,
+    REFERENCE_WAVELENGTH_NM, RGB_REFERENCE_WAVELENGTHS_NM,
 };
 pub use ephemeris::{
     apparent_moon, apparent_moon_topocentric, apparent_planet, apparent_planet_topocentric,

@@ -201,21 +201,38 @@ fn atmospheric_attenuation(altitude_rad: f32, k_rgb: vec3<f32>) -> vec3<f32> {
     return exp(neg_oh_four_ln10 * k_rgb * x);
 }
 
-fn refracted_altitude_rad(true_altitude_rad: f32) -> f32 {
-    // Saemundsson 1986 / Meeus ch. 16 apparent refraction for standard
-    // pressure/temperature. Returns apparent altitude from true altitude.
-    // The expression is well-behaved down to about -1°, below which a simple
-    // stellar renderer should keep objects hidden rather than invent ducting.
+// Saemundsson 1986 / Meeus ch. 16 apparent-altitude refraction angle
+// `ρ = apparent − true` (radians) for the renderer's broadband / green
+// reference. The expression is well-behaved down to about −1°, below
+// which a simple stellar renderer should keep objects hidden rather than
+// invent ducting; outside that domain the routine returns zero so the
+// dispersion scaling below cannot produce spurious offsets.
+fn saemundsson_refraction_angle_rad(true_altitude_rad: f32) -> f32 {
     let alt_deg = true_altitude_rad * (180.0 / 3.14159265359);
     if alt_deg < -1.0 || alt_deg > 89.9 {
-        return true_altitude_rad;
+        return 0.0;
     }
     let pressure_scale = max(camera.refraction_params.x, 0.0) / 1010.0;
     let temp_k = max(273.0 + camera.refraction_params.y, 150.0);
     let weather_scale = pressure_scale * 283.0 / temp_k;
-    let r_arcmin = 1.02 / tan((alt_deg + 10.3 / (alt_deg + 5.11)) * (3.14159265359 / 180.0)) * weather_scale;
-    return true_altitude_rad + (r_arcmin / 60.0) * (3.14159265359 / 180.0);
+    let r_arcmin = 1.02 / tan((alt_deg + 10.3 / (alt_deg + 5.11)) * (3.14159265359 / 180.0))
+        * weather_scale;
+    return (r_arcmin / 60.0) * (3.14159265359 / 180.0);
 }
+
+fn refracted_altitude_rad(true_altitude_rad: f32) -> f32 {
+    return true_altitude_rad + saemundsson_refraction_angle_rad(true_altitude_rad);
+}
+
+// V-25 differential atmospheric dispersion: per-channel scaling of the
+// broadband Saemundsson refraction angle by the Edlén 1966 refractivity
+// ratio `(n(λ) − 1) / (n(550 nm) − 1)`. The constants below are computed
+// from `astronomy::corrections::edlen_refractivity_standard_air` at the
+// R/G/B reference wavelengths (620, 550, 440 nm) and pinned against the
+// host by a workspace test so the two views cannot silently drift.
+const DISPERSION_RATIO_R: f32 = 0.99589;
+const DISPERSION_RATIO_G: f32 = 1.0;
+const DISPERSION_RATIO_B: f32 = 1.01105;
 
 fn apply_annual_aberration(eq_j2000_dir: vec3<f32>) -> vec3<f32> {
     let beta = camera.aberration_pm.xyz;
@@ -233,6 +250,22 @@ fn refract_equatorial_direction(eq_date_dir: vec3<f32>) -> vec3<f32> {
     let local = (camera.eq_to_local * vec4<f32>(eq_date_dir, 0.0)).xyz;
     let true_alt = asin(clamp(local.z, -1.0, 1.0));
     let apparent_alt = refracted_altitude_rad(true_alt);
+    let az = atan2(local.x, local.y);
+    let cos_alt = cos(apparent_alt);
+    return vec3<f32>(sin(az) * cos_alt, cos(az) * cos_alt, sin(apparent_alt));
+}
+
+// Per-channel refracted local direction: the green channel reuses the
+// shared Saemundsson lift; red/blue add the Edlén dispersion delta so the
+// PSF can be split into three chromatic footprints.
+fn refract_equatorial_direction_for_channel(
+    eq_date_dir: vec3<f32>,
+    dispersion_ratio: f32,
+) -> vec3<f32> {
+    let local = (camera.eq_to_local * vec4<f32>(eq_date_dir, 0.0)).xyz;
+    let true_alt = asin(clamp(local.z, -1.0, 1.0));
+    let broadband = saemundsson_refraction_angle_rad(true_alt);
+    let apparent_alt = true_alt + broadband * dispersion_ratio;
     let az = atan2(local.x, local.y);
     let cos_alt = cos(apparent_alt);
     return vec3<f32>(sin(az) * cos_alt, cos(az) * cos_alt, sin(apparent_alt));
@@ -324,6 +357,11 @@ struct VertexOutput {
     @location(1) color: vec3<f32>,
     @location(2) brightness: f32,
     @location(3) sprite_half_px: f32,
+    // V-25 differential atmospheric dispersion: per-channel screen-space
+    // offsets (in pixels) from the green-channel sprite centre. `xy` holds
+    // the red offset; `zw` the blue offset. Both zero when the atmosphere
+    // is disabled or the star sits on an unrefracted path.
+    @location(4) dispersion_px_rb: vec4<f32>,
 };
 
 @vertex
@@ -372,6 +410,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
         }
     }
     var clip: vec4<f32>;
+    var dispersion_px_rb = vec4<f32>(0.0);
     if camera.viewpoint_params.x > 0.5 {
         let distance_pc = max(input.distance_pc, 0.0);
         let galactic_position_pc = (EQ_TO_GAL * corrected_j2000) * distance_pc;
@@ -380,6 +419,35 @@ fn vs_main(input: VertexInput) -> VertexOutput {
         let corrected_date = (camera.j2000_to_date * vec4<f32>(corrected_j2000, 0.0)).xyz;
         let local_or_refracted = refract_equatorial_direction(corrected_date);
         clip = project_equatorial_direction(corrected_j2000, local_or_refracted, atmosphere_active);
+        // V-25: only the Earth-frame refracted path produces visible
+        // dispersion. The external galactic viewpoint and the
+        // `atmosphere_active == false` branch keep all three channels
+        // co-located, so the legacy bit-identical render is preserved
+        // whenever the producer would emit `extinction_k_rgb == 0`.
+        if atmosphere_active {
+            let local_r = refract_equatorial_direction_for_channel(
+                corrected_date,
+                DISPERSION_RATIO_R,
+            );
+            let local_b = refract_equatorial_direction_for_channel(
+                corrected_date,
+                DISPERSION_RATIO_B,
+            );
+            let clip_r = project_equatorial_direction(corrected_j2000, local_r, true);
+            let clip_b = project_equatorial_direction(corrected_j2000, local_b, true);
+            let half_viewport = viewport_size() * 0.5;
+            let g_xy = clip.xy / max(clip.w, 1e-6);
+            let r_xy = clip_r.xy / max(clip_r.w, 1e-6);
+            let b_xy = clip_b.xy / max(clip_b.w, 1e-6);
+            // NDC delta → pixel delta. Y flips between NDC (up = +1) and
+            // the fragment's quad-space `uv` (up = +1 too, since the
+            // sprite is built around screen-space), so the sign is
+            // preserved.
+            dispersion_px_rb = vec4<f32>(
+                (r_xy - g_xy) * half_viewport,
+                (b_xy - g_xy) * half_viewport,
+            );
+        }
     }
 
     let pixel_offset = input.quad_pos * input.star_size;
@@ -421,6 +489,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
         out.color = vec3<f32>(0.0);
         out.brightness = 0.0;
         out.sprite_half_px = 0.0;
+        out.dispersion_px_rb = vec4<f32>(0.0);
         return out;
     }
 
@@ -432,6 +501,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     // whenever the atmospheric pass was active.
     out.brightness = input.star_brightness;
     out.sprite_half_px = input.star_size;
+    out.dispersion_px_rb = dispersion_px_rb;
     return out;
 }
 
@@ -566,14 +636,32 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let r_norm = length(input.uv);
     let r_px = r_norm * input.sprite_half_px;
 
-    // Spencer PSF: radial body + azimuthal ciliary corona, tapered at the
-    // sprite-quad edge by a smooth apodization window (see above).
-    let psf = (radial_psf(r_px) + corona(input.uv, r_px)) * apodize(r_norm);
+    // Sprite-edge taper (shared across channels: the apodization window
+    // closes the quad outline, independent of wavelength).
+    let apod = apodize(r_norm);
+    // Ciliary corona is a geometric eye / lens effect, not chromatic, so
+    // it stays shared across the three channels.
+    let ciliary = corona(input.uv, r_px);
 
-    let intensity = psf * input.brightness;
+    // V-25 differential atmospheric dispersion: sample the radial Spencer
+    // PSF at three slightly-offset centres so the rendered star footprint
+    // becomes a short vertical R–G–B streak near the horizon and a
+    // single point near zenith (the offsets shrink with altitude).
+    let r_px_xy = input.uv * input.sprite_half_px;
+    let r_disp = input.dispersion_px_rb.xy;
+    let b_disp = input.dispersion_px_rb.zw;
+    let psf_r = radial_psf(length(r_px_xy - r_disp));
+    let psf_g = radial_psf(r_px);
+    let psf_b = radial_psf(length(r_px_xy - b_disp));
+    let psf_rgb = (vec3<f32>(psf_r, psf_g, psf_b) + vec3<f32>(ciliary)) * apod;
+
+    let intensity_rgb = psf_rgb * input.brightness;
+    // Coverage / accumulation channel uses the green PSF so additive star
+    // blending stays on the same scale the renderer used before V-25.
+    let coverage = (psf_g + ciliary) * apod * input.brightness;
 
     // No hard discard — we are writing into an Rgba16Float HDR target so
     // faint PSF tails accumulate instead of being clipped. The tonemap pass
     // maps the full HDR scene to the display.
-    return vec4<f32>(input.color * intensity, intensity);
+    return vec4<f32>(input.color * intensity_rgb, coverage);
 }

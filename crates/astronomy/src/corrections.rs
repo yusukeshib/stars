@@ -199,9 +199,21 @@ pub fn refracted_altitude_saemundsson(
     pressure_hpa: f64,
     temperature_c: f64,
 ) -> f64 {
+    true_altitude_rad + saemundsson_refraction_angle(true_altitude_rad, pressure_hpa, temperature_c)
+}
+
+/// Saemundsson refraction *angle* `ρ = apparent − true`, in radians, with
+/// pressure/temperature scaling. Returns zero outside the formula's valid
+/// domain so callers can compose it with the dispersion scaling below
+/// without re-implementing the domain guard.
+fn saemundsson_refraction_angle(
+    true_altitude_rad: f64,
+    pressure_hpa: f64,
+    temperature_c: f64,
+) -> f64 {
     let alt_deg = true_altitude_rad.to_degrees();
     if !alt_deg.is_finite() || !(-1.0..=89.9).contains(&alt_deg) {
-        return true_altitude_rad;
+        return 0.0;
     }
     let pressure_scale = if pressure_hpa.is_finite() {
         pressure_hpa.max(0.0) / 1010.0
@@ -215,7 +227,66 @@ pub fn refracted_altitude_saemundsson(
     };
     let weather_scale = pressure_scale * 283.0 / temp_k;
     let r_arcmin = 1.02 / ((alt_deg + 10.3 / (alt_deg + 5.11)).to_radians()).tan() * weather_scale;
-    true_altitude_rad + (r_arcmin / 60.0).to_radians()
+    (r_arcmin / 60.0).to_radians()
+}
+
+/// Edlén 1966 empirical refractivity for standard dry air at 15 °C / 760 Torr.
+/// Returns `(n − 1)` (the refractivity), accurate to ~1 × 10⁻⁸ across the
+/// visible band. The pressure / temperature scaling enters the renderer
+/// through Saemundsson; this helper carries only the spectral dispersion.
+///
+/// Reference: Edlén, B. 1966, Metrologia 2, 71.
+pub fn edlen_refractivity_standard_air(wavelength_nm: f64) -> f64 {
+    if !wavelength_nm.is_finite() || wavelength_nm <= 0.0 {
+        return EDLEN_REFERENCE_REFRACTIVITY;
+    }
+    // Edlén tabulates the formula in inverse micrometres (σ = 1/λ[µm]).
+    let sigma = 1_000.0 / wavelength_nm;
+    let sigma_sq = sigma * sigma;
+    let n_minus_one = 8_342.54 + 2_406_147.0 / (130.0 - sigma_sq) + 15_998.0 / (38.9 - sigma_sq);
+    n_minus_one * 1.0e-8
+}
+
+/// Reference green-channel wavelength (550 nm). Saemundsson is empirically
+/// calibrated against the broadband visible refraction, so anchoring the
+/// per-wavelength scaling at 550 nm keeps the green channel bit-identical
+/// to the existing single-wavelength path.
+pub const REFERENCE_WAVELENGTH_NM: f64 = 550.0;
+
+/// Edlén refractivity at the reference (green) wavelength. Used to scale
+/// Saemundsson's broadband refraction into per-wavelength refraction.
+pub const EDLEN_REFERENCE_REFRACTIVITY: f64 = 2.778_4e-4;
+
+/// Representative renderer wavelengths for the R/G/B channels, in nm.
+///
+/// 620 / 550 / 440 nm are the wavelengths the roadmap (`V-25`) anchors the
+/// per-channel atmospheric dispersion against, and are within a few nm of
+/// the sRGB primaries' dominant wavelengths. Centring the green channel at
+/// 550 nm keeps the single-wavelength refraction path unchanged.
+pub const RGB_REFERENCE_WAVELENGTHS_NM: [f64; 3] = [620.0, 550.0, 440.0];
+
+/// Refraction angle `ρ(λ) = apparent − true` at a given wavelength, in
+/// radians. Combines Saemundsson's apparent-altitude refraction (the
+/// renderer's broadband baseline) with Edlén 1966 dispersion `(n(λ) − 1)`
+/// so the green channel matches the existing single-wavelength path and
+/// the differential `ρ(B) − ρ(R)` follows the Edlén refractivity ratio.
+///
+/// References:
+/// * Filippenko, A. V. 1982, PASP 94, 715.
+/// * Stone, R. C. 1996, PASP 108, 1051.
+/// * Edlén, B. 1966, Metrologia 2, 71.
+pub fn refraction_per_wavelength(
+    true_altitude_rad: f64,
+    pressure_hpa: f64,
+    temperature_c: f64,
+    wavelength_nm: f64,
+) -> f64 {
+    let broadband = saemundsson_refraction_angle(true_altitude_rad, pressure_hpa, temperature_c);
+    if broadband == 0.0 {
+        return 0.0;
+    }
+    let ratio = edlen_refractivity_standard_air(wavelength_nm) / EDLEN_REFERENCE_REFRACTIVITY;
+    broadband * ratio
 }
 
 pub fn mat_mul_vec(m: Mat3d, v: Vec3d) -> Vec3d {
@@ -322,5 +393,85 @@ mod tests {
         let refracted = refracted_altitude_saemundsson(0.0, 1010.0, 10.0);
         let arcmin = refracted.to_degrees() * 60.0;
         assert!((28.0..=35.0).contains(&arcmin), "refraction = {arcmin}'");
+    }
+
+    /// V-25: the Edlén 1966 dispersion at the renderer's R/G/B reference
+    /// wavelengths must straddle the green anchor: red refraction is
+    /// slightly weaker, blue is slightly stronger.
+    #[test]
+    fn edlen_refractivity_brackets_550nm_with_rgb_anchors() {
+        let n_r = edlen_refractivity_standard_air(620.0);
+        let n_g = edlen_refractivity_standard_air(550.0);
+        let n_b = edlen_refractivity_standard_air(440.0);
+        assert!(
+            n_r < n_g,
+            "red refractivity {n_r:e} must be < green {n_g:e}"
+        );
+        assert!(
+            n_g < n_b,
+            "blue refractivity {n_b:e} must be > green {n_g:e}"
+        );
+        // The reference constant must match Edlén at 550 nm to within the
+        // formula's own ~1e-8 precision so the green channel renders
+        // bit-identically through the single-wavelength path.
+        assert!(
+            (n_g - EDLEN_REFERENCE_REFRACTIVITY).abs() < 1.0e-7,
+            "n_g {n_g:e} vs reference {EDLEN_REFERENCE_REFRACTIVITY:e}"
+        );
+    }
+
+    /// V-25: at 5° true altitude, 1013 hPa, 10 °C, the differential
+    /// `ρ(B) − ρ(R)` between the renderer's blue (440 nm) and red
+    /// (620 nm) channels must sit in the naked-eye-visible regime
+    /// predicted by Edlén combined with the broadband Saemundsson
+    /// refraction (Filippenko 1982 Table 1 scaled to z = 85°).
+    ///
+    /// The roadmap originally framed this as “∈ [1.2″, 2.5″]”, but those
+    /// values correspond to a much higher altitude or a narrower
+    /// wavelength interval; the correct Edlén + Saemundsson differential
+    /// at altitude 5° between 440 and 620 nm is ~9″, still firmly
+    /// naked-eye-visible (the qualitative roadmap criterion).
+    #[test]
+    fn rgb_dispersion_at_five_degrees_is_arcsecond_scale() {
+        let alt = 5.0_f64.to_radians();
+        let rho_r = refraction_per_wavelength(alt, 1013.0, 10.0, 620.0);
+        let rho_b = refraction_per_wavelength(alt, 1013.0, 10.0, 440.0);
+        let diff_arcsec = (rho_b - rho_r).to_degrees() * 3600.0;
+        assert!(
+            (6.0..=12.0).contains(&diff_arcsec),
+            "ρ(B) − ρ(R) at alt=5° = {diff_arcsec}″ (expected naked-eye-visible ≈ 8–9″)"
+        );
+        // Green stays equal to the broadband Saemundsson refraction.
+        let rho_g = refraction_per_wavelength(alt, 1013.0, 10.0, 550.0);
+        let broadband = refracted_altitude_saemundsson(alt, 1013.0, 10.0) - alt;
+        // Green is anchored at 550 nm; the only deviation from the
+        // broadband Saemundsson value is the constant rounding of
+        // `EDLEN_REFERENCE_REFRACTIVITY`, which is < 1e-5 relative.
+        assert!(
+            (rho_g - broadband).abs() / broadband < 1.0e-4,
+            "green channel ρ = {rho_g} vs Saemundsson broadband {broadband}"
+        );
+    }
+
+    /// V-25: dispersion must shrink with altitude (high zenith → small
+    /// differential refraction) and survive pressure scaling without
+    /// flipping sign.
+    #[test]
+    fn rgb_dispersion_decreases_with_altitude() {
+        let alt_low = 5.0_f64.to_radians();
+        let alt_mid = 30.0_f64.to_radians();
+        let alt_high = 60.0_f64.to_radians();
+        let diff = |alt: f64| {
+            refraction_per_wavelength(alt, 1013.0, 10.0, 440.0)
+                - refraction_per_wavelength(alt, 1013.0, 10.0, 620.0)
+        };
+        let d_low = diff(alt_low);
+        let d_mid = diff(alt_mid);
+        let d_high = diff(alt_high);
+        assert!(d_low > d_mid && d_mid > d_high);
+        assert!(
+            d_high > 0.0,
+            "differential must stay positive (blue lifted more than red)"
+        );
     }
 }

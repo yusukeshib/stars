@@ -177,7 +177,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-22` | Per-fragment rod/cone tonemap | ✅ |
 | `V-23` | Catalogue colour pipeline (B−V → T → blackbody → sRGB) | ✅ |
 | `V-24` | Atmospheric scintillation | ✅ |
-| `V-25` | **Differential atmospheric dispersion** | ⬜ |
+| `V-25` | **Differential atmospheric dispersion** | ✅ |
 | `V-26` | Lunar earthshine | ✅ |
 | `V-27` | **Belt of Venus + Earth-shadow band** | ⬜ |
 | `V-28` | **Spectral airglow decomposition** | ✅ |
@@ -727,7 +727,7 @@ the chromatic amplitude factor of Dravins 1998.
 
 ---
 
-### `V-25` Differential atmospheric dispersion — ⬜
+### `V-25` Differential atmospheric dispersion — ✅
 
 **Item.** Wavelength-dependent refraction renders horizon-near point
 sources as small vertical prismatic streaks (blue end higher, red end
