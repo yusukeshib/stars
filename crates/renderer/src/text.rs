@@ -525,6 +525,24 @@ impl TextRenderer {
                     });
                 }
             }
+            // V-52c: Titan label. Same overlay gate as the planet/Galilean
+            // labels and the same priority offset as the Galilean group so
+            // it competes with the moons for label real estate (rather
+            // than the planets, which are typically brighter and farther
+            // apart). The colour tracks Titan's amber haze hue.
+            if planet_uniforms.titan_params[1] > 0.5 {
+                let t = planet_uniforms.titan_eq_radius;
+                if t[3] > 0.0 {
+                    out.push(LabelCandidate {
+                        frame: LabelFrame::Equatorial,
+                        position: [t[0], t[1], t[2]],
+                        text: Cow::Borrowed("Titan"),
+                        color: [0.96, 0.78, 0.50, alpha],
+                        priority: -190.0 + planet_uniforms.titan_rgb_magnitude[3],
+                        placement: LabelPlacement::LeftAlignedToAnchor,
+                    });
+                }
+            }
         }
         if self.config.cardinals {
             for (az, label) in [

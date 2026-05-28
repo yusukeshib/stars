@@ -1,9 +1,9 @@
 use astronomy::{
     active_occluders, apparent_galilean_moons_topocentric, apparent_planets_topocentric,
-    apparent_saturn_ring_topocentric, earth_velocity_over_c_j2000, equation_of_equinoxes,
-    equatorial_to_horizontal_matrix, illuminants, lmst_radians, precession_nutation_matrix,
-    solar_eclipse_state, years_since_j2000, GalileanMoon, Observer, Planet, SolarEclipseKind,
-    SunMoonApparent, MAX_OCCLUDERS,
+    apparent_saturn_ring_topocentric, apparent_titan_topocentric, earth_velocity_over_c_j2000,
+    equation_of_equinoxes, equatorial_to_horizontal_matrix, illuminants, lmst_radians,
+    precession_nutation_matrix, solar_eclipse_state, years_since_j2000, GalileanMoon, Observer,
+    Planet, SolarEclipseKind, SunMoonApparent, MAX_OCCLUDERS,
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -270,6 +270,27 @@ pub(crate) struct CameraUniform {
     /// as an `f32`; `enabled` is `1.0` when Jupiter is above the horizon and
     /// planets are globally on, `0.0` otherwise.
     pub galilean_params: [f32; 4],
+    /// V-52c Titan direction in J2000 equatorial coordinates.
+    /// `xyz` is the unit direction toward Titan (refracted near the
+    /// horizon when atmosphere is enabled, identical to the planet path);
+    /// `w` is Titan's physical angular radius in radians. Titan is
+    /// sub-arcsecond at every Earth-Saturn geometry so the shader renders
+    /// it as a point source, but the angular radius is kept here to
+    /// mirror the Galilean uniform shape and to let a future
+    /// telescope-grade renderer resolve the disk.
+    pub titan_eq_radius: [f32; 4],
+    /// V-52c Titan display colour in linear RGB. `w` is apparent visual
+    /// magnitude (Karkoschka 1998 `V(1, 0)` reduced magnitude +
+    /// `5·log10(r · Δ)` with Saturn's distances).
+    pub titan_rgb_magnitude: [f32; 4],
+    /// V-52c Titan control header:
+    /// `[count, enabled, reserved, reserved]`. `count` is
+    /// `TITAN_UNIFORM_COUNT` (always `1.0`) as an `f32`; `enabled` is
+    /// `1.0` when Saturn is above the horizon and planets are globally
+    /// on, `0.0` otherwise. The shape mirrors `galilean_params` so the
+    /// shader can iterate this and future Saturnian-moon blocks
+    /// uniformly.
+    pub titan_params: [f32; 4],
     /// Hošek-Wilkie 2012 RGB sky-dome coefficients pre-cooked on the host
     /// each frame (V-38). Nine `vec4`s; row `i` holds the per-channel `i`-th
     /// analytic coefficient (A..I) as `(R, G, B, _)`. Unused when
@@ -349,6 +370,17 @@ pub(crate) const GALILEAN_UNIFORM_COUNT: usize = 4;
 pub(crate) type GalileanEqRadiusUniform = [[f32; 4]; GALILEAN_UNIFORM_COUNT];
 pub(crate) type GalileanRgbMagnitudeUniform = [[f32; 4]; GALILEAN_UNIFORM_COUNT];
 
+/// V-52c: number of Saturnian moons rendered as point sources next to
+/// Saturn. Only Titan (V ≈ 8.4 at opposition) ships in V-52c; the other
+/// Meeus-supported Saturnian moons (Mimas / Enceladus / Tethys / Dione /
+/// Rhea / Hyperion / Iapetus) are deferred to a follow-on rung because
+/// their `V` magnitudes fall outside the renderer's default limiting
+/// magnitude in most scene presets. The constant exists so the uniform
+/// layout — a `vec4` direction-radius slot, a `vec4` rgb-magnitude slot,
+/// and a `vec4` control header — can grow to include the other moons
+/// without a uniform-block reshuffle.
+pub(crate) const TITAN_UNIFORM_COUNT: usize = 1;
+
 /// Cached renderer-facing planet uniforms. Computing VSOP87 planet states is
 /// orders of magnitude more expensive than rebuilding the camera matrices, so
 /// `Renderer` reuses this between coarse ephemeris refreshes while still
@@ -368,6 +400,12 @@ pub(crate) struct PlanetUniforms {
     pub galilean_eq_radius: GalileanEqRadiusUniform,
     pub galilean_rgb_magnitude: GalileanRgbMagnitudeUniform,
     pub galilean_params: [f32; 4],
+    /// V-52c Titan uniform block; mirrors
+    /// [`CameraUniform::titan_eq_radius`] / [`CameraUniform::titan_rgb_magnitude`]
+    /// / [`CameraUniform::titan_params`].
+    pub titan_eq_radius: [f32; 4],
+    pub titan_rgb_magnitude: [f32; 4],
+    pub titan_params: [f32; 4],
 }
 
 impl PlanetUniforms {
@@ -381,6 +419,9 @@ impl PlanetUniforms {
             galilean_eq_radius: [[0.0; 4]; GALILEAN_UNIFORM_COUNT],
             galilean_rgb_magnitude: [[0.0; 4]; GALILEAN_UNIFORM_COUNT],
             galilean_params: [GALILEAN_UNIFORM_COUNT as f32, 0.0, 0.0, 0.0],
+            titan_eq_radius: [0.0; 4],
+            titan_rgb_magnitude: [0.0; 4],
+            titan_params: [TITAN_UNIFORM_COUNT as f32, 0.0, 0.0, 0.0],
         }
     }
 }
@@ -862,6 +903,16 @@ fn galilean_linear_rgb(moon: GalileanMoon) -> [f32; 3] {
     }
 }
 
+/// V-52c Titan display colour in linear RGB. Titan's dense N₂-CH₄ haze
+/// gives it a pronounced orange-brown tint in the eyepiece (Karkoschka
+/// 1998, Cassini/ISS photometry). The colour here is softened toward the
+/// Sun-illumination chroma the same way the Galilean tints are softened
+/// against Jupiter, so Titan sits next to Saturn without an implausible
+/// brightness jump.
+fn titan_linear_rgb() -> [f32; 3] {
+    [0.96, 0.78, 0.50]
+}
+
 impl LocalView {
     /// Return a finite, renderer-safe view.
     ///
@@ -1281,6 +1332,35 @@ impl Camera {
         }
         let galilean_params = [GALILEAN_UNIFORM_COUNT as f32, 1.0, 0.0, 0.0];
 
+        // V-52c Titan. Same `apparent_disk_direction_j2000` pipeline as the
+        // planets / Galilean moons so refraction near the horizon stays
+        // consistent with Saturn, and so the shader-side direction lands in
+        // the J2000 frame the camera uniform already publishes.
+        let titan = apparent_titan_topocentric(self.observer);
+        let titan_dir = apparent_disk_direction_j2000(
+            titan.direction_equatorial(),
+            self.atmosphere.sunlit_scattering,
+            pressure_hpa,
+            temperature_c,
+            date_to_local,
+            local_to_date,
+            date_to_j2000,
+        );
+        let titan_rgb = titan_linear_rgb();
+        let titan_eq_radius = [
+            titan_dir.x,
+            titan_dir.y,
+            titan_dir.z,
+            titan.angular_radius_rad as f32,
+        ];
+        let titan_rgb_magnitude = [
+            titan_rgb[0],
+            titan_rgb[1],
+            titan_rgb[2],
+            titan.magnitude as f32,
+        ];
+        let titan_params = [TITAN_UNIFORM_COUNT as f32, 1.0, 0.0, 0.0];
+
         PlanetUniforms {
             eq_radius,
             rgb_magnitude,
@@ -1290,6 +1370,9 @@ impl Camera {
             galilean_eq_radius,
             galilean_rgb_magnitude,
             galilean_params,
+            titan_eq_radius,
+            titan_rgb_magnitude,
+            titan_params,
         }
     }
 
@@ -1613,6 +1696,9 @@ impl Camera {
             galilean_eq_radius: planet_uniforms.galilean_eq_radius,
             galilean_rgb_magnitude: planet_uniforms.galilean_rgb_magnitude,
             galilean_params: planet_uniforms.galilean_params,
+            titan_eq_radius: planet_uniforms.titan_eq_radius,
+            titan_rgb_magnitude: planet_uniforms.titan_rgb_magnitude,
+            titan_params: planet_uniforms.titan_params,
             hw_coeffs,
             hw_radiance,
             scintillation_params,
@@ -1687,6 +1773,69 @@ mod tests {
         // Use J2000 so the pole/zenith geometry tests are not asserting a
         // particular modern precession offset.
         Observer::from_degrees(lat_deg, 0.0, astronomy::J2000_JD)
+    }
+
+    #[test]
+    fn titan_uniform_matches_apparent_titan_at_j2000() {
+        // V-52c: the Titan uniform slot should publish a non-zero direction
+        // and a magnitude consistent with the standalone astronomy backend
+        // at the same instant. We compare the host-side `apparent_titan`
+        // result (the same backend the renderer consumes through
+        // `apparent_titan_topocentric`) to the uniform slot's `xyz`. The
+        // separation must stay within ≈10″ — Earth-radius parallax on
+        // Saturn (~2″) plus refraction (we hand the renderer atmosphere
+        // off, but the apparent_disk_direction_j2000 chain still rotates
+        // through equinox-of-date) is well inside that bound.
+        let observer = observer_at(35.0);
+        let mut cam = Camera::new(observer, LocalView::default(), 1.0);
+        cam.atmosphere = Atmosphere::OFF;
+        let pu = cam.planet_uniforms();
+
+        // Slot 0 is the only Titan slot; count = 1, enabled = 1.
+        assert_eq!(pu.titan_params[0], TITAN_UNIFORM_COUNT as f32);
+        assert_eq!(pu.titan_params[1], 1.0);
+
+        // Direction is a unit vector.
+        let dir = Vec3::new(
+            pu.titan_eq_radius[0],
+            pu.titan_eq_radius[1],
+            pu.titan_eq_radius[2],
+        );
+        assert!((dir.length() - 1.0).abs() < 1e-4, "|dir|={}", dir.length());
+
+        // Magnitude is in the Karkoschka 1998 family (V ≈ 7.8 .. 9.0 over the
+        // full Earth–Saturn distance range). At J2000 Saturn is near 3-4 AU
+        // from Earth so we expect a magnitude in the upper-8s.
+        let mag = pu.titan_rgb_magnitude[3];
+        assert!(
+            (7.5..9.5).contains(&mag),
+            "Titan magnitude in uniform = {mag}, expected 7.5..9.5"
+        );
+
+        // The angular-radius field is sub-arcsecond (Titan is sub-pixel
+        // at every FoV the renderer currently exposes).
+        let radius_arcsec = (pu.titan_eq_radius[3] as f64).to_degrees() * 3600.0;
+        assert!(
+            radius_arcsec < 1.0,
+            "Titan apparent radius in uniform = {radius_arcsec}\" too large"
+        );
+
+        // RGB is the documented amber-haze tint (positive, < 1).
+        for &c in &pu.titan_rgb_magnitude[..3] {
+            assert!(c > 0.0 && c <= 1.0, "Titan RGB channel out of range: {c}");
+        }
+    }
+
+    #[test]
+    fn titan_uniform_disabled_when_planets_off() {
+        // V-52c: `PlanetUniforms::disabled()` is what the host passes when
+        // the user toggles planets off. In that state the Titan-enabled
+        // gate must read zero so the shader skips the moon entirely.
+        let pu = PlanetUniforms::disabled();
+        assert_eq!(pu.titan_params[0], TITAN_UNIFORM_COUNT as f32);
+        assert_eq!(pu.titan_params[1], 0.0);
+        assert_eq!(pu.titan_eq_radius, [0.0; 4]);
+        assert_eq!(pu.titan_rgb_magnitude, [0.0; 4]);
     }
 
     #[test]

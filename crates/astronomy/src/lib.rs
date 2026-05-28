@@ -33,8 +33,8 @@ pub use ephemeris::{
 };
 pub use horizontal::{equatorial_to_horizontal, equatorial_to_horizontal_matrix, AltAz};
 pub use moons::{
-    apparent_galilean_moons, apparent_galilean_moons_topocentric, GalileanMoon,
-    GalileanMoonApparent,
+    apparent_galilean_moons, apparent_galilean_moons_topocentric, apparent_titan,
+    apparent_titan_topocentric, GalileanMoon, GalileanMoonApparent, TitanApparent,
 };
 pub use observer::Observer;
 pub use occultation::{
