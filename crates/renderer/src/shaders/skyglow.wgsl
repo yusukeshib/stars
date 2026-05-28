@@ -59,6 +59,13 @@ struct CameraUniform {
     planet_rgb_magnitude: array<vec4<f32>, 7>,
     // [planet_count, planets_enabled, unused, unused].
     planet_params: vec4<f32>,
+    // V-52a Saturn ring orientation: xyz = unit vector along Saturn's north
+    // ring pole in the same J2000-equatorial frame as `planet_eq_radius`,
+    // w = signed `sin B` (sub-Earth Saturnicentric latitude).
+    saturn_ring_pole_sinb: vec4<f32>,
+    // V-52a Saturn ring photometric state:
+    // [sin_b_sun, enabled, reserved, reserved].
+    saturn_ring_state: vec4<f32>,
     // Hošek-Wilkie 2012 RGB sky-dome coefficients (V-38). Nine vec4s; row i
     // holds the per-channel i-th analytic coefficient (A..I) as (R, G, B, _).
     // Pre-cooked on the CPU each frame from (turbidity, albedo, sun_elev).
@@ -485,6 +492,129 @@ fn magnitude_to_flux(magnitude: f32, zeropoint: f32) -> f32 {
     return exp(NEG_OH_FOUR_LN10 * (magnitude - zeropoint));
 }
 
+// V-52a Saturn ring constants.
+// `Planet::ALL` indexes Saturn at position 4 (Mercury, Venus, Mars, Jupiter,
+// Saturn, Uranus, Neptune).
+const SATURN_PLANET_INDEX: i32 = 4;
+// Ring inner / outer radii in units of Saturn's equatorial radius (Porco
+// et al. 2005); these are the f32 truncation of the host-side
+// `astronomy::SaturnRingApparent::BAND_RADII_R_S` values
+// (`74_510 / 60_268`, `91_980 / 60_268`, `117_580 / 60_268`,
+// `122_050 / 60_268`, `136_775 / 60_268`). A workspace test pins the two
+// representations against each other at f32 precision so the WGSL constants
+// cannot silently drift from the host.
+const SATURN_RING_C_INNER_R_S: f32 = 1.2363112;
+const SATURN_RING_B_INNER_R_S: f32 = 1.526183;
+const SATURN_RING_B_OUTER_R_S: f32 = 1.9509524;
+const SATURN_RING_A_INNER_R_S: f32 = 2.0251212;
+const SATURN_RING_A_OUTER_R_S: f32 = 2.2694464;
+// Per-band V-band brightness ratios relative to the B ring (Dones et al.
+// 1993). The B ring anchors at 1.0; ring radiance is later scaled by Saturn's
+// per-pixel flux contribution so the band sits naturally next to the body.
+const SATURN_BAND_BRIGHTNESS_C: f32 = 0.20;
+const SATURN_BAND_BRIGHTNESS_B: f32 = 1.00;
+const SATURN_BAND_BRIGHTNESS_CASSINI: f32 = 0.15;
+const SATURN_BAND_BRIGHTNESS_A: f32 = 0.50;
+// Dark (unlit) face dim factor: rings on the side facing away from the Sun
+// still glow faintly from ringshine and forward-scattered Saturnshine, but
+// drop sharply in surface brightness.
+const SATURN_RING_DARK_FACE_FACTOR: f32 = 0.10;
+
+// Returns the V-52a Saturn ring brightness factor at `ray_dir` relative to
+// the B-ring photometric anchor. Zero when Saturn is below the horizon, the
+// ring pass is disabled, the pixel falls outside every band, or the pixel sits
+// on the far half of the ring inside Saturn's body silhouette.
+//
+// `body_visual_radius_rad` is the same per-pixel-floored disk radius the body
+// uses (`planet_disk_radiance`); the ring tracks it so that at naked-eye FoV,
+// where Saturn's true 9″ disk is sub-pixel, the ring scales up with the body
+// instead of vanishing.
+fn saturn_ring_brightness(ray_dir: vec3<f32>, body_visual_radius_rad: f32) -> f32 {
+    if camera.saturn_ring_state.y <= 0.0 {
+        return 0.0;
+    }
+    let saturn_dir = normalize(camera.planet_eq_radius[SATURN_PLANET_INDEX].xyz);
+    if dot(saturn_dir, camera.zenith_eq.xyz) <= 0.0 {
+        return 0.0;
+    }
+    let r_planet = max(body_visual_radius_rad, 1e-7);
+    let sin_b = camera.saturn_ring_pole_sinb.w;
+    let sin_bp = camera.saturn_ring_state.x;
+
+    // Build a 2D "sky-plane" basis at Saturn's centre. `semi_minor_dir` is the
+    // direction the ring's projected semi-minor axis points along on the sky
+    // (the in-sky-plane projection of the ring pole). `semi_major_dir` is the
+    // perpendicular within the sky plane and stays at full ring radius because
+    // it lies on the ring's true major axis.
+    let pole = normalize(camera.saturn_ring_pole_sinb.xyz);
+    let pole_tangent = pole - saturn_dir * dot(pole, saturn_dir);
+    let pole_tangent_len = length(pole_tangent);
+    let abs_sin_b = abs(sin_b);
+    if abs_sin_b < 1e-3 || pole_tangent_len < 1e-4 {
+        // Edge-on ring — the projected ellipse has zero area at the V-52a
+        // accuracy budget. (`abs_sin_b` is the foreshortening factor below;
+        // `pole_tangent_len` only flags the degenerate face-on case where the
+        // semi-minor axis direction is undefined.)
+        return 0.0;
+    }
+    let semi_minor_dir = pole_tangent / pole_tangent_len;
+    let semi_major_dir = normalize(cross(saturn_dir, semi_minor_dir));
+
+    // Offset of the ray from Saturn's centre on the sky tangent plane.
+    let to_ray = ray_dir - saturn_dir * dot(ray_dir, saturn_dir);
+    let u = dot(to_ray, semi_major_dir);
+    let v = dot(to_ray, semi_minor_dir);
+
+    // Foreshortening: a point at radius `r` in the ring plane projects to a
+    // sky-plane displacement of (`r cosφ`, `r sinφ · sin B`). Inverting that
+    // gives the true ring-plane coordinates below; `sin B` (not `cos B`) is
+    // the squash factor because `B` is the sub-Earth Saturnicentric latitude,
+    // i.e. 90° minus the angle between the line of sight and the ring pole.
+    let ring_x = u;
+    let ring_y = v / abs_sin_b;
+    let ring_r = sqrt(ring_x * ring_x + ring_y * ring_y);
+    let r_in_R_S = ring_r / r_planet;
+
+    // Band lookup. The Cassini Division is the gap between B-outer and
+    // A-inner; everything else outside the four bands is empty.
+    var band = 0.0;
+    if r_in_R_S >= SATURN_RING_C_INNER_R_S && r_in_R_S < SATURN_RING_B_INNER_R_S {
+        band = SATURN_BAND_BRIGHTNESS_C;
+    } else if r_in_R_S >= SATURN_RING_B_INNER_R_S && r_in_R_S < SATURN_RING_B_OUTER_R_S {
+        band = SATURN_BAND_BRIGHTNESS_B;
+    } else if r_in_R_S >= SATURN_RING_B_OUTER_R_S && r_in_R_S < SATURN_RING_A_INNER_R_S {
+        band = SATURN_BAND_BRIGHTNESS_CASSINI;
+    } else if r_in_R_S >= SATURN_RING_A_INNER_R_S && r_in_R_S < SATURN_RING_A_OUTER_R_S {
+        band = SATURN_BAND_BRIGHTNESS_A;
+    } else {
+        return 0.0;
+    }
+
+    // Ring surface brightness falls with the projected-area foreshortening.
+    // At edge-on (|sin B| = 0) the ring is invisible; the factor recovers the
+    // ring's apparent integrated brightness across the elliptical annulus.
+    band *= abs_sin_b;
+
+    // Dark-face dim: the unlit side of the ring (sub-Earth and sub-Sun
+    // Saturnicentric latitudes have opposite signs) glows only from ringshine.
+    if sin_b * sin_bp < 0.0 {
+        band *= SATURN_RING_DARK_FACE_FACTOR;
+    }
+
+    // Body shadow on the far half of the ring. "Far half" is the side of the
+    // ring plane that points away from the visible pole — i.e., `v` has the
+    // opposite sign of `sin B`. A ring pixel inside Saturn's body silhouette
+    // on that side is occulted by the opaque body.
+    if v * sin_b < 0.0 {
+        let sky_offset = sqrt(u * u + v * v);
+        if sky_offset < r_planet {
+            return 0.0;
+        }
+    }
+
+    return band;
+}
+
 fn planet_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_sr: f32) -> vec3<f32> {
     if camera.planet_params.y <= 0.0 || sin_alt <= 0.0 {
         return vec3<f32>(0.0);
@@ -514,8 +644,22 @@ fn planet_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_
         let subtract = occluder_subtract_mask(ray_dir, occluder_target, pixel_sr);
         let flux = magnitude_to_flux(camera.planet_rgb_magnitude[i].w, zeropoint);
         let mask = disk_mask(ray_dir, dir, visual_radius, pixel_sr);
-        rgb +=
-            camera.planet_rgb_magnitude[i].xyz * flux * mask * (1.0 - subtract) / footprint_pixels;
+        let body_contribution = camera.planet_rgb_magnitude[i].xyz
+            * flux * mask * (1.0 - subtract) / footprint_pixels;
+        rgb += body_contribution;
+
+        // V-52a: add the Saturn ring system using the same per-pixel flux
+        // anchor as the body. The band factor is on the B-ring scale (1.0 at
+        // the brightest band, opening-angle scaled); multiplying by the body
+        // per-pixel flux keeps the ring at a physically plausible ratio to
+        // Saturn's disk surface brightness without a separate calibration.
+        if i == SATURN_PLANET_INDEX {
+            let ring_band = saturn_ring_brightness(ray_dir, visual_radius);
+            if ring_band > 0.0 {
+                rgb += camera.planet_rgb_magnitude[i].xyz
+                    * flux * ring_band * (1.0 - subtract) / footprint_pixels;
+            }
+        }
     }
     return rgb;
 }

@@ -49,6 +49,12 @@ struct CameraUniform {
     planet_eq_radius_pad: array<vec4<f32>, 7>,
     planet_rgb_magnitude_pad: array<vec4<f32>, 7>,
     planet_params_pad: vec4<f32>,
+    // V-52a Saturn ring uniform block. The star pass does not draw the ring;
+    // declared only to keep the WGSL view of `CameraUniform` aligned with the
+    // host struct so fields past it (Hošek-Wilkie coefficients, scintillation,
+    // solar eclipse, occluder array) read from the right offsets.
+    saturn_ring_pole_sinb_pad: vec4<f32>,
+    saturn_ring_state_pad: vec4<f32>,
     // Hošek-Wilkie coefficient block (V-38). Same reason as the planet pad.
     hw_coeffs_pad: array<vec4<f32>, 9>,
     hw_radiance_pad: vec4<f32>,

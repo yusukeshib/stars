@@ -26,8 +26,9 @@ pub use corrections::{
 };
 pub use ephemeris::{
     apparent_moon, apparent_moon_topocentric, apparent_planet, apparent_planet_topocentric,
-    apparent_planets_topocentric, apparent_sun, apparent_sun_topocentric, MoonApparent, Planet,
-    PlanetApparent, SunApparent, SunMoonApparent,
+    apparent_planets_topocentric, apparent_saturn_ring, apparent_saturn_ring_topocentric,
+    apparent_sun, apparent_sun_topocentric, MoonApparent, Planet, PlanetApparent,
+    SaturnRingApparent, SunApparent, SunMoonApparent,
 };
 pub use horizontal::{equatorial_to_horizontal, equatorial_to_horizontal_matrix, AltAz};
 pub use observer::Observer;

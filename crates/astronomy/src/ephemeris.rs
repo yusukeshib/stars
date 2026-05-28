@@ -22,6 +22,19 @@ const EARTH_FLATTENING: f64 = 1.0 / 298.257_223_563;
 const SOLAR_RADIUS_KM: f64 = 695_700.0;
 /// Mean lunar radius in kilometres, IAU/IAG Working Group cartographic value.
 const LUNAR_RADIUS_KM: f64 = 1_737.4;
+/// Saturn equatorial radius in kilometres (IAU WGCCRE 2015 / Archinal et al. 2018).
+const SATURN_EQUATORIAL_RADIUS_KM: f64 = 60_268.0;
+
+/// Saturn ring inner / outer radii in units of Saturn's equatorial radius, from
+/// the Cassini orbital fits collated by Porco et al. 2005 (Science 307, 1226,
+/// Table 1). Boundaries that don't drive a brightness step are not stored — the
+/// V-52a renderer only needs the four edges between C, B, Cassini Division, and
+/// A.
+const SATURN_RING_C_INNER_R_S: f64 = 74_510.0 / SATURN_EQUATORIAL_RADIUS_KM;
+const SATURN_RING_B_INNER_R_S: f64 = 91_980.0 / SATURN_EQUATORIAL_RADIUS_KM;
+const SATURN_RING_B_OUTER_R_S: f64 = 117_580.0 / SATURN_EQUATORIAL_RADIUS_KM;
+const SATURN_RING_A_INNER_R_S: f64 = 122_050.0 / SATURN_EQUATORIAL_RADIUS_KM;
+const SATURN_RING_A_OUTER_R_S: f64 = 136_775.0 / SATURN_EQUATORIAL_RADIUS_KM;
 
 /// Solar-system planets rendered/planned by Phase 2. Earth is intentionally
 /// omitted because this crate is currently Earth-observer centric.
@@ -103,6 +116,52 @@ impl PlanetApparent {
     pub fn direction_equatorial(self) -> Vec3 {
         equatorial_unit_vector(self.right_ascension_rad, self.declination_rad)
     }
+}
+
+/// Apparent geometric state of Saturn's ring system (V-52a).
+///
+/// Computed from Meeus 1998 ch. 45 ("Ephemeris for Physical Observations of
+/// Saturn's rings") in the mean-equator-and-equinox-of-date frame that already
+/// underpins [`PlanetApparent`]. The ring inner / outer radii used by the
+/// renderer are static constants pinned to the Cassini fits (Porco et al.
+/// 2005); this struct only carries the per-epoch orientation state.
+#[derive(Debug, Clone, Copy)]
+pub struct SaturnRingApparent {
+    /// Saturnicentric latitude of Earth in radians (Meeus 1998 "B"). Positive
+    /// when the northern face of the rings is visible from the observer.
+    pub sub_earth_lat_rad: f64,
+    /// Saturnicentric latitude of the Sun in radians (Meeus 1998 "B'").
+    /// `sub_earth_lat_rad` and `sub_sun_lat_rad` carry the same sign whenever
+    /// the lit face is the one tilted toward Earth.
+    pub sub_sun_lat_rad: f64,
+    /// Unit vector along Saturn's north ring pole in the same equatorial frame
+    /// of date as [`PlanetApparent::right_ascension_rad`]. The renderer projects
+    /// this into screen space to orient the ring ellipse.
+    pub ring_pole_eq: Vec3,
+    /// Position angle of Saturn's north ring pole on the sky, measured east of
+    /// north in radians (Meeus 1998 eq. 45.5). Useful for label / overlay code
+    /// that doesn't want to re-project [`Self::ring_pole_eq`].
+    pub position_angle_rad: f64,
+}
+
+impl SaturnRingApparent {
+    /// Ring inner / outer radii in units of Saturn's equatorial radius for the
+    /// four bands the V-52a renderer pass distinguishes. The boundaries are
+    /// `[C_inner, B_inner, B_outer, A_inner, A_outer]`; the Cassini Division
+    /// is the `[B_outer, A_inner]` gap.
+    pub const BAND_RADII_R_S: [f64; 5] = [
+        SATURN_RING_C_INNER_R_S,
+        SATURN_RING_B_INNER_R_S,
+        SATURN_RING_B_OUTER_R_S,
+        SATURN_RING_A_INNER_R_S,
+        SATURN_RING_A_OUTER_R_S,
+    ];
+
+    /// Per-band V-band brightness ratios relative to the B ring (Dones et al.
+    /// 1993, Icarus 105, 184, Table II). Order matches the band sequence
+    /// `[C, B, Cassini, A]` returned by [`Self::BAND_RADII_R_S`] taken
+    /// pair-wise.
+    pub const BAND_BRIGHTNESS: [f64; 4] = [0.20, 1.00, 0.15, 0.50];
 }
 
 /// Apparent geocentric Sun state for rendering.
@@ -382,6 +441,95 @@ pub fn apparent_planets_topocentric(observer: Observer) -> [PlanetApparent; 7] {
     Planet::ALL.map(|planet| apparent_planet_topocentric(observer, planet))
 }
 
+/// Inclination of Saturn's equator to the mean ecliptic of date and the
+/// longitude of the ascending node of that equator on the same ecliptic, both
+/// from Meeus 1998 ch. 45 (the secular polynomial reproduces the IAU WGCCRE
+/// 2015 Saturn-pole drift over the V-52a test budget within < 0.01°).
+fn saturn_ring_axis_of_date_rad(julian_date: f64) -> (f64, f64) {
+    let t = (julian_date - J2000_JD) / 36_525.0;
+    let i_deg = 28.075216 - 0.012998 * t + 0.000004 * t * t;
+    let omega_deg = 169.508470 + 1.394681 * t + 0.000412 * t * t;
+    (i_deg * DEG_TO_RAD, omega_deg * DEG_TO_RAD)
+}
+
+/// Apparent state of Saturn's ring system for a dynamical Julian Date.
+///
+/// All angles are in the mean equator and equinox of date so the result lines
+/// up bit-for-bit with [`apparent_planet`]`(Planet::Saturn, julian_date)`.
+/// Pass `TimeScales::jd_tdb` (or TT for the current low-precision visual
+/// model) rather than UTC/UT1 when a full time-scale bundle is available.
+pub fn apparent_saturn_ring(julian_date: f64) -> SaturnRingApparent {
+    let saturn = apparent_planet(Planet::Saturn, julian_date);
+    let (incl, node) = saturn_ring_axis_of_date_rad(julian_date);
+    let (sin_incl, cos_incl) = incl.sin_cos();
+
+    // Sub-Earth Saturnicentric latitude B (Meeus 45.1) from the geocentric
+    // ecliptic position of Saturn.
+    let (sin_beta, cos_beta) = saturn.ecliptic_latitude_rad.sin_cos();
+    let sin_dlon_geo = (saturn.ecliptic_longitude_rad - node).sin();
+    let sin_b = sin_incl * cos_beta * sin_dlon_geo - cos_incl * sin_beta;
+    let sub_earth_lat_rad = sin_b.clamp(-1.0, 1.0).asin();
+
+    // Sub-Sun Saturnicentric latitude B' from the heliocentric ecliptic
+    // position of Saturn. The `astro` crate's `heliocent_coords` returns
+    // (longitude, latitude, radius) in the same VSOP87-of-date frame the rest
+    // of the planet pipeline uses.
+    let (helio_long, helio_lat, _) =
+        astro::planet::heliocent_coords(&astro::planet::Planet::Saturn, julian_date);
+    let (sin_b_sun, cos_b_sun) = helio_lat.sin_cos();
+    let sin_dlon_helio = (helio_long - node).sin();
+    let sin_bp = sin_incl * cos_b_sun * sin_dlon_helio - cos_incl * sin_b_sun;
+    let sub_sun_lat_rad = sin_bp.clamp(-1.0, 1.0).asin();
+
+    // Ring pole direction. The pole sits at ecliptic latitude (π/2 − i) along
+    // the meridian λ = Ω − π/2 (a quarter-circle ahead of the ascending node),
+    // i.e. ecliptic coordinates `(Ω − π/2, π/2 − i)`. Rotate that fixed
+    // direction into the equatorial frame of date with the same obliquity used
+    // by the rest of this module.
+    let pole_ecl_long = node - std::f64::consts::FRAC_PI_2;
+    let pole_ecl_lat = std::f64::consts::FRAC_PI_2 - incl;
+    let pole_eq = ecliptic_to_equatorial_vector(
+        pole_ecl_long,
+        pole_ecl_lat,
+        1.0,
+        mean_obliquity_rad(julian_date),
+    );
+    let pole_norm = (pole_eq[0] * pole_eq[0] + pole_eq[1] * pole_eq[1] + pole_eq[2] * pole_eq[2])
+        .sqrt()
+        .max(1e-12);
+    let ring_pole_eq = Vec3::new(
+        (pole_eq[0] / pole_norm) as f32,
+        (pole_eq[1] / pole_norm) as f32,
+        (pole_eq[2] / pole_norm) as f32,
+    );
+
+    // Position angle of the north ring pole on the sky (Meeus 45.5).
+    let (alpha_p, delta_p, _) = ra_dec_from_equatorial_vector(pole_eq);
+    let (sin_d_sat, cos_d_sat) = saturn.declination_rad.sin_cos();
+    let (sin_d_p, cos_d_p) = delta_p.sin_cos();
+    let dalpha = alpha_p - saturn.right_ascension_rad;
+    let (sin_dalpha, cos_dalpha) = dalpha.sin_cos();
+    let position_angle_rad =
+        (cos_d_p * sin_dalpha).atan2(sin_d_p * cos_d_sat - cos_d_p * sin_d_sat * cos_dalpha);
+
+    SaturnRingApparent {
+        sub_earth_lat_rad,
+        sub_sun_lat_rad,
+        ring_pole_eq,
+        position_angle_rad,
+    }
+}
+
+/// Apparent topocentric state of Saturn's rings for an observer on Earth.
+///
+/// Earth-radius parallax shifts Saturn's apparent direction by < 5″ — well
+/// below the test gate — so the ring orientation is identical to the geocentric
+/// value to f64 precision. We still recompute through [`apparent_saturn_ring`]
+/// so callers get a uniform observer-driven API.
+pub fn apparent_saturn_ring_topocentric(observer: Observer) -> SaturnRingApparent {
+    apparent_saturn_ring(observer.time.jd_tdb)
+}
+
 /// Apparent geocentric Moon position for a Julian Date.
 ///
 /// The geocentric ecliptic longitude/latitude/distance come from the `astro`
@@ -574,5 +722,105 @@ mod tests {
             * 3600.0;
         assert!(separation_arcsec > 0.01);
         assert!(separation_arcsec < 10.0);
+    }
+
+    // V-52a Saturn ring orientation tests. Reference openings are from the
+    // ring-plane crossings tabulated by Meeus 1998 ch. 45 (edge-on dates) and
+    // the JPL Horizons-derived maximum-opening epochs that bracket them.
+    fn jd_from_utc_ymd(year: i32, month: u8, day_with_fraction: f64) -> f64 {
+        // Meeus 1998 eq. 7.1, Gregorian calendar.
+        let (y, m) = if month <= 2 {
+            (year - 1, i32::from(month) + 12)
+        } else {
+            (year, i32::from(month))
+        };
+        let a = (y as f64 / 100.0).floor();
+        let b = 2.0 - a + (a / 4.0).floor();
+        (365.25 * (y as f64 + 4716.0)).floor()
+            + (30.6001 * (m as f64 + 1.0)).floor()
+            + day_with_fraction
+            + b
+            - 1524.5
+    }
+
+    #[test]
+    fn saturn_ring_edge_on_in_1995() {
+        // 1995-08-10 12h UTC, ring-plane crossing (Meeus 1998 ch. 45 example).
+        let jd = jd_from_utc_ymd(1995, 8, 10.5);
+        let ring = apparent_saturn_ring(jd);
+        let b_deg = ring.sub_earth_lat_rad.to_degrees().abs();
+        assert!(
+            b_deg < 0.6,
+            "|B| at 1995-08-10 should be near edge-on, got {b_deg}°"
+        );
+    }
+
+    #[test]
+    fn saturn_ring_max_open_in_2002() {
+        // Maximum-opening solstice between the 1995 and 2009 ring-plane
+        // crossings, around 2002-12-17. The 2002 solstice exposes Saturn's
+        // southern face (B ≈ −26.7°); the next solstice in 2017 flips to the
+        // northern face.
+        let jd = jd_from_utc_ymd(2002, 12, 17.0);
+        let ring = apparent_saturn_ring(jd);
+        let b_deg = ring.sub_earth_lat_rad.to_degrees();
+        assert!(
+            (b_deg + 26.7).abs() < 0.3,
+            "B at 2002-12-17 should be near −26.7°, got {b_deg}°"
+        );
+        // The Sun's sub-Saturn latitude must share the sign of B near maximum
+        // opening — the same hemisphere is lit and tilted toward Earth.
+        assert!(ring.sub_sun_lat_rad < 0.0);
+    }
+
+    #[test]
+    fn saturn_ring_max_open_north_in_2017() {
+        // The next solstice after 2009 — northern face fully tipped.
+        let jd = jd_from_utc_ymd(2017, 5, 28.0);
+        let ring = apparent_saturn_ring(jd);
+        let b_deg = ring.sub_earth_lat_rad.to_degrees();
+        assert!(
+            (b_deg - 26.7).abs() < 0.5,
+            "B at 2017-05-28 should be near +26.7°, got {b_deg}°"
+        );
+        assert!(ring.sub_sun_lat_rad > 0.0);
+    }
+
+    #[test]
+    fn saturn_ring_edge_on_in_2009() {
+        // 2009-09-04 ring-plane crossing.
+        let jd = jd_from_utc_ymd(2009, 9, 4.5);
+        let ring = apparent_saturn_ring(jd);
+        let b_deg = ring.sub_earth_lat_rad.to_degrees().abs();
+        assert!(
+            b_deg < 0.6,
+            "|B| at 2009-09-04 should be near edge-on, got {b_deg}°"
+        );
+    }
+
+    #[test]
+    fn saturn_ring_pole_is_unit_length_and_near_iau_pole_at_j2000() {
+        let ring = apparent_saturn_ring(J2000_JD);
+        assert!((ring.ring_pole_eq.length() - 1.0).abs() < 1e-5);
+        // IAU WGCCRE 2015 Saturn pole at J2000: α₀ = 40.589°, δ₀ = 83.537°.
+        let expected = equatorial_unit_vector_f64(40.589_f64.to_radians(), 83.537_f64.to_radians());
+        let dot = (ring.ring_pole_eq.x as f64) * expected[0]
+            + (ring.ring_pole_eq.y as f64) * expected[1]
+            + (ring.ring_pole_eq.z as f64) * expected[2];
+        let sep_deg = dot.clamp(-1.0, 1.0).acos().to_degrees();
+        assert!(sep_deg < 0.1, "ring pole drift from IAU value: {sep_deg}°");
+    }
+
+    #[test]
+    fn saturn_ring_topocentric_matches_geocentric() {
+        // Earth-radius parallax cannot move Saturn's ring orientation at the
+        // 0.1° test gate. Confirm the topocentric API matches the geocentric
+        // result to within parallax-sized differences (`Observer::from_degrees`
+        // may quantise the JD through f32 on its way to TimeScales).
+        let jd = jd_from_utc_ymd(2002, 12, 17.0);
+        let observer = Observer::from_degrees(35.68, 139.69, jd);
+        let geo = apparent_saturn_ring(observer.time.jd_tdb);
+        let topo = apparent_saturn_ring_topocentric(observer);
+        assert!((geo.sub_earth_lat_rad - topo.sub_earth_lat_rad).abs() < 1e-9);
     }
 }
