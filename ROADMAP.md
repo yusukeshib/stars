@@ -226,7 +226,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-11` | Sharable JSON sessions | ✅ |
 | `L-12` | Scene presets | ✅ |
 | `L-13` | Notebook examples | ✅ |
-| `L-14` | Public demo gallery | ⬜ |
+| `L-14` | Public demo gallery | ✅ |
 | `L-15` | Data provenance manifest | ✅ |
 | `L-16` | Catalog backend scaling design | ✅ |
 | `L-17` | Hipparcos / Tycho-2 / Gaia DR3 ingest | ⬜ |
@@ -2726,29 +2726,43 @@ astronomy outputs, and render the same scene as web / CLI.
 
 ---
 
-### `L-14` Public demo gallery — ⬜
+### `L-14` Public demo gallery — ✅ done
 
-**Item.** Curated, shareable scenes such as Tokyo tonight, summer Milky
-Way, lunar eclipse aid, and galactic-north view, backed by stable session
-files.
+**Item.** Curated, narrated public demo page at
+[`docs/demo-gallery.md`](docs/demo-gallery.md) (and
+[`docs/demo-gallery.ja.md`](docs/demo-gallery.ja.md)) covering 12 of the
+most visually-striking deterministic scene presets: total solar eclipse,
+Belt of Venus, Galilean shadow on Jupiter, Bortle 1 ↔ Bortle 8 light-
+pollution comparison, full-sky Mollweide, galactic-north external
+viewpoint, and the canonical Tokyo / dark-sky / sunset / moonlit-night
+baselines.
 
 **Scientific basis.** Demo discipline: each scene is reproducible and
 cites the chosen catalog, atmosphere, and ephemeris versions through the
-session schema.
+session schema. The committed PNGs are hashed in
+`data/manifest.toml` under `kind = "generated"` with
+`preprocessing = "scripts/render-demo-gallery.sh"`, so `make manifest-check`
+(part of `make ci`) fails on silent byte drift.
 
-**Implementation scope.**
-- `docs/public-gallery.md` index; each entry pinned to a committed
-  session JSON.
-- A small static site under `apps/web/frontend/gallery/` that links to
-  the live render with the session preloaded.
-- Curation policy: every gallery entry has a citation block.
+**Implementation.**
+- `docs/demo-gallery.md` / `docs/demo-gallery.ja.md` — curated narrated
+  index with the preset name on every entry.
+- `scripts/render-demo-gallery.sh` and `make demo-gallery` /
+  `make demo-gallery-check` — mirrors the validation-gallery script
+  layout but renders only the curated subset.
+- `docs/assets/demo-gallery/*.png` — 480 × 270 PNGs, one per curated
+  preset, each manifest-tracked.
+- README front-door section (English + Japanese) with a 3-up thumbnail
+  strip and a `make demo-gallery` callout.
 
-**Tests / validation.**
-- `make ci` re-renders the gallery scenes and diffs against the
-  committed PNGs.
+**Tests / validation.** `make manifest-check` (in `make ci`) re-hashes
+the committed bytes; `make demo-gallery-check` is the opt-in exact
+screenshot regression for pinned-GPU CI environments.
 
-**Hosts wired.** Web (gallery page); CLI (re-render); viewer (load via
-session).
+**Hosts wired.** Documentation + CLI re-render. The optional in-app
+gallery page over `apps/web/frontend/` is deliberately deferred — the
+Markdown-first surface ships from one source-of-truth subset that the
+web UI can later read.
 
 ---
 

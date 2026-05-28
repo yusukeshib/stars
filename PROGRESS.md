@@ -2365,6 +2365,47 @@ Primary implementation areas:
   `data/manifest.toml`, `docs/scene-presets.md`,
   `docs/validation-gallery.md`, `ARCHITECTURE.md`, `ROADMAP.md`.
 
+## L-14 Public demo gallery
+
+Shipped a curated, narrated public demo page at
+[`docs/demo-gallery.md`](demo-gallery.md) (and the Japanese mirror
+[`docs/demo-gallery.ja.md`](demo-gallery.ja.md)) as the project front-door
+showcase. Twelve of the most visually-striking deterministic scene
+presets are surfaced with a one-line scientific caption, a 480 × 270
+thumbnail, and the exact `--preset <name>` reproduction command:
+
+- `tokyo-tonight`, `sunset`, `civil-twilight-antisolar-tokyo`,
+  `moonlit-night`, `dark-sky`, `dark-sky-bortle-1`, `tokyo-bortle-8`,
+  `solar-eclipse`, `venus-transit`, `jupiter-shadow-transit`,
+  `all-sky-mollweide`, `galactic-north`.
+
+Delivered as a docs + scripts + manifest PR (no engine or renderer
+changes):
+
+- `scripts/render-demo-gallery.sh` mirrors the validation-gallery
+  script structure (`--update` / `--check` modes) but renders only the
+  curated subset.
+- `make demo-gallery` and `make demo-gallery-check` Makefile targets.
+- `docs/assets/demo-gallery/*.png` — the 12 curated PNGs, each tracked
+  in `data/manifest.toml` under `kind = "generated"` and
+  `preprocessing = "scripts/render-demo-gallery.sh"`. `make
+  manifest-check` (part of `make ci`) re-hashes the committed bytes,
+  so silent drift fails CI even without running the screenshot
+  regression.
+- `README.md` and `README.ja.md` carry a prominent "Demo gallery"
+  section near the top with three thumbnails (solar eclipse, Belt of
+  Venus, Galilean shadow on Jupiter) and a `make demo-gallery`
+  callout.
+
+Reproduction discipline. Every gallery entry pins to a committed
+session JSON in `docs/presets/sessions/` (catalog + atmosphere +
+ephemeris versions live in the session schema), so a future re-render
+reproduces the same scientific state. The L-14 surface is the
+project's single source of truth for "this is what `stars` looks like";
+future renderer slices that visibly change a curated scene must
+regenerate `docs/assets/demo-gallery/<scene>.png` and update its
+manifest hash in the same PR.
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

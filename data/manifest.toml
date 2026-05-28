@@ -825,3 +825,137 @@ Subject to the OpenStreetMap Foundation Nominatim usage policy. Only the
 selected coordinates enter the current browser session — no observer query
 is sent to first-party `stars` services.
 """
+
+# Demo gallery (L-14): curated public demo PNGs.
+
+[[artifact]]
+id = "demo-gallery-tokyo-tonight"
+description = "Demo gallery PNG: Tokyo summer evening — default local perspective entry point."
+kind = "generated"
+path = "docs/assets/demo-gallery/tokyo-tonight.png"
+sha256 = "894c5aca8536d309d7e4d8f64165471a846a379d9fc4ca789a019d4a67218341"
+bytes = 93055
+license = "see-upstream"
+preprocessing = "scripts/render-demo-gallery.sh"
+used_by = ["docs/demo-gallery.md", "docs/demo-gallery.ja.md"]
+
+[[artifact]]
+id = "demo-gallery-sunset"
+description = "Demo gallery PNG: Sunset horizon — golden-hour Preetham scattering."
+kind = "generated"
+path = "docs/assets/demo-gallery/sunset.png"
+sha256 = "a69faf1c3e986dad0e47fcc89352f8e578e1854ab7f10f3f134a8ac5a8768408"
+bytes = 23527
+license = "see-upstream"
+preprocessing = "scripts/render-demo-gallery.sh"
+used_by = ["docs/demo-gallery.md", "docs/demo-gallery.ja.md"]
+
+[[artifact]]
+id = "demo-gallery-civil-twilight-antisolar-tokyo"
+description = "Demo gallery PNG: Belt of Venus + Earth-shadow band (V-27, anti-solar Tokyo)."
+kind = "generated"
+path = "docs/assets/demo-gallery/civil-twilight-antisolar-tokyo.png"
+sha256 = "e86f7925ec5162dee26eca1c74c2e90f19efa7a1e181a00807d9580dd5bdc2f8"
+bytes = 52308
+license = "see-upstream"
+preprocessing = "scripts/render-demo-gallery.sh"
+used_by = ["docs/demo-gallery.md", "docs/demo-gallery.ja.md"]
+
+[[artifact]]
+id = "demo-gallery-moonlit-night"
+description = "Demo gallery PNG: Moonlit night with V-26 dark-side earthshine."
+kind = "generated"
+path = "docs/assets/demo-gallery/moonlit-night.png"
+sha256 = "6f975be64b8c19f56c61b697ae2868fd485bb451cc901ee2769eba55b431102d"
+bytes = 56260
+license = "see-upstream"
+preprocessing = "scripts/render-demo-gallery.sh"
+used_by = ["docs/demo-gallery.md", "docs/demo-gallery.ja.md"]
+
+[[artifact]]
+id = "demo-gallery-dark-sky"
+description = "Demo gallery PNG: High-altitude dark sky — Milky Way + spectral airglow."
+kind = "generated"
+path = "docs/assets/demo-gallery/dark-sky.png"
+sha256 = "1930de66e99cc8e7a854f739e9eeb1d027f20c6382dc12d2f4f3e70fb3b6b5a2"
+bytes = 82902
+license = "see-upstream"
+preprocessing = "scripts/render-demo-gallery.sh"
+used_by = ["docs/demo-gallery.md", "docs/demo-gallery.ja.md"]
+
+[[artifact]]
+id = "demo-gallery-dark-sky-bortle-1"
+description = "Demo gallery PNG: V-39 Bortle 1 rural floor (light-pollution comparison)."
+kind = "generated"
+path = "docs/assets/demo-gallery/dark-sky-bortle-1.png"
+sha256 = "1930de66e99cc8e7a854f739e9eeb1d027f20c6382dc12d2f4f3e70fb3b6b5a2"
+bytes = 82902
+license = "see-upstream"
+preprocessing = "scripts/render-demo-gallery.sh"
+used_by = ["docs/demo-gallery.md", "docs/demo-gallery.ja.md"]
+
+[[artifact]]
+id = "demo-gallery-tokyo-bortle-8"
+description = "Demo gallery PNG: V-39 Bortle 8 city sky (light-pollution comparison)."
+kind = "generated"
+path = "docs/assets/demo-gallery/tokyo-bortle-8.png"
+sha256 = "5fb08c27929725d3d060e15490b2f74251362911b64449cdb33953d0eb336c56"
+bytes = 55184
+license = "see-upstream"
+preprocessing = "scripts/render-demo-gallery.sh"
+used_by = ["docs/demo-gallery.md", "docs/demo-gallery.ja.md"]
+
+[[artifact]]
+id = "demo-gallery-solar-eclipse"
+description = "Demo gallery PNG: Total solar eclipse (V-51c) — corona during totality."
+kind = "generated"
+path = "docs/assets/demo-gallery/solar-eclipse.png"
+sha256 = "463004e77ffc9a1acf67065dea146b9a9e65594c36310ec380d8d22bd4592af9"
+bytes = 7571
+license = "see-upstream"
+preprocessing = "scripts/render-demo-gallery.sh"
+used_by = ["docs/demo-gallery.md", "docs/demo-gallery.ja.md"]
+
+[[artifact]]
+id = "demo-gallery-venus-transit"
+description = "Demo gallery PNG: Venus transit of the Sun (V-51e planet-on-Sun)."
+kind = "generated"
+path = "docs/assets/demo-gallery/venus-transit.png"
+sha256 = "8d6eb30366e132ee4c5dec50d5811b83e715d700be28e4818c9335b4f1fb701c"
+bytes = 5338
+license = "see-upstream"
+preprocessing = "scripts/render-demo-gallery.sh"
+used_by = ["docs/demo-gallery.md", "docs/demo-gallery.ja.md"]
+
+[[artifact]]
+id = "demo-gallery-jupiter-shadow-transit"
+description = "Demo gallery PNG: Galilean shadow on Jupiter (V-52d)."
+kind = "generated"
+path = "docs/assets/demo-gallery/jupiter-shadow-transit.png"
+sha256 = "d4271d60977ea2717a4e496e6a4e2791faf1d5263987066c056c7ec01163ae50"
+bytes = 3328
+license = "see-upstream"
+preprocessing = "scripts/render-demo-gallery.sh"
+used_by = ["docs/demo-gallery.md", "docs/demo-gallery.ja.md"]
+
+[[artifact]]
+id = "demo-gallery-all-sky-mollweide"
+description = "Demo gallery PNG: Full-sky Mollweide projection (V-40)."
+kind = "generated"
+path = "docs/assets/demo-gallery/all-sky-mollweide.png"
+sha256 = "23cba3820ed770355fc4735fd80da7f976bbf47b5ce73ccd3e7816ca3b47ae6a"
+bytes = 174455
+license = "see-upstream"
+preprocessing = "scripts/render-demo-gallery.sh"
+used_by = ["docs/demo-gallery.md", "docs/demo-gallery.ja.md"]
+
+[[artifact]]
+id = "demo-gallery-galactic-north"
+description = "Demo gallery PNG: Galactic-north external viewpoint (V-41)."
+kind = "generated"
+path = "docs/assets/demo-gallery/galactic-north.png"
+sha256 = "75d777ba4a9811bd752a106450b78cd16db3ddb5a27701e40978505a813a9a3c"
+bytes = 38537
+license = "see-upstream"
+preprocessing = "scripts/render-demo-gallery.sh"
+used_by = ["docs/demo-gallery.md", "docs/demo-gallery.ja.md"]
