@@ -543,7 +543,6 @@ Hosts wired: CLI / viewer / web (all driven by the shared
 
 ---
 
-||||||| parent of 9c94053 (V-52b-E5: Lieske 1998 E5 scaffold + Horizons reference fixture)
 ### Galilean moons — Lieske 1998 E5 precision upgrade scaffold (`V-52b-E5`)
 
 `V-52b-E5` is the precision-upgrade follow-on to `V-52b`: replace the
@@ -1981,7 +1980,6 @@ References:
 - Qiu, J. et al. 2003, JGR 108, D22 (phase dependence and Bond-albedo
   retrieval).
 
-||||||| parent of 1e9dac4 (V-25: differential atmospheric dispersion)
 ## `V-25` Differential atmospheric dispersion
 
 Wavelength-dependent refraction now renders horizon-near point sources as
@@ -2057,6 +2055,103 @@ References:
 Hosts wired: CLI / viewer / web (all consume the same renderer crate,
 so the dispersion ships through the shared shader pipeline without
 any host-side wiring changes).
+
+### Belt of Venus and Earth-shadow band (V-27)
+
+Closed the anti-solar gap in the twilight composition: the existing
+V-33 twilight model is zenith-symmetric in luminance, so the pink Belt
+of Venus arch and the blue-grey Earth-shadow band below it were not
+rendered. V-27 adds compact `(relative_az, view_alt)` 2-axis fits to
+Lee & Hernández-Andrés 2003 measurements of the anti-twilight arch and
+shadow band, evaluated identically on the Rust side (for unit tests and
+the documented model) and inside the WGSL twilight pass.
+
+Scientific basis:
+
+- Hulburt 1953 (JOSA 43, 113) explains the warm anti-twilight arch as
+  Rayleigh-stripped, red-pass single-scattering along the long
+  anti-solar slant column.
+- Lee & Hernández-Andrés 2003 (Appl. Opt. 42, 445) measure the
+  radiance and chromaticity field across solar depression and relative
+  azimuth and supply the empirical envelope the fits are anchored to.
+- Adams, Plass & Kattawar 1974 (J. Atmos. Sci. 31, 1662) provide the
+  multiple-scattering context for the band darkening inside the
+  geometric Earth shadow.
+
+Shipped capabilities:
+
+- `astronomy::atmosphere::antitwilight_arch_radiance(sun_alt, relative_az,
+  view_alt)` returns a per-channel `[R, G, B]` multiplier on top of the
+  V-33 zenith twilight reference. Peak amplitude
+  `(R, G, B) = (+0.28, +0.04, -0.18)` is reached at relative azimuth
+  180°, view altitude ≈ 8°, and solar depression ≈ 3°; the multiplier
+  collapses to `[1, 1, 1]` outside the civil-twilight depression window
+  `(0°, 6.5°)` so daylight and nautical/astronomical twilight pass
+  through unchanged.
+- `astronomy::atmosphere::earth_shadow_band_radiance(...)` returns the
+  matching cool-band multiplier with peak amplitude
+  `(R, G, B) = (-0.40, -0.32, -0.22)` at the anti-solar horizon, giving
+  a blue-grey tint and a clear luminance dip in the band.
+- `crates/renderer/src/shaders/skyglow.wgsl` evaluates the same two fits
+  inside `twilight_sky_radiance`. Sun and view directions are projected
+  onto the local horizon plane to get a stable relative azimuth even
+  when the Sun is below the horizon, and the per-channel multipliers
+  are applied before HDR conversion so the existing daylight ↔ twilight
+  ↔ dark-sky composition stays additive in physical units.
+- New deterministic scene preset `civil-twilight-antisolar-tokyo`
+  (Tokyo, 2026-06-21 10:20 UTC, az 110°, alt 8°, 75° FoV) framed on
+  the anti-solar horizon to expose the Belt of Venus arch and the
+  Earth-shadow band underneath. The preset round-trips through the
+  schema-versioned JSON session path like every other preset.
+
+Validation:
+
+- `astronomy::atmosphere` unit tests pin: at sun_alt = -2° the
+  anti-solar arch fit gives `R > G > B` with `R > 1.05` at view_alt =
+  5°; the Earth-shadow band has the lowest V-band luminance in the
+  anti-solar half-sky at view_alt = 0° (dimmer than 2.5°, 5°, 8°,
+  12°, 20°, 45°, 80°); both fits collapse to `[1, 1, 1]` for
+  daylight, nautical and astronomical twilight; the combined Belt of
+  Venus R/G ratio at the ROI A altitude (8°, anti-solar, depression
+  3°) lies in `[1.15, 1.35]` while the Earth-shadow ROI B (0°,
+  anti-solar) lies in `[0.85, 1.00]`, and ROI A > ROI B.
+- Pinned validation scene: `docs/presets/sessions/civil-twilight-antisolar-tokyo.json`
+  and `docs/assets/validation/civil-twilight-antisolar-tokyo.png` are
+  recorded in `data/manifest.toml`; `make manifest-check` re-hashes
+  both.
+- Renderer tests continue to pass; the WGSL change is localized to the
+  twilight composition region of `skyglow.wgsl` to minimise conflicts
+  with the parallel V-25 / V-26 / V-28 work that also touches the
+  same shader.
+
+Documented limitations:
+
+- The fits reproduce the chromaticity envelope of Lee & Hernández-Andrés
+  2003, not their full multi-wavelength radiance tables; the
+  multiplier targets the V-27 visual feature, not photometric truth
+  outside the cited envelope. Multiple-scattering inside the Earth
+  shadow is captured only as a residual blue-grey tint, not as a
+  height-resolved twilight radiative transfer.
+
+Hosts wired: CLI, viewer, web (all consume the same `skyglow.wgsl`
+twilight pass; the new preset is exposed through the shared
+`scene_preset_infos()` table).
+
+Primary implementation areas:
+
+- `crates/astronomy/src/atmosphere.rs`
+  (`antitwilight_arch_radiance`, `earth_shadow_band_radiance`,
+  `BELT_OF_VENUS_DEPRESSION_RANGE_DEG`, four V-27 unit tests).
+- `crates/renderer/src/shaders/skyglow.wgsl`
+  (`antitwilight_arch_multiplier`, `earth_shadow_band_multiplier`,
+  V-27 application inside `twilight_sky_radiance`).
+- `crates/common/src/presets.rs`
+  (`ScenePresetArg::CivilTwilightAntisolarTokyo`,
+  `scene_from_preset` case, info entry).
+- `docs/presets/sessions/civil-twilight-antisolar-tokyo.json`,
+  `docs/assets/validation/civil-twilight-antisolar-tokyo.png`,
+  `data/manifest.toml`, `docs/scene-presets.md`,
+  `docs/validation-gallery.md`, `ARCHITECTURE.md`, `ROADMAP.md`.
 
 ## Documentation progress
 

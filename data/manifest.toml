@@ -384,6 +384,17 @@ preprocessing = "scripts/export-scene-presets.sh"
 used_by = ["docs/scene-presets.md"]
 
 [[artifact]]
+id = "scene-preset-session-civil-twilight-antisolar-tokyo"
+description = "Scene preset JSON: civil twilight, anti-solar Tokyo (V-27 Belt of Venus + Earth-shadow band)."
+kind = "generated"
+path = "docs/presets/sessions/civil-twilight-antisolar-tokyo.json"
+sha256 = "f3d111a684e3c92e8e728cecceb2b4b1cdc056325a33a66538a2cb1a796d5870"
+bytes = 1995
+license = "see-upstream"
+preprocessing = "scripts/export-scene-presets.sh"
+used_by = ["docs/scene-presets.md"]
+
+[[artifact]]
 id = "scene-preset-session-nautical-twilight"
 description = "Scene preset JSON: nautical twilight."
 kind = "generated"
@@ -616,6 +627,17 @@ kind = "generated"
 path = "docs/assets/validation/civil-twilight.png"
 sha256 = "6f1076b6ccb1061e546d7810984b8e8752f402351e00148c50e8405dac62aedc"
 bytes = 55812
+license = "see-upstream"
+preprocessing = "scripts/render-validation-gallery.sh"
+used_by = ["docs/validation-gallery.md"]
+
+[[artifact]]
+id = "validation-gallery-civil-twilight-antisolar-tokyo"
+description = "Validation gallery PNG: V-27 civil-twilight anti-solar scene over Tokyo (Belt of Venus + Earth-shadow band)."
+kind = "generated"
+path = "docs/assets/validation/civil-twilight-antisolar-tokyo.png"
+sha256 = "fe058286762af281921d9877bb77dbd26289c727daad30bce15f3c28c5fb9dc3"
+bytes = 59958
 license = "see-upstream"
 preprocessing = "scripts/render-validation-gallery.sh"
 used_by = ["docs/validation-gallery.md"]

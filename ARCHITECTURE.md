@@ -274,6 +274,13 @@ The exact pass layout can change, but responsibilities should stay separated:
   disagree. The daylight sky-dome radiance comes from the Hošek-Wilkie
   2012 analytic model (V-38), cooked per frame on the CPU in
   `astronomy::atmosphere::hosek_wilkie::cook` and evaluated on the GPU.
+  The twilight composition (V-33) is zenith-symmetric in luminance and
+  picks up its anti-solar structure inside the same pass via V-27: the
+  shader evaluates `antitwilight_arch_multiplier(sun_alt, relative_az,
+  view_alt)` and `earth_shadow_band_multiplier(...)` (matching the Rust
+  fits in `astronomy::atmosphere`) and multiplies the per-channel
+  twilight radiance by both, so the Belt of Venus and Earth-shadow band
+  appear only in the anti-solar half-sky during civil twilight.
   Perspective
   reconstructs rays through the inverse view-projection matrix; all-sky modes
   invert the selected Mollweide / Aitoff / Hammer map before rotating the ray

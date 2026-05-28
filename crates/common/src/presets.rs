@@ -30,6 +30,7 @@ pub enum ScenePresetArg {
     Noon,
     Sunset,
     CivilTwilight,
+    CivilTwilightAntisolarTokyo,
     NauticalTwilight,
     AstronomicalTwilight,
     MoonlitNight,
@@ -49,6 +50,7 @@ impl ScenePresetArg {
         Self::Noon,
         Self::Sunset,
         Self::CivilTwilight,
+        Self::CivilTwilightAntisolarTokyo,
         Self::NauticalTwilight,
         Self::AstronomicalTwilight,
         Self::MoonlitNight,
@@ -68,6 +70,7 @@ impl ScenePresetArg {
             Self::Noon => "noon",
             Self::Sunset => "sunset",
             Self::CivilTwilight => "civil-twilight",
+            Self::CivilTwilightAntisolarTokyo => "civil-twilight-antisolar-tokyo",
             Self::NauticalTwilight => "nautical-twilight",
             Self::AstronomicalTwilight => "astronomical-twilight",
             Self::MoonlitNight => "moonlit-night",
@@ -127,6 +130,12 @@ pub const SCENE_PRESET_INFOS: &[ScenePresetInfo] = &[
         title: "Civil twilight",
         description: "Solar-depression twilight scene just after sunset with the western horizon in frame.",
         validation_focus: "civil twilight band, additive twilight/dark-sky transition",
+    },
+    ScenePresetInfo {
+        id: ScenePresetArg::CivilTwilightAntisolarTokyo,
+        title: "Civil twilight, anti-solar (Tokyo)",
+        description: "Tokyo civil-twilight scene framed on the anti-solar horizon to expose the Belt of Venus (pink anti-twilight arch) above the Earth-shadow band (V-27).",
+        validation_focus: "V-27 anti-solar twilight structure: Belt of Venus chromaticity, Earth-shadow band luminance, R/G ratio at pinned ROI altitudes",
     },
     ScenePresetInfo {
         id: ScenePresetArg::NauticalTwilight,
@@ -274,6 +283,28 @@ pub fn scene_from_preset(
             "2026-06-21T10:20:00Z",
             290.0,
             10.0,
+            75.0,
+            overlay_config(&[
+                OverlayKind::Horizon,
+                OverlayKind::CardinalLabels,
+                OverlayKind::Ecliptic,
+                OverlayKind::PlanetLabels,
+            ]),
+            AtmospherePreset::ClearRural,
+            catalog,
+        )?,
+        // V-27 validation scene: civil twilight from Tokyo on 2026-06-21 at
+        // 10:20 UTC (the same epoch as the `civil-twilight` preset), framed
+        // toward the anti-solar horizon (az ≈ 110°, alt ≈ 8°) so the
+        // Belt of Venus arch and the Earth-shadow band underneath fall
+        // inside the field. The FOV is the same 75° as the symmetric
+        // civil-twilight preset, so the two scenes are directly comparable.
+        ScenePresetArg::CivilTwilightAntisolarTokyo => earth_scene(
+            35.68,
+            139.69,
+            "2026-06-21T10:20:00Z",
+            110.0,
+            8.0,
             75.0,
             overlay_config(&[
                 OverlayKind::Horizon,

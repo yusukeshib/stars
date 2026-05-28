@@ -179,7 +179,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-24` | Atmospheric scintillation | ✅ |
 | `V-25` | **Differential atmospheric dispersion** | ✅ |
 | `V-26` | Lunar earthshine | ✅ |
-| `V-27` | **Belt of Venus + Earth-shadow band** | ⬜ |
+| `V-27` | **Belt of Venus + Earth-shadow band** | ✅ |
 | `V-28` | **Spectral airglow decomposition** | ✅ |
 | `V-29` | Atmospheric refraction | ✅ |
 | `V-30` | Sun and Moon apparent topocentric state | ✅ |
@@ -823,7 +823,7 @@ first order.
 
 ---
 
-### `V-27` Belt of Venus and Earth-shadow band — ⬜
+### `V-27` Belt of Venus and Earth-shadow band — ✅
 
 **Item.** Twilight is not radially symmetric around the zenith. Looking
 opposite the Sun during civil twilight, observers see a pink "anti-twilight

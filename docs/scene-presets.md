@@ -37,6 +37,7 @@ panel, or attached to a report.
 | `noon` | Tokyo clear-sky local-noon view. | Daylight scattering, solar disk, star suppression by sky radiance. |
 | `sunset` | Tokyo western-horizon sunset. | Golden-hour colour, horizon haze, low-solar-altitude continuity. |
 | `civil-twilight` | Early post-sunset twilight. | Civil twilight band and day/night blend. |
+| `civil-twilight-antisolar-tokyo` | Tokyo civil twilight framed on the anti-solar horizon (V-27). | Belt of Venus arch and Earth-shadow band; R/G ratio at pinned ROI altitudes. |
 | `nautical-twilight` | Deeper twilight with first bright stars. | Nautical twilight band and additive dark-sky transition. |
 | `astronomical-twilight` | Late twilight approaching dark sky. | Astronomical twilight boundary and dark-sky continuity. |
 | `moonlit-night` | Bright Moon night scene. | Moon disk, lunar illuminance, and moonlit sky term. |
