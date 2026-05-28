@@ -266,6 +266,38 @@ point-in-region test.
 # ---------------------------------------------------------------------------
 
 [[artifact]]
+id = "horizons-galilean-moons-fixture"
+description = "JPL Horizons reference fixture for the Galilean moons (Jupiter + Io/Europa/Ganymede/Callisto) at three geocentric epochs spanning the ROADMAP ±100-yr budget: 1900-01-01, 2000-01-01, 2100-01-01 (all 00:00 UT). Pinned target for the V-52b-E5 Lieske 1998 E5 precision upgrade."
+kind = "generated"
+path = "data/horizons_galilean_moons.csv"
+sha256 = "d64090d295427897de7a583b17f916e227f0db31cc99688cfe682abe8388b672"
+bytes = 1404
+source = "https://ssd.jpl.nasa.gov/horizons/"
+archive_id = "JPL Horizons API (CENTER=500@399, QUANTITIES='1,20', EPHEM_TYPE=OBSERVER)"
+citation = "Giorgini, J. D. et al., JPL Horizons On-Line Ephemeris System (https://ssd.jpl.nasa.gov/horizons/manual.html)."
+retrieved = "2026-05"
+license = "public-domain"
+license_url = "https://ssd.jpl.nasa.gov/"
+preprocessing = "scripts/fetch-horizons-galilean-moons.sh"
+fields_used = ["moon_naif", "moon_name", "epoch_utc", "jd_utc", "ra_hms", "dec_dms", "range_au", "deldot_km_s"]
+used_by = [
+    "crates/astronomy/src/moons.rs",
+    "crates/astronomy/src/moons/lieske_e5.rs",
+]
+limitations = """
+Three epochs (1900 / 2000 / 2100) are the minimum the ROADMAP `V-52b-E5`
+rung requires; densifying the fixture (additional dates within the
+±100-yr window, plus topocentric sites for diurnal-parallax pins) is
+explicitly part of the precision-upgrade follow-up. RA/Dec are quoted at
+Horizons's default precision (RA to 0.01 s, Dec to 0.1″), which is
+≈0.15″/0.1″ — comfortably under the ~5″ V-52b-E5 gate. The 2100 row
+will drift by milliarcseconds across JPL kernel updates because JPL
+refines its future-state planetary ephemerides as new observations
+land; rerun the regenerator and update the SHA-256 when validating
+against a newer JPL kernel.
+"""
+
+[[artifact]]
 id = "hosek-wilkie-2012-rgb-v1.4a"
 description = "Hošek-Wilkie 2012 analytic full-spectral sky-dome model: packed RGB coefficient table (3 channels × 2 albedos × 10 turbidities × 6 elevation control points × 9 polynomial coefficients + per-(channel, albedo, turbidity, elev) radiance scale)."
 kind = "generated"
