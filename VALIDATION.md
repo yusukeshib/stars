@@ -102,7 +102,7 @@ Current limitation:
 ### Solar-system positions
 
 Current implementation includes visually useful Sun, Moon, planet, Saturn
-ring, and Galilean-moon apparent / topocentric inputs.
+ring, Galilean-moon, and Titan apparent / topocentric inputs.
 
 Validation expectation:
 
@@ -113,6 +113,10 @@ Validation expectation:
 - Angular radius and phase values should be pinned for simple dates.
 - Galilean-moon angular separations should respect each moon's maximum
   apparent elongation from Jupiter.
+- Titan's angular separation from Saturn should respect its maximum
+  apparent elongation (≲ 3.4′ at closest opposition), and its apparent
+  magnitude near a Saturn opposition should fall in the published
+  Karkoschka 1998 band (V ≈ 8.3 ±0.4 near r ≈ 9 AU, Δ ≈ 8 AU).
 
 Current limitation:
 
@@ -123,6 +127,12 @@ Current limitation:
   to arcminute-scale errors at the edges of the ±100-yr roadmap budget.
   The full Lieske 1998 E5 precision upgrade with a Horizons-anchored
   ~5″ gate is tracked as the dedicated rung `V-52b-E5`.
+- The Titan backend ships at Meeus 1998 ch. 45 accuracy (V-52c) — the
+  same simplification of the TASS theory of Vienne & Duriez 1995 that
+  the `astro` crate implements — with the same accuracy posture as the
+  Meeus-grade Galilean backend. The full TASS1.7 precision upgrade
+  with a Horizons-anchored ~5″ gate is tracked as the dedicated rung
+  `V-52c-TASS17`.
 
 ### Eclipse / occultation geometry (`V-51`)
 

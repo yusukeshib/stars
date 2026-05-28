@@ -415,6 +415,132 @@ gibbous appears as a ~24 % waning crescent). The sign is now `-moon_dir`,
 matching the geometric convention that `moon_dir` points from the observer to
 the Moon.
 
+### Titan (`V-52c` — Meeus-grade; full TASS1.7 follow-up `V-52c-TASS17`)
+
+Third slice of `V-52` (planetary rings and moons): Titan now renders as
+a point source ≈0.5′–3′ from Saturn (Saturn's brightest moon, V ≈ 8.4
+at opposition), routed through the same magnitude-to-flux pipeline as
+the planets and the V-52b Galilean moons, and labelled behind the
+existing planet-labels overlay layer. Titan's orbital position comes
+from Meeus 1998 *Astronomical Algorithms* ch. 45 — a verified
+machine-readable simplification of the TASS theory of Vienne & Duriez
+1995 (A&A 297, 588) that the `astro` crate already implements for all
+eight major Saturnian moons. This ships at the same accuracy posture
+the V-52b Galilean moons did (good for naked-eye / small-eyepiece
+identification within a few arcseconds near J2000, drifting to
+≈10–60″ over the ROADMAP ±100-yr budget). The full ~5″ / ±100-yr
+TASS1.7 precision upgrade is tracked as the dedicated follow-on rung
+`V-52c-TASS17`.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/moons.rs`: extended with `TitanApparent`,
+  `apparent_titan(jd)`, and `apparent_titan_topocentric(observer)`,
+  mirroring the V-52b Galilean API one-for-one. A new private
+  `titan_from_saturn` helper is the Saturn-side analogue of the
+  existing `galilean_moons_from_jupiter` (same sky-plane basis and
+  east/north → equatorial-vector arithmetic; only the parent-planet
+  radius and the per-moon Meeus driver differ).
+- `crates/renderer/src/camera.rs`: extends `PlanetUniforms` and
+  `CameraUniform` with a `titan_eq_radius` / `titan_rgb_magnitude` /
+  `titan_params` block (single-slot version of the V-52b
+  `galilean_*` block), populated in `Camera::planet_uniforms` and
+  routed through the existing `apparent_disk_direction_j2000`
+  refraction pipeline.
+- `crates/renderer/src/shaders/skyglow.wgsl`: new
+  `titan_disk_radiance` evaluator added to the per-pixel sum, sibling
+  to the V-52b `galilean_disk_radiance`. The scalar form (rather than
+  iterating a 1-element array) keeps the inner loop free of
+  array-bound math for the only Saturnian moon currently rendered.
+- `crates/renderer/src/shaders/star.wgsl`: padding fields to keep the
+  WGSL view of `CameraUniform` aligned with the host struct (same
+  pattern as V-52a / V-52b).
+- `crates/renderer/src/text.rs`: a single Titan label candidate
+  registered inside the existing planet-labels overlay branch with
+  the same priority offset and overlay-toggle gate as the Galilean
+  group.
+
+Shipped capabilities:
+
+- Topocentric `(RA, Dec, distance_au, angular_radius_rad, magnitude)`
+  from `apparent_titan_topocentric(observer)`.
+- Apparent magnitude from Karkoschka 1998 (*Icarus* 133, 134) mean-
+  opposition `V(1, 0) = −1.28` plus the standard `5·log10(r · Δ)`
+  distance term, evaluated against Saturn's heliocentric / geocentric
+  distances (Titan orbits ≤0.008 AU from Saturn, well inside the
+  V-52c accuracy budget).
+- Amber-haze surface colour tuned for naked-eye eyepiece use,
+  softened toward the Sun-illumination chroma the same way the V-52b
+  Galilean tints are softened against Jupiter.
+- Sub-arcsecond apparent disk (≈0.4–0.9″ across one orbital period at
+  J2000-era geometry); rendered as a point source for the same
+  reason the Galilean moons are.
+- Label shares the existing planet-labels overlay toggle and inherits
+  the amber tint.
+- Same `planets_enabled` host gate as Saturn itself, so CLI
+  `--no-planets`, the viewer toggle, and the web `set_planets_enabled`
+  WASM hook all turn Titan off in one motion. No new session schema
+  field, no new UI control, no new WASM setter introduced in this
+  slice.
+
+Validation (Meeus-grade):
+
+- `titan_stays_within_max_elongation_from_saturn` confirms Titan's
+  apparent separation from Saturn stays within its tabulated maximum
+  elongation (≲3.4′ at closest opposition) at three points across one
+  Titonian orbital period.
+- `titan_swings_across_one_full_orbital_period` confirms the sky-plane
+  offset reverses (> 200″) across half a period of 15.95 d.
+- `titan_has_plausible_magnitude_near_opposition` cross-checks the
+  `V(1, 0) + 5·log10(r · Δ)` formula against the published V ≈ 8.3
+  near the 2003-12 Saturn opposition within ±0.4 mag.
+- `titan_angular_radius_is_sub_arcsecond_at_opposition` pins Titan as
+  a sub-pixel point source at every supported FoV across a full
+  orbital period.
+- `titan_topocentric_matches_geocentric_within_parallax` pins the
+  topocentric path agrees with the geocentric one within ≈5″ (the
+  Earth-radius parallax bound at Saturn's mean distance).
+- `titan_unit_direction_is_normalised` pins
+  `TitanApparent::direction_equatorial` as a unit vector.
+- `titan_separation_from_saturn_is_within_a_few_arcminutes_at_j2000`
+  pins the headline configuration (Titan ≈3′ from Saturn) at J2000.
+- `renderer::camera::tests::titan_uniform_matches_apparent_titan_at_j2000`
+  / `titan_uniform_disabled_when_planets_off` pin the Pod / Zeroable
+  uniform plumbing end-to-end.
+
+Deliberately out of scope for this slice:
+
+- The ROADMAP `~5″ / ±100-yr` accuracy gate — tracked by
+  `V-52c-TASS17`, which will swap in the full Vienne & Duriez 1995
+  TASS1.7 coefficient tables without changing the host-facing API.
+- A `saturn-titan-eyepiece` validation-gallery scene preset —
+  deferred to a small follow-up PR so the preset JSON-export pipeline
+  and its round-trip tests bump together, mirroring the
+  `saturn-eyepiece` and `jupiter-eyepiece` deferrals from V-52a /
+  V-52b.
+- The remaining seven Meeus-supported Saturnian moons (Mimas /
+  Enceladus / Tethys / Dione / Rhea / Hyperion / Iapetus). They are
+  fainter than Titan by 1–4 magnitudes and fall outside the
+  renderer's default limiting magnitude in most scene presets. The
+  uniform-block design leaves room for them to slot in next to the
+  Galilean block whenever the renderer wants to render them.
+
+References (also pinned in ROADMAP `V-52c`):
+
+- Meeus, J. 1998, *Astronomical Algorithms*, 2nd ed., ch. 45
+  ("Positions of the Satellites of Saturn").
+- Vienne, A., Duriez, L. 1995, A&A 297, 588 (TASS1.7 — ROADMAP target
+  for the `V-52c-TASS17` precision upgrade).
+- Karkoschka, E. 1998, *Icarus* 133, 134 (Titan visual photometry,
+  source of the `V(1, 0) = −1.28` reduced magnitude).
+- Archinal, B. A. et al. 2018, CMDA 130, 22 (Titan physical radius
+  2575 km from IAU WGCCRE 2015).
+
+Hosts wired: CLI / viewer / web (all driven by the shared
+`planets_enabled` flag).
+
+---
+
 ### Galilean moons (`V-52b`)
 
 Second slice of `V-52` (planetary rings and moons): Io, Europa,

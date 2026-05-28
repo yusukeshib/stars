@@ -408,7 +408,8 @@ Used for:
 - annual aberration;
 - atmospheric refraction;
 - apparent Sun / Moon / planet positions;
-- apparent Galilean-moon positions and magnitudes (V-52b).
+- apparent Galilean-moon positions and magnitudes (V-52b);
+- apparent Titan position and magnitude (V-52c).
 
 References / standards named in roadmap:
 
@@ -423,15 +424,22 @@ References / standards named in roadmap:
   (low-precision Lieske reduction, V-52b);
 - Lieske 1977 / Lieske 1998 E5 theory — ROADMAP target for the
   `V-52b-E5` precision upgrade;
-- Archinal et al. 2018 CMDA 130, 22 for Galilean physical radii and
-  IAU WGCCRE rotation parameters.
+- Meeus 1998 *Astronomical Algorithms* ch. 45 for Titan sky-plane
+  offsets (low-precision reduction of the TASS theory of Vienne &
+  Duriez 1995, V-52c);
+- Vienne & Duriez 1995 A&A 297, 588 — TASS1.7 — ROADMAP target for
+  the `V-52c-TASS17` precision upgrade;
+- Karkoschka 1998 *Icarus* 133, 134 for Titan visual photometry
+  (source of the `V(1, 0) = −1.28` reduced magnitude used in V-52c);
+- Archinal et al. 2018 CMDA 130, 22 for Galilean / Titan physical
+  radii and IAU WGCCRE rotation parameters.
 
 Implementation areas:
 
 - `crates/astronomy/src/time.rs`
 - `crates/astronomy/src/corrections.rs`
 - `crates/astronomy/src/ephemeris.rs`
-- `crates/astronomy/src/moons.rs` (V-52b Galilean satellites)
+- `crates/astronomy/src/moons.rs` (V-52b Galilean satellites, V-52c Titan)
 - `crates/astronomy/src/observer.rs`
 - `crates/renderer/src/camera.rs`
 

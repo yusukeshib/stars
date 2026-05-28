@@ -74,6 +74,16 @@ struct CameraUniform {
     galilean_rgb_magnitude: array<vec4<f32>, 4>,
     // V-52b Galilean moons header: [count, enabled, reserved, reserved].
     galilean_params: vec4<f32>,
+    // V-52c Titan: xyz = J2000-equatorial unit direction,
+    // w = angular radius in radians (sub-arcsecond, sub-pixel at every FoV).
+    titan_eq_radius: vec4<f32>,
+    // V-52c Titan: xyz = display colour (linear RGB),
+    // w = apparent visual magnitude.
+    titan_rgb_magnitude: vec4<f32>,
+    // V-52c Titan header: [count, enabled, reserved, reserved].
+    // count is 1 (Titan is the only Saturnian moon V-52c ships); enabled
+    // is 1.0 when Saturn is above the horizon and planets are globally on.
+    titan_params: vec4<f32>,
     // Hošek-Wilkie 2012 RGB sky-dome coefficients (V-38). Nine vec4s; row i
     // holds the per-channel i-th analytic coefficient (A..I) as (R, G, B, _).
     // Pre-cooked on the CPU each frame from (turbidity, albedo, sun_elev).
@@ -762,6 +772,42 @@ fn galilean_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixe
     return rgb;
 }
 
+// V-52c Titan. Renders Titan as a point source next to Saturn. Mirrors
+// `galilean_disk_radiance` but uses the scalar Titan uniform block instead
+// of a four-element array — Titan is the only Saturnian moon V-52c ships,
+// so iterating over a length-one array would just add cost for no gain.
+// The shape stays parallel so the function reads identically to its
+// Galilean sibling: above-horizon gate, pixel-footprint flux, no occluder
+// subtraction (Saturnian occultation transits are deferred to a follow-on
+// rung the same way Galilean ones are).
+fn titan_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_sr: f32) -> vec3<f32> {
+    if camera.titan_params.y <= 0.0 || sin_alt <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    if camera.planet_params.y <= 0.0 {
+        // Gate Titan on the global planets toggle so it shares one host
+        // control with Saturn itself; if planets are off, Titan also goes.
+        return vec3<f32>(0.0);
+    }
+
+    let dir = normalize(camera.titan_eq_radius.xyz);
+    if dot(dir, camera.zenith_eq.xyz) <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let pixel_radius = sqrt(max(pixel_sr, 1e-12));
+    let angular_radius = max(camera.titan_eq_radius.w, 1e-7);
+    // Titan's apparent disk is ≈0.4–0.9" across, well below the per-pixel
+    // angle at every naked-eye / small-eyepiece FoV, so the visual radius
+    // is the pixel radius. Same footprint-area scaling as the planet /
+    // Galilean paths to keep the per-pixel HDR contribution scale-
+    // invariant under FoV changes.
+    let visual_radius = max(pixel_radius, angular_radius);
+    let footprint_pixels = max((visual_radius * visual_radius) / max(pixel_sr, 1e-12), 1.0);
+    let flux = magnitude_to_flux(camera.titan_rgb_magnitude.w, zeropoint);
+    let mask = disk_mask(ray_dir, dir, visual_radius, pixel_sr);
+    return camera.titan_rgb_magnitude.xyz * flux * mask / footprint_pixels;
+}
+
 fn henyey_greenstein(cos_angle: f32, g: f32) -> f32 {
     let gg = g * g;
     let denom = pow(max(1.0 + gg - 2.0 * g * cos_angle, 1e-3), 1.5);
@@ -1180,5 +1226,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let disk_radiance = sun_moon_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
     let planet_radiance = planet_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
     let galilean_radiance = galilean_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
-    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance + planet_radiance + galilean_radiance, 1.0);
+    let titan_radiance = titan_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
+    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance + planet_radiance + galilean_radiance + titan_radiance, 1.0);
 }
