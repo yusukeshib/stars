@@ -37,9 +37,10 @@ pub use occultation::{
 };
 pub use planning::{
     active_occluders, body_altitude_rad, body_equatorial, evening_plan, evening_window_jd_utc,
-    find_lunar_occultation, find_planet_transit, find_solar_eclipse, jd_utc_to_unix_ms,
-    rise_transit_set, solar_eclipse_state, twilight_band, twilight_indicators, EveningPlan,
-    LunarOccultationEvent, LunarOccultedBody, PlanetTransitEvent, PlanningBody, RiseTransitSet,
+    find_lunar_occultation, find_mutual_planetary_occultation, find_planet_transit,
+    find_solar_eclipse, jd_utc_to_unix_ms, rise_transit_set, solar_eclipse_state, twilight_band,
+    twilight_indicators, EveningPlan, LunarOccultationEvent, LunarOccultedBody,
+    MutualPlanetaryOccultationEvent, PlanetTransitEvent, PlanningBody, RiseTransitSet,
     SolarEclipseEvent, SolarEclipseKind, SolarEclipseState, TwilightBand, TwilightIndicator,
     DEFAULT_PLANNING_BODIES,
 };

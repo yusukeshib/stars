@@ -423,10 +423,9 @@ fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixe
     let moon_radius = max(camera.moon_disk.x, 1e-6);
 
     // V-51b: union mask of every active occluder whose back disk is the
-    // Sun. With V-51c this is exactly the Moon-on-Sun pair, so the
-    // V-51c golden frames remain bit-identical; V-51e (planetary
-    // transits) and V-51f (planet-on-planet) will plug additional
-    // entries into the same shader path without further churn.
+    // Sun. With V-51c + V-51e this covers the Moon-on-Sun pair and any
+    // Mercury / Venus transit; off-event the loop short-circuits on
+    // `count == 0` and the V-51c golden frames stay bit-identical.
     let totality_weight = clamp(camera.solar_eclipse_state.z, 0.0, 1.0);
     // `sun_moon_sep` is reused by the V-51c corona scissor below to mute
     // the Baumbach term inside the lunar disk during totality.
@@ -468,10 +467,12 @@ fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixe
         let moon_luminance = max(camera.moon_eq_illuminance.w, 0.0) / max(moon_solid_angle, 1e-8);
         let phase = lunar_phase_lambert(ray_dir, moon_dir, sun_dir, moon_radius);
         let earth_shadow = clamp(camera.moon_disk.w, 0.0, 1.0);
-        // V-51b: subtract any front disks targeting the Moon (reserved
-        // for V-51d/f planet-behind-Moon edge cases; empty in V-51b so
-        // the multiplicand is 1.0 and the V-51c golden frame stays
-        // bit-identical).
+        // V-51b: subtract any front disks targeting the Moon. No
+        // producer emits an `OccluderTarget::Moon` entry today (V-51d
+        // makes the Moon a front disk, V-51f only pairs planets), so
+        // the multiplicand stays 1.0 and the V-51c golden frame is
+        // unaffected; the wiring remains in place for future slices
+        // that may emit planet-behind-Moon edge cases.
         rgb += hdr_flux_from_cd_m2(vec3<f32>(1.01, 1.0, 0.82) * moon_luminance * phase * (1.0 - 0.88 * earth_shadow), zeropoint)
             * disk_mask(ray_dir, moon_dir, moon_radius, pixel_sr)
             * (1.0 - moon_subtract);
