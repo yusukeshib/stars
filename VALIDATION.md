@@ -123,10 +123,19 @@ Current limitation:
 - `L-06` still tracks higher-precision DE440 / publication-grade ephemeris
   work. Do not describe the current stack as final research-grade ephemerides.
 - The Galilean-moon backend ships at Meeus 1998 ch. 44 accuracy (V-52b):
-  good for naked-eye / small-eyepiece identification near J2000, drifting
-  to arcminute-scale errors at the edges of the ±100-yr roadmap budget.
-  The full Lieske 1998 E5 precision upgrade with a Horizons-anchored
-  ~5″ gate is tracked as the dedicated rung `V-52b-E5`.
+  good for naked-eye / small-eyepiece identification near J2000. The
+  pinned Horizons fixture (`data/horizons_galilean_moons.csv`,
+  manifest id `horizons-galilean-moons-fixture`) at 1900 / 2000 /
+  2100 epochs shows the in-plane RA-component offset error stays
+  below ≈45″ across ±100 yr, while the out-of-plane Dec component
+  rises to ≈180″ for Callisto at 2100 (the Meeus simplification
+  drops the orbital inclination tilt, which dominates the weak
+  axis). The full Lieske 1998 E5 precision upgrade tightens this
+  budget to ~5″ across all four moons at every fixture epoch and is
+  tracked as the dedicated rung `V-52b-E5` — that PR replaces the
+  body of `lieske_e5::jovicentric_offset` and edits the single
+  constant `MEEUS_GRADE_MAX_OFFSET_ERR_ARCSEC` in
+  `moons::tests` from 200″ down to ≈5″.
 - The Titan backend ships at Meeus 1998 ch. 45 accuracy (V-52c) — the
   same simplification of the TASS theory of Vienne & Duriez 1995 that
   the `astro` crate implements — with the same accuracy posture as the

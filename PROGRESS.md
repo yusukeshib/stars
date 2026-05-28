@@ -541,6 +541,108 @@ Hosts wired: CLI / viewer / web (all driven by the shared
 
 ---
 
+||||||| parent of 9c94053 (V-52b-E5: Lieske 1998 E5 scaffold + Horizons reference fixture)
+### Galilean moons — Lieske 1998 E5 precision upgrade scaffold (`V-52b-E5`)
+
+`V-52b-E5` is the precision-upgrade follow-on to `V-52b`: replace the
+Meeus 1998 ch. 44 truncation currently producing the Jovicentric
+sky-plane offsets with the full Lieske 1998 E5 trigonometric series so
+the apparent positions of Io / Europa / Ganymede / Callisto stay
+within ~5″ of JPL Horizons across the ROADMAP ±100-yr budget. The
+full coefficient transcription requires its own dedicated validation
+matrix; this slice lands the substitution-point module structure, the
+pinned Horizons reference fixture, and the test gate the follow-up
+PR will tighten.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/moons/lieske_e5.rs` (new): substitution-point
+  module with `JovicentricOffset`, `jovicentric_offset`, and
+  `MoonSeriesShape`. The body of `jovicentric_offset` currently
+  delegates to the Meeus truncation via the `astro` crate (same
+  numerical result `V-52b` shipped) and carries a `TODO(V-52b-E5)`
+  block sketching the future evaluator (per-moon ξ / V / ζ trig sums,
+  the `dG` Jupiter–Saturn long-period inequality, and the `qqdot`
+  rotation matrix into J2000 mean equator). `MoonSeriesShape` pins the
+  Lieske 1998 per-moon term counts (Io: 10/41/7; Europa: 24/66/11;
+  Ganymede: 31/75/13; Callisto: 49/89/18 — the same numbers Jay
+  Lieske's reference `galsat` Fortran exposes), so the follow-up's
+  coefficient parser has a free shape sanity-check.
+- `crates/astronomy/src/moons.rs`: routes the Jovicentric offset
+  computation through `lieske_e5::jovicentric_offset` and promotes
+  `GalileanMoon::astro` to `pub(crate)` so the submodule can call into
+  it. Public API (`apparent_galilean_moons{,_topocentric}`,
+  `GalileanMoonApparent`) is unchanged — the renderer and hosts pick
+  up the upgrade transparently when the precision PR lands.
+- `data/horizons_galilean_moons.csv` (new, manifest id
+  `horizons-galilean-moons-fixture`): geocentric ICRF apparent
+  RA / Dec / range / range-rate for Jupiter + the four Galilean moons
+  at three epochs spanning ±100 years (1900 / 2000 / 2100 UT).
+- `scripts/fetch-horizons-galilean-moons.sh` (new): bash regenerator
+  hitting the public JPL Horizons API.
+- `data/manifest.toml`: new generated-artifact row for the fixture
+  (with provenance, license, and the regeneration command).
+
+Shipped capabilities:
+
+- Substitution point exists and is reached by both the geocentric and
+  topocentric Galilean-moon code paths. Replacing the body of
+  `lieske_e5::jovicentric_offset` in a follow-on PR cascades through
+  every host without further changes.
+- The 5-row × 3-epoch Horizons fixture is now committed and pinned by
+  `make manifest-check`.
+- `moons::tests::meeus_grade_matches_horizons_within_meeus_budget`
+  computes the *Jovicentric* sky-plane offset error between the
+  current Meeus-grade model and the Horizons fixture for every
+  (moon, epoch) pair (precession-invariant because moon and Jupiter
+  share the rotation) and asserts it stays under the
+  `MEEUS_GRADE_MAX_OFFSET_ERR_ARCSEC = 200.0`″ band. The `V-52b-E5`
+  precision upgrade tightens that constant to ~5″ once the Lieske
+  series is wired through.
+- `lieske_e5::tests::series_shape_matches_lieske_galsat_counts` pins
+  the per-moon ξ / V / ζ term counts so a transcribed coefficient
+  table that diverges from Lieske 1998's published shape fails the
+  build at parse time.
+
+Validation observations (Meeus-grade, against the pinned Horizons
+fixture):
+
+- 1900-01-01 UT: max per-moon Jovicentric-offset error ≈37″
+  (Ganymede), min ≈2″ (Io).
+- 2000-01-01 UT: max ≈151″ (Callisto), driven by the out-of-plane
+  Dec-component error the Meeus simplification drops.
+- 2100-01-01 UT: max ≈180″ (Callisto), same failure mode.
+- The in-plane RA component error stays under ≈45″ at every epoch;
+  the Dec component is the weak axis the full Lieske E5 series
+  closes.
+
+Deliberately out of scope for this slice:
+
+- The full Lieske 1998 E5 trigonometric series transcription
+  (≈700 coefficients + ≈700 argument / rate pairs across the four
+  moons, plus the `dG` long-period inequality and the rotation
+  matrix). Tracked as the rest of `V-52b-E5`.
+- Densifying the Horizons fixture (more epochs, topocentric sites
+  for diurnal-parallax pins) — explicitly part of the precision PR.
+- Velocity-branch outputs (`samjay` / `samjap` distinction in
+  Lieske's reference Fortran). The renderer only needs positions,
+  so the velocity branch is left out for now.
+
+References (also pinned in ROADMAP `V-52b-E5`):
+
+- Lieske, J. H. 1998, A&AS 129, 205 (E5 theory — the target).
+- Lieske, J. H. 1977, A&A 56, 333 (E2 theory — introduces the
+  ξ / V / ζ decomposition).
+- Lieske, J. H. 1977, JPL Engineering Memorandum 314-112 (companion
+  partials / barycenter-to-Jupiter correction routines).
+- JPL Horizons On-Line Ephemeris System
+  (https://ssd.jpl.nasa.gov/horizons/) — the reference the precision
+  gate is anchored against.
+
+Hosts wired: unchanged — already CLI / viewer / web through `V-52b`.
+
+---
+
 ### Galilean moons (`V-52b`)
 
 Second slice of `V-52` (planetary rings and moons): Io, Europa,
