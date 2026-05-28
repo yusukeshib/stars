@@ -414,6 +414,109 @@ gibbous appears as a ~24 % waning crescent). The sign is now `-moon_dir`,
 matching the geometric convention that `moon_dir` points from the observer to
 the Moon.
 
+### Galilean moons (`V-52b`)
+
+Second slice of `V-52` (planetary rings and moons): Io, Europa,
+Ganymede, and Callisto now render as point sources next to Jupiter,
+routed through the same magnitude-to-flux pipeline as the planets and
+labelled behind the existing planet-labels overlay layer. Their
+orbital positions come from Meeus 1998 *Astronomical Algorithms* ch. 44
+(a low-precision reduction of Lieske's E5 theory) — enough for
+naked-eye / small-eyepiece identification across the next few decades
+but not the full ROADMAP ±100-yr / ~5″ accuracy gate. The precision
+upgrade is tracked as the dedicated follow-on rung `V-52b-E5`.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/moons.rs` (new): `GalileanMoon` enum,
+  `GalileanMoonApparent`, and the
+  `apparent_galilean_moons{,_topocentric}` API mirroring the planet /
+  Saturn-ring shape.
+- `crates/astronomy/src/ephemeris.rs`: four equatorial / observer
+  helpers promoted to `pub(crate)` so the new module can reuse them
+  without duplicating SOFA-style math.
+- `crates/renderer/src/camera.rs`: extends `PlanetUniforms` and
+  `CameraUniform` with a `galilean_eq_radius[4]` /
+  `galilean_rgb_magnitude[4]` / `galilean_params` block, populated in
+  `Camera::planet_uniforms` and routed through the existing
+  `apparent_disk_direction_j2000` refraction pipeline.
+- `crates/renderer/src/shaders/skyglow.wgsl`: new
+  `galilean_disk_radiance` evaluator added to the per-pixel sum.
+- `crates/renderer/src/shaders/star.wgsl`: padding fields to keep the
+  WGSL view of `CameraUniform` aligned with the host struct (same
+  pattern as `V-52a`).
+- `crates/renderer/src/text.rs`: `GALILEAN_LABELS` registered as a
+  candidate batch inside the existing planet-labels overlay branch.
+
+Shipped capabilities:
+
+- Per-moon topocentric `(RA, Dec, distance_au, angular_radius_rad,
+  magnitude)` from `apparent_galilean_moons_topocentric(observer)`,
+  with the four moons returned in Lieske's canonical I-II-III-IV order.
+- Apparent magnitudes from Meeus 1998 table 41.A reduced `V(1,0)`
+  values plus the standard `5·log10(r·Δ)` distance term, evaluated
+  against Jupiter's heliocentric / geocentric distances.
+- Surface colour palette tuned for naked-eye eyepiece use (Io: sulfur
+  yellow; Europa: water-ice white; Ganymede: tan-grey; Callisto: dark
+  grey-tan); rendered as point sources because the largest Galilean
+  disc (Ganymede at ~1.7″) is sub-pixel at every supported FoV.
+- Labels share the existing planet-labels overlay toggle and inherit
+  the same colour family.
+- Same `planets_enabled` host gate as Jupiter itself, so CLI
+  `--no-planets`, the viewer toggle, and the web `set_planets_enabled`
+  WASM hook all turn the moons off in one motion. No new session
+  schema field or UI control was added in this slice.
+
+Validation (Meeus-grade):
+
+- `moons_returned_in_canonical_order` pins the I-II-III-IV ordering of
+  `GalileanMoon::ALL`.
+- `moons_stay_within_max_elongation_from_jupiter` confirms each moon's
+  apparent separation from Jupiter at J2000 stays within its tabulated
+  maximum elongation (Io ≲ 2.4′, Callisto ≲ 10.7′ at closest opposition).
+- `moons_have_distinct_positions` pins pairwise separations > 1″ at
+  J2000.
+- `moons_have_plausible_magnitudes_near_opposition` cross-checks the
+  `V(1,0) + 5·log10(r·Δ)` formula against the standard near-opposition
+  V values `[5.0, 5.3, 4.6, 5.7]` within ±0.4 mag.
+- `moons_evolve_over_one_io_period` confirms Io's sky-plane offset
+  reverses across half its 1.77-day orbital period.
+- `topocentric_matches_geocentric_within_parallax` checks the
+  topocentric path agrees with the geocentric one within ≈10″ (the
+  Earth-radius parallax bound at Jupiter's mean distance).
+- `moon_unit_direction_is_normalised` pins
+  `GalileanMoonApparent::direction_equatorial` as a unit vector.
+
+Deliberately out of scope for this slice:
+
+- The ROADMAP `~5″ / ±100-yr` accuracy gate — tracked by
+  `V-52b-E5`, which will swap in the full Lieske 1998 series without
+  changing the host-facing API.
+- `jupiter-eyepiece` validation-gallery scene preset — deferred to a
+  small follow-up PR so the preset JSON-export pipeline and its
+  round-trip tests bump together, mirroring the `saturn-eyepiece`
+  deferral from `V-52a`.
+- Shadow / occultation transits on the Jovian disk and mutual
+  occultations between the moons — owned by `V-52d`, which will
+  reuse the geometry produced here and the `V-51b` analytic-mask
+  occluder array.
+
+References (also pinned in ROADMAP `V-52b`):
+
+- Meeus, J. 1998, *Astronomical Algorithms*, 2nd ed., ch. 44
+  ("Positions of the Satellites of Jupiter").
+- Lieske, J. H. 1977, A&A 56, 333 (E2 theory — origin of the
+  coefficient family Meeus simplifies).
+- Lieske, J. H. 1998, A&AS 129, 205 (E5 theory — ROADMAP target for
+  the `V-52b-E5` precision upgrade).
+- Archinal, B. A. et al. 2018, CMDA 130, 22 (Galilean physical radii
+  and IAU WGCCRE rotation parameters).
+
+Hosts wired: CLI / viewer / web (all driven by the shared
+`planets_enabled` flag).
+
+---
+
 ### Saturn ring system (`V-52a`)
 
 First slice of `V-52` (planetary rings and moons): Saturn now renders

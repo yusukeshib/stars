@@ -11,7 +11,9 @@ use std::borrow::Cow;
 use std::cell::Cell;
 use wgpu::util::DeviceExt;
 
-use crate::camera::{Camera, CameraUniform, PlanetUniforms, PLANET_UNIFORM_COUNT};
+use crate::camera::{
+    Camera, CameraUniform, PlanetUniforms, GALILEAN_UNIFORM_COUNT, PLANET_UNIFORM_COUNT,
+};
 use crate::overlay::{OverlayConfig, OverlayKind};
 
 // The generated `label_data.rs` is included as if it were written inline.
@@ -43,6 +45,10 @@ const MAX_TEXT_VERTICES: usize = 96_000;
 const PLANET_LABELS: [&str; PLANET_UNIFORM_COUNT] = [
     "Mercury", "Venus", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune",
 ];
+
+/// V-52b: labels for the four Galilean moons, in the same order as
+/// `astronomy::GalileanMoon::ALL` and the `galilean_eq_radius` uniform.
+const GALILEAN_LABELS: [&str; GALILEAN_UNIFORM_COUNT] = ["Io", "Europa", "Ganymede", "Callisto"];
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -497,6 +503,27 @@ impl TextRenderer {
                     priority: -200.0 + planet_uniforms.rgb_magnitude[idx][3],
                     placement: LabelPlacement::LeftAlignedToAnchor,
                 });
+            }
+            // V-52b: Galilean-moon labels share the planet-labels overlay
+            // toggle and inherit the same colour family. Their priority is
+            // ranked just behind the planets themselves so the host
+            // collision-resolver drops them first when crowding around
+            // Jupiter is bad in the eyepiece view.
+            if planet_uniforms.galilean_params[1] > 0.5 {
+                for (idx, label) in GALILEAN_LABELS.iter().enumerate() {
+                    let g = planet_uniforms.galilean_eq_radius[idx];
+                    if g[3] <= 0.0 {
+                        continue;
+                    }
+                    out.push(LabelCandidate {
+                        frame: LabelFrame::Equatorial,
+                        position: [g[0], g[1], g[2]],
+                        text: Cow::Borrowed(label),
+                        color: [0.95, 0.90, 0.62, alpha],
+                        priority: -190.0 + planet_uniforms.galilean_rgb_magnitude[idx][3],
+                        placement: LabelPlacement::LeftAlignedToAnchor,
+                    });
+                }
             }
         }
         if self.config.cardinals {

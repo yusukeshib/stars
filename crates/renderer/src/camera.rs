@@ -1,8 +1,9 @@
 use astronomy::{
-    active_occluders, apparent_planets_topocentric, apparent_saturn_ring_topocentric,
-    earth_velocity_over_c_j2000, equation_of_equinoxes, equatorial_to_horizontal_matrix,
-    illuminants, lmst_radians, precession_nutation_matrix, solar_eclipse_state, years_since_j2000,
-    Observer, Planet, SolarEclipseKind, SunMoonApparent, MAX_OCCLUDERS,
+    active_occluders, apparent_galilean_moons_topocentric, apparent_planets_topocentric,
+    apparent_saturn_ring_topocentric, earth_velocity_over_c_j2000, equation_of_equinoxes,
+    equatorial_to_horizontal_matrix, illuminants, lmst_radians, precession_nutation_matrix,
+    solar_eclipse_state, years_since_j2000, GalileanMoon, Observer, Planet, SolarEclipseKind,
+    SunMoonApparent, MAX_OCCLUDERS,
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -252,6 +253,23 @@ pub(crate) struct CameraUniform {
     /// * `enabled` is `1.0` when the ring pass should fire (Saturn above the
     ///   horizon and planets globally on), `0.0` otherwise.
     pub saturn_ring_state: [f32; 4],
+    /// V-52b Galilean-moon directions in J2000 equatorial coordinates.
+    /// `xyz` is the unit direction toward each moon (refracted near the
+    /// horizon when atmosphere is enabled, identical to the planet path);
+    /// `w` is the moon's physical angular radius in radians. The Galilean
+    /// moons are sub-pixel at every naked-eye / small-eyepiece FoV so the
+    /// shader actually renders them as point sources, but the angular
+    /// radius is kept here to mirror the planet uniform shape and to let a
+    /// future telescope-grade renderer resolve them.
+    pub galilean_eq_radius: GalileanEqRadiusUniform,
+    /// V-52b Galilean-moon display colour in linear RGB. `w` is apparent
+    /// visual magnitude (Meeus 1998 ch. 44 reduced magnitude + `5·log10(rΔ)`).
+    pub galilean_rgb_magnitude: GalileanRgbMagnitudeUniform,
+    /// V-52b Galilean-moon control header:
+    /// `[count, enabled, reserved, reserved]`. `count` is `GALILEAN_UNIFORM_COUNT`
+    /// as an `f32`; `enabled` is `1.0` when Jupiter is above the horizon and
+    /// planets are globally on, `0.0` otherwise.
+    pub galilean_params: [f32; 4],
     /// Hošek-Wilkie 2012 RGB sky-dome coefficients pre-cooked on the host
     /// each frame (V-38). Nine `vec4`s; row `i` holds the per-channel `i`-th
     /// analytic coefficient (A..I) as `(R, G, B, _)`. Unused when
@@ -324,6 +342,13 @@ pub(crate) const PLANET_UNIFORM_COUNT: usize = 7;
 pub(crate) type PlanetEqRadiusUniform = [[f32; 4]; PLANET_UNIFORM_COUNT];
 pub(crate) type PlanetRgbMagnitudeUniform = [[f32; 4]; PLANET_UNIFORM_COUNT];
 
+/// V-52b: number of Galilean moons rendered as point sources next to
+/// Jupiter. Mirrored by the `galilean_eq_radius` array length in
+/// `shaders/skyglow.wgsl` and `shaders/star.wgsl`.
+pub(crate) const GALILEAN_UNIFORM_COUNT: usize = 4;
+pub(crate) type GalileanEqRadiusUniform = [[f32; 4]; GALILEAN_UNIFORM_COUNT];
+pub(crate) type GalileanRgbMagnitudeUniform = [[f32; 4]; GALILEAN_UNIFORM_COUNT];
+
 /// Cached renderer-facing planet uniforms. Computing VSOP87 planet states is
 /// orders of magnitude more expensive than rebuilding the camera matrices, so
 /// `Renderer` reuses this between coarse ephemeris refreshes while still
@@ -337,6 +362,12 @@ pub(crate) struct PlanetUniforms {
     /// [`CameraUniform::saturn_ring_pole_sinb`] / [`CameraUniform::saturn_ring_state`].
     pub saturn_ring_pole_sinb: [f32; 4],
     pub saturn_ring_state: [f32; 4],
+    /// V-52b Galilean-moon uniform block; mirrors
+    /// [`CameraUniform::galilean_eq_radius`] / [`CameraUniform::galilean_rgb_magnitude`]
+    /// / [`CameraUniform::galilean_params`].
+    pub galilean_eq_radius: GalileanEqRadiusUniform,
+    pub galilean_rgb_magnitude: GalileanRgbMagnitudeUniform,
+    pub galilean_params: [f32; 4],
 }
 
 impl PlanetUniforms {
@@ -347,6 +378,9 @@ impl PlanetUniforms {
             params: [PLANET_UNIFORM_COUNT as f32, 0.0, 0.0, 0.0],
             saturn_ring_pole_sinb: [0.0; 4],
             saturn_ring_state: [0.0; 4],
+            galilean_eq_radius: [[0.0; 4]; GALILEAN_UNIFORM_COUNT],
+            galilean_rgb_magnitude: [[0.0; 4]; GALILEAN_UNIFORM_COUNT],
+            galilean_params: [GALILEAN_UNIFORM_COUNT as f32, 0.0, 0.0, 0.0],
         }
     }
 }
@@ -814,6 +848,20 @@ fn planet_linear_rgb(planet: Planet) -> [f32; 3] {
     }
 }
 
+/// V-52b Galilean-moon display colour in linear RGB. Surface colours follow
+/// the standard amateur-imaging tints (Io: sulfur yellow; Europa: water-ice
+/// white; Ganymede: tan-grey; Callisto: dark grey-tan), softened toward the
+/// Sun-illumination colour so the moons sit next to Jupiter without an
+/// implausible chroma jump in the eyepiece.
+fn galilean_linear_rgb(moon: GalileanMoon) -> [f32; 3] {
+    match moon {
+        GalileanMoon::Io => [1.00, 0.86, 0.55],
+        GalileanMoon::Europa => [0.95, 0.93, 0.88],
+        GalileanMoon::Ganymede => [0.90, 0.84, 0.74],
+        GalileanMoon::Callisto => [0.78, 0.74, 0.68],
+    }
+}
+
 impl LocalView {
     /// Return a finite, renderer-safe view.
     ///
@@ -1208,12 +1256,40 @@ impl Camera {
         ];
         let saturn_ring_state = [ring.sub_sun_lat_rad.sin() as f32, 1.0, 0.0, 0.0];
 
+        // V-52b Galilean moons. Same `apparent_disk_direction_j2000` pipeline
+        // as the planets so refraction near the horizon stays consistent with
+        // Jupiter, and so the shader-side direction lands in the J2000 frame
+        // the camera uniform already publishes.
+        let mut galilean_eq_radius = [[0.0; 4]; GALILEAN_UNIFORM_COUNT];
+        let mut galilean_rgb_magnitude = [[0.0; 4]; GALILEAN_UNIFORM_COUNT];
+        for (idx, moon) in apparent_galilean_moons_topocentric(self.observer)
+            .iter()
+            .enumerate()
+        {
+            let dir = apparent_disk_direction_j2000(
+                moon.direction_equatorial(),
+                self.atmosphere.sunlit_scattering,
+                pressure_hpa,
+                temperature_c,
+                date_to_local,
+                local_to_date,
+                date_to_j2000,
+            );
+            let rgb = galilean_linear_rgb(moon.moon);
+            galilean_eq_radius[idx] = [dir.x, dir.y, dir.z, moon.angular_radius_rad as f32];
+            galilean_rgb_magnitude[idx] = [rgb[0], rgb[1], rgb[2], moon.magnitude as f32];
+        }
+        let galilean_params = [GALILEAN_UNIFORM_COUNT as f32, 1.0, 0.0, 0.0];
+
         PlanetUniforms {
             eq_radius,
             rgb_magnitude,
             params: [PLANET_UNIFORM_COUNT as f32, 1.0, 0.0, 0.0],
             saturn_ring_pole_sinb,
             saturn_ring_state,
+            galilean_eq_radius,
+            galilean_rgb_magnitude,
+            galilean_params,
         }
     }
 
@@ -1534,6 +1610,9 @@ impl Camera {
             planet_params: planet_uniforms.params,
             saturn_ring_pole_sinb: planet_uniforms.saturn_ring_pole_sinb,
             saturn_ring_state: planet_uniforms.saturn_ring_state,
+            galilean_eq_radius: planet_uniforms.galilean_eq_radius,
+            galilean_rgb_magnitude: planet_uniforms.galilean_rgb_magnitude,
+            galilean_params: planet_uniforms.galilean_params,
             hw_coeffs,
             hw_radiance,
             scintillation_params,

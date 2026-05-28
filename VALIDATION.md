@@ -101,8 +101,8 @@ Current limitation:
 
 ### Solar-system positions
 
-Current implementation includes visually useful Sun, Moon, and planet apparent /
-topocentric inputs.
+Current implementation includes visually useful Sun, Moon, planet, Saturn
+ring, and Galilean-moon apparent / topocentric inputs.
 
 Validation expectation:
 
@@ -111,11 +111,18 @@ Validation expectation:
 - Topocentric correction should be tested separately from geocentric direction
   where possible.
 - Angular radius and phase values should be pinned for simple dates.
+- Galilean-moon angular separations should respect each moon's maximum
+  apparent elongation from Jupiter.
 
 Current limitation:
 
 - `L-06` still tracks higher-precision DE440 / publication-grade ephemeris
   work. Do not describe the current stack as final research-grade ephemerides.
+- The Galilean-moon backend ships at Meeus 1998 ch. 44 accuracy (V-52b):
+  good for naked-eye / small-eyepiece identification near J2000, drifting
+  to arcminute-scale errors at the edges of the ±100-yr roadmap budget.
+  The full Lieske 1998 E5 precision upgrade with a Horizons-anchored
+  ~5″ gate is tracked as the dedicated rung `V-52b-E5`.
 
 ### Eclipse / occultation geometry (`V-51`)
 
