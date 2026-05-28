@@ -8,12 +8,13 @@ use renderer::{
     DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
-    atmosphere_from_args, eyepiece_from_args, hyg_catalog_snapshot, load_session,
-    load_star_instances_from_file, overlay_config_from_args, parse_time_to_time_scales,
-    save_session, scene_from_preset, scene_preset_infos, scintillation_from_args,
-    viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg, CorrectionSnapshot,
-    ExternalViewpointOverrides, EyepieceOverrides, OverlayArg, ProjectionArg, ScenePresetArg,
-    ScintillationOverrides, SessionScene, StarSession, ViewpointArg,
+    atmosphere_from_args, eyepiece_from_args, hyg_catalog_snapshot, light_pollution_from_args,
+    load_session, load_star_instances_from_file, overlay_config_from_args,
+    parse_time_to_time_scales, save_session, scene_from_preset, scene_preset_infos,
+    scintillation_from_args, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
+    CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides, LightPollutionOverrides,
+    OverlayArg, ProjectionArg, ScenePresetArg, ScintillationOverrides, SessionScene, StarSession,
+    ViewpointArg,
 };
 
 /// Render the night sky as seen from a given observer to a PNG.
@@ -197,6 +198,33 @@ struct Args {
     #[arg(long)]
     surface_albedo: Option<f32>,
 
+    /// V-39 light-pollution Bortle class (1..=9). Class 1 = rural dark sky
+    /// (default), Class 9 = inner-city. Mutually exclusive with `--sqm`;
+    /// `--bortle` wins if both are passed. Adds a sodium / LED-tinted
+    /// Garstang-scaled artificial sky-glow to the dark-sky composition
+    /// before extinction.
+    #[arg(long)]
+    bortle: Option<u8>,
+
+    /// V-39 light-pollution manual zenith SQM reading in V mag/arcsec².
+    /// Useful when the local Bortle class is unknown but a SQM-L
+    /// measurement is on hand. Clamped to `16.0..=22.0`.
+    #[arg(long)]
+    sqm: Option<f32>,
+
+    /// V-39 light-pollution observer (lat, lng) for the Falchi 2016 World
+    /// Atlas sample. Currently a `TODO(V-39-Atlas)` placeholder that falls
+    /// back to Bortle 1 + a log line; the schema is laid down so the
+    /// loader can ship in a follow-up PR without breaking sessions.
+    #[arg(long, num_args = 2, value_names = ["LAT", "LNG"], allow_hyphen_values = true)]
+    light_pollution_atlas: Option<Vec<f32>>,
+
+    /// Disable V-39 artificial light pollution: forces the Bortle 1 / dark
+    /// sky floor regardless of `--bortle` / `--sqm`. Matches the existing
+    /// `--no-extinction` / `--no-scintillation` flag-style.
+    #[arg(long)]
+    no_light_pollution: bool,
+
     /// Disable Mercury-through-Neptune rendering.
     #[arg(long)]
     no_planets: bool,
@@ -299,6 +327,17 @@ fn main() -> Result<()> {
                 seed: args.scintillation_seed,
             },
         );
+        let light_pollution = light_pollution_from_args(
+            args.no_light_pollution,
+            LightPollutionOverrides {
+                bortle: args.bortle,
+                sqm_mag_per_arcsec2: args.sqm,
+                atlas_lat_lng_deg: args.light_pollution_atlas.as_deref().and_then(|v| match v {
+                    [lat, lng] => Some((*lat, *lng)),
+                    _ => None,
+                }),
+            },
+        );
         let (viewpoint, external_viewpoint) = viewpoint_from_args(
             args.viewpoint,
             ExternalViewpointOverrides {
@@ -319,6 +358,7 @@ fn main() -> Result<()> {
             overlays,
             atmosphere_preset: args.atmosphere_preset.into(),
             atmosphere,
+            light_pollution,
             scintillation,
             planets_enabled: !args.no_planets,
             projection: args.projection.into(),
@@ -385,6 +425,7 @@ fn main() -> Result<()> {
         scene.view,
         scene.atmosphere,
         scene.scintillation,
+        scene.light_pollution,
         !args.no_skyglow,
         scene.planets_enabled,
         scene.projection,
@@ -433,6 +474,7 @@ async fn render_to_pixels(
     view: LocalView,
     atmosphere: Atmosphere,
     scintillation: renderer::Scintillation,
+    light_pollution: renderer::LightPollution,
     skyglow_enabled: bool,
     planets_enabled: bool,
     projection: renderer::SkyProjection,
@@ -492,6 +534,7 @@ async fn render_to_pixels(
     let mut camera = Camera::new(observer, view, width as f32 / height as f32);
     camera.atmosphere = atmosphere;
     camera.scintillation = scintillation;
+    camera.light_pollution = light_pollution;
     camera.planets_enabled = planets_enabled;
     camera.projection = projection;
     camera.viewpoint = viewpoint;

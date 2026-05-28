@@ -12,8 +12,8 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use astronomy::TimeScales;
 use renderer::{
-    Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation, LocalView, OverlayConfig,
-    OverlayKind, Scintillation, SkyProjection, SkyViewpoint,
+    Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView,
+    OverlayConfig, OverlayKind, Scintillation, SkyProjection, SkyViewpoint,
 };
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +21,12 @@ use crate::{AtmospherePresetArg, OverlayArg, ProjectionArg, ViewpointArg};
 
 /// Current JSON session schema. Increment when a breaking semantic change is
 /// made to any serialized field.
-pub const SESSION_SCHEMA_VERSION: u32 = 4;
+///
+/// v5: V-39 adds the `lightPollution` block (Bortle / SQM / atlas placeholder)
+/// to the session. The field is required in v5+; older sessions on the
+/// previous schema do not migrate forward automatically — the host must
+/// re-run `--write-session` to bump.
+pub const SESSION_SCHEMA_VERSION: u32 = 5;
 
 /// Complete scene/session file. Unknown future fields are ignored by serde, but
 /// the top-level schema version must match before a host uses the data.
@@ -37,6 +42,7 @@ pub struct StarSession {
     pub overlays: SessionOverlays,
     pub projection: SessionProjection,
     pub atmosphere: SessionAtmosphere,
+    pub light_pollution: SessionLightPollution,
     pub scintillation: SessionScintillation,
     pub planets: SessionPlanets,
     pub eyepiece: SessionEyepiece,
@@ -54,6 +60,7 @@ pub struct SessionScene {
     pub overlays: OverlayConfig,
     pub atmosphere_preset: AtmospherePreset,
     pub atmosphere: Atmosphere,
+    pub light_pollution: LightPollution,
     pub scintillation: Scintillation,
     pub planets_enabled: bool,
     pub projection: SkyProjection,
@@ -144,6 +151,125 @@ pub struct SessionAtmosphere {
     pub temperature_c: f32,
     /// Ground albedo seen by the V-38 Hošek-Wilkie daylight model.
     pub surface_albedo: f32,
+}
+
+/// V-39 light-pollution config: scales the dark-sky background by Bortle
+/// class, hand-entered SQM mag/arcsec², or a (deferred) Falchi 2016 atlas
+/// sample. The `kind` field selects the variant; the other fields are
+/// populated for that variant only. Unused fields serialise as `null` so
+/// the on-disk JSON stays human-readable.
+///
+/// The default is `kind = "bortle"` with `bortle = 1`, which reproduces
+/// the pre-V-39 dark-sky composition bit-for-bit.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionLightPollution {
+    /// Variant tag: `"bortle"`, `"sqm"`, or `"atlas-2016"`.
+    pub kind: SessionLightPollutionKind,
+    /// Bortle 2001 class index when `kind == Bortle`. `None` otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bortle: Option<u8>,
+    /// V-band zenith SQM reading in mag/arcsec² when `kind == Sqm`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sqm_mag_per_arcsec2: Option<f32>,
+    /// Observer latitude in decimal degrees, north positive, when
+    /// `kind == Atlas2016`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atlas_latitude_deg: Option<f32>,
+    /// Observer longitude in decimal degrees, east positive, when
+    /// `kind == Atlas2016`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atlas_longitude_deg: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SessionLightPollutionKind {
+    Bortle,
+    Sqm,
+    Atlas2016,
+}
+
+impl Default for SessionLightPollution {
+    fn default() -> Self {
+        Self::from(LightPollution::default())
+    }
+}
+
+impl From<LightPollution> for SessionLightPollution {
+    fn from(value: LightPollution) -> Self {
+        match value {
+            LightPollution::Bortle(class) => Self {
+                kind: SessionLightPollutionKind::Bortle,
+                bortle: Some(class),
+                sqm_mag_per_arcsec2: None,
+                atlas_latitude_deg: None,
+                atlas_longitude_deg: None,
+            },
+            LightPollution::Sqm(mu) => Self {
+                kind: SessionLightPollutionKind::Sqm,
+                bortle: None,
+                sqm_mag_per_arcsec2: Some(mu),
+                atlas_latitude_deg: None,
+                atlas_longitude_deg: None,
+            },
+            LightPollution::Atlas2016 {
+                latitude_deg,
+                longitude_deg,
+            } => Self {
+                kind: SessionLightPollutionKind::Atlas2016,
+                bortle: None,
+                sqm_mag_per_arcsec2: None,
+                atlas_latitude_deg: Some(latitude_deg),
+                atlas_longitude_deg: Some(longitude_deg),
+            },
+        }
+    }
+}
+
+impl SessionLightPollution {
+    pub fn to_light_pollution(self) -> Result<LightPollution> {
+        match self.kind {
+            SessionLightPollutionKind::Bortle => {
+                let class = self
+                    .bortle
+                    .context("lightPollution.kind=bortle requires bortle field")?;
+                if !(1..=9).contains(&class) {
+                    bail!("lightPollution.bortle={class} is outside 1..=9");
+                }
+                Ok(LightPollution::Bortle(class))
+            }
+            SessionLightPollutionKind::Sqm => {
+                let mu = self
+                    .sqm_mag_per_arcsec2
+                    .context("lightPollution.kind=sqm requires sqmMagPerArcsec2 field")?;
+                if !(16.0..=22.5).contains(&mu) {
+                    bail!(
+                        "lightPollution.sqmMagPerArcsec2={mu} is outside the supported 16.0..=22.5 mag/arcsec² range"
+                    );
+                }
+                Ok(LightPollution::Sqm(mu))
+            }
+            SessionLightPollutionKind::Atlas2016 => {
+                let latitude_deg = self
+                    .atlas_latitude_deg
+                    .context("lightPollution.kind=atlas-2016 requires atlasLatitudeDeg field")?;
+                let longitude_deg = self
+                    .atlas_longitude_deg
+                    .context("lightPollution.kind=atlas-2016 requires atlasLongitudeDeg field")?;
+                if !(-90.0..=90.0).contains(&latitude_deg) {
+                    bail!("lightPollution.atlasLatitudeDeg={latitude_deg} is outside -90..=90");
+                }
+                if !(-180.0..=180.0).contains(&longitude_deg) {
+                    bail!("lightPollution.atlasLongitudeDeg={longitude_deg} is outside -180..=180");
+                }
+                Ok(LightPollution::Atlas2016 {
+                    latitude_deg,
+                    longitude_deg,
+                })
+            }
+        }
+    }
 }
 
 /// Per-frame atmospheric scintillation state (V-24).
@@ -262,6 +388,7 @@ impl StarSession {
                 external: SessionExternalViewpoint::from(scene.external_viewpoint),
             },
             atmosphere: SessionAtmosphere::from_parts(scene.atmosphere_preset, scene.atmosphere),
+            light_pollution: SessionLightPollution::from(scene.light_pollution),
             scintillation: SessionScintillation::from(scene.scintillation),
             planets: SessionPlanets {
                 enabled: scene.planets_enabled,
@@ -344,6 +471,7 @@ impl StarSession {
             },
             atmosphere_preset,
             atmosphere: self.atmosphere.to_atmosphere()?,
+            light_pollution: self.light_pollution.to_light_pollution()?,
             scintillation: self.scintillation.to_scintillation()?,
             planets_enabled: self.planets.enabled,
             projection: self.projection.projection.into(),
@@ -702,6 +830,7 @@ mod tests {
             },
             atmosphere_preset: AtmospherePreset::ClearRural,
             atmosphere: Atmosphere::CLEAR_RURAL,
+            light_pollution: LightPollution::default(),
             scintillation: Scintillation::default(),
             planets_enabled: true,
             projection: SkyProjection::Perspective,
@@ -718,7 +847,7 @@ mod tests {
         let scene = sample_scene();
         let session = StarSession::from_scene("0.1.0", "test", &scene);
         let json = serde_json::to_string(&session).unwrap();
-        assert!(json.contains("\"schemaVersion\":4"));
+        assert!(json.contains("\"schemaVersion\":5"));
         assert!(json.contains("\"cardinal-labels\""));
         assert!(json.contains("\"scintillation\""));
         let parsed: StarSession = serde_json::from_str(&json).unwrap();
@@ -738,6 +867,48 @@ mod tests {
         let mut session = StarSession::from_scene("0.1.0", "test", &sample_scene());
         session.schema_version = SESSION_SCHEMA_VERSION + 1;
         assert!(session.to_scene().is_err());
+    }
+
+    #[test]
+    fn light_pollution_serializes_and_round_trips() {
+        for pollution in [
+            LightPollution::Bortle(1),
+            LightPollution::Bortle(5),
+            LightPollution::Bortle(8),
+            LightPollution::Sqm(19.5),
+            LightPollution::Atlas2016 {
+                latitude_deg: 35.68,
+                longitude_deg: 139.69,
+            },
+        ] {
+            let session_lp = SessionLightPollution::from(pollution);
+            let back = session_lp.to_light_pollution().unwrap();
+            assert_eq!(back, pollution, "round-trip failed for {pollution:?}");
+        }
+    }
+
+    #[test]
+    fn light_pollution_rejects_invalid_bortle_class() {
+        let session_lp = SessionLightPollution {
+            kind: SessionLightPollutionKind::Bortle,
+            bortle: Some(42),
+            sqm_mag_per_arcsec2: None,
+            atlas_latitude_deg: None,
+            atlas_longitude_deg: None,
+        };
+        assert!(session_lp.to_light_pollution().is_err());
+    }
+
+    #[test]
+    fn light_pollution_rejects_missing_kind_fields() {
+        let session_lp = SessionLightPollution {
+            kind: SessionLightPollutionKind::Sqm,
+            bortle: Some(3), // wrong field for kind=sqm; sqmMagPerArcsec2 is required.
+            sqm_mag_per_arcsec2: None,
+            atlas_latitude_deg: None,
+            atlas_longitude_deg: None,
+        };
+        assert!(session_lp.to_light_pollution().is_err());
     }
 
     #[test]

@@ -340,6 +340,19 @@ pub(crate) struct CameraUniform {
     /// V-51b active-occluder header: `x` = count
     /// (`<= MAX_OCCLUDERS` as an `f32`), `yzw` reserved.
     pub occluder_params: [f32; 4],
+    /// V-39 light-pollution state for the dark-sky composition:
+    /// `[artificial_zenith_s10, enabled, reserved, reserved]`.
+    /// * `artificial_zenith_s10` is the [`LightPollution::artificial_zenith_s10`]
+    ///   evaluation, in S10(V) units; zero means "Bortle 1 / dark sky" and
+    ///   the shader's artificial branch is fully optimised out.
+    /// * `enabled` is `1.0` when artificial sky-glow should be added before
+    ///   extinction; `0.0` matches a host that explicitly opts out so the
+    ///   pre-V-39 background is reproduced bit-for-bit.
+    pub light_pollution_state: [f32; 4],
+    /// V-39 artificial-sky-glow RGB tint (sodium / LED warm orange). `xyz`
+    /// is a linear-RGB triple normalised to a Rec.709 luminance of 1.0; `w`
+    /// is unused.
+    pub light_pollution_tint: [f32; 4],
 }
 
 /// Lower bound of the V-51c totality smoothstep on obscuration.
@@ -979,6 +992,13 @@ pub struct Camera {
     /// alongside the field of the same name they pass to
     /// `build_star_instance`.
     pub limiting_magnitude: f32,
+    /// V-39 observer-side artificial light pollution. The skyglow shader
+    /// adds a Garstang-scaled sodium/LED-tinted term to the dark-sky
+    /// composition *before* atmospheric extinction so that a Tokyo Bortle 8
+    /// session renders a bright, warm-orange zenith and an even brighter
+    /// horizon glow, while a Bortle 1 / rural site renders pixel-identically
+    /// to the pre-V-39 dark-sky pipeline.
+    pub light_pollution: astronomy::skyglow::LightPollution,
 }
 
 impl Camera {
@@ -995,6 +1015,7 @@ impl Camera {
             eyepiece: EyepieceSimulation::default(),
             scintillation: Scintillation::default(),
             limiting_magnitude: NAKED_EYE_LIMITING_MAGNITUDE,
+            light_pollution: astronomy::skyglow::LightPollution::default(),
         }
     }
 
@@ -1705,6 +1726,19 @@ impl Camera {
             solar_eclipse_state: solar_eclipse_state_uniform,
             occluders: occluders_uniform,
             occluder_params: occluder_params_uniform,
+            light_pollution_state: {
+                // The artificial term is fully optimised out for Bortle 1 /
+                // rural defaults: `artificial_zenith_s10()` returns 0 there,
+                // and the shader gates on `enabled > 0.5` so the dark-sky
+                // composition stays bit-identical to the pre-V-39 path.
+                let zenith_s10 = self.light_pollution.artificial_zenith_s10() as f32;
+                let enabled = if zenith_s10 > 0.0 { 1.0 } else { 0.0 };
+                [zenith_s10, enabled, 0.0, 0.0]
+            },
+            light_pollution_tint: {
+                let [r, g, b] = astronomy::skyglow::LightPollution::artificial_rgb_tint();
+                [r, g, b, 0.0]
+            },
         }
     }
 

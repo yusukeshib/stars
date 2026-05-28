@@ -112,6 +112,17 @@ struct CameraUniform {
     occluders: array<vec4<f32>, 32>,
     // V-51b active-occluder header: x = count, yzw reserved.
     occluder_params: vec4<f32>,
+    // V-39 light-pollution state. Layout:
+    // [artificial_zenith_s10, enabled, reserved, reserved].
+    // `artificial_zenith_s10` is the S10(V) excess over the natural floor
+    // pinned in `astronomy::skyglow::NATURAL_FLOOR_S10`. `enabled` is `1.0`
+    // when the artificial-skyglow term should be added before extinction.
+    // Bortle 1 / dark-sky default emits `0.0` for both, so the dark-sky
+    // composition stays bit-identical to the pre-V-39 path.
+    light_pollution_state: vec4<f32>,
+    // V-39 sodium / LED warm-orange RGB tint. xyz is a linear-RGB triple
+    // normalised to a Rec.709 luminance of 1.0; w is reserved.
+    light_pollution_tint: vec4<f32>,
 };
 
 // Stable shader codes for `OccluderTarget` (mirrors Rust).
@@ -1118,6 +1129,29 @@ fn airglow_radiance_rgb(altitude_rad: f32, zeropoint: f32, pixel_arcsec2: f32) -
     return s10_rgb * unit_flux * pixel_arcsec2;
 }
 
+// V-39 Garstang single-scattering kernel: relative artificial-skyglow
+// brightness as a function of zenith distance (radians). Capped at 85° so
+// horizon-grazing pixels do not blow up. Mirrors the Rust reference in
+// `astronomy::skyglow::garstang_zenith_distance_kernel`; a unit test pins
+// the table values, this WGSL port is the per-pixel evaluator.
+fn garstang_kernel(zenith_distance_rad: f32) -> f32 {
+    let z = clamp(zenith_distance_rad, 0.0, 85.0 * DEG_TO_RAD);
+    let sec_z = 1.0 / max(cos(z), 1e-6);
+    return 0.4 * sec_z + 0.6 * sec_z * sec_z;
+}
+
+// V-39 artificial-skyglow surface brightness in S10(V) at a given zenith
+// distance (radians). Reads `light_pollution_state.x` for the per-frame
+// zenith S10 excess; zero (Bortle 1) means the artificial term is
+// effectively switched off.
+fn artificial_skyglow_s10(zenith_distance_rad: f32) -> f32 {
+    let zenith_s10 = camera.light_pollution_state.x;
+    if zenith_s10 <= 0.0 {
+        return 0.0;
+    }
+    return zenith_s10 * garstang_kernel(zenith_distance_rad);
+}
+
 fn isl_mag_per_arcsec2(l_rad: f32, b_rad: f32) -> f32 {
     let l_deg = l_rad * RAD_TO_DEG;
     let b_deg = b_rad * RAD_TO_DEG;
@@ -1348,6 +1382,24 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let flux_per_arcsec2 = exp(NEG_OH_FOUR_LN10 * (mu - zeropoint));
     let flux_per_pixel = flux_per_arcsec2 * pixel_arcsec2;
 
+    // V-39: artificial-skyglow surface brightness in S10(V) at this pixel's
+    // zenith distance, evaluated *before* atmospheric extinction so a
+    // Bortle 8 city sky stays bright and warm-orange. The Garstang single-
+    // scattering kernel rises with zenith distance, making the horizon glow
+    // brighter than the zenith on a polluted night — the visual signature
+    // light-pollution observers report. Bortle 1 / dark-sky leaves
+    // `artificial_zenith_s10 == 0` so this branch is a free zero per pixel.
+    let sin_alt_for_lp = clamp(dot(ray_dir, camera.zenith_eq.xyz), -1.0, 1.0);
+    let zenith_distance = acos(sin_alt_for_lp);
+    let artificial_s10 = artificial_skyglow_s10(zenith_distance);
+    // Convert S10(V) to per-arcsec² flux on the renderer's HDR scale, then
+    // to per-pixel; same pipeline as the natural dark-sky term. The
+    // S10_TO_MAG_ARCSEC2_OFFSET constant is the magnitude of a 1 S10(V)
+    // surface, so per-arcsec² flux = artificial_s10 * 10^-0.4·(offset - zp).
+    let artificial_flux_per_arcsec2 = artificial_s10
+        * exp(NEG_OH_FOUR_LN10 * (S10_TO_MAG_ARCSEC2_OFFSET - zeropoint));
+    let artificial_flux_per_pixel = artificial_flux_per_arcsec2 * pixel_arcsec2;
+
     // Atmospheric extinction (same Schaefer 1993 / Kasten-Young 1989
     // pipeline as the star pass): per-channel `10^(-0.4 · k · X)`,
     // below-horizon → zero.
@@ -1377,7 +1429,18 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // mottle of a dark-site night sky.
     let alt_rad_airglow = asin(sin_alt);
     let airglow_flux = airglow_radiance_rgb(alt_rad_airglow, zeropoint, pixel_arcsec2);
-    let night_radiance = (tint * flux_per_pixel + airglow_flux) * attenuation;
+    // V-39 artificial sky-glow term: warm-orange sodium/LED tint multiplied
+    // by the per-pixel artificial flux, then passed through the same
+    // extinction as the natural dark-sky background. Gated on
+    // `light_pollution_state.y > 0.5` so Bortle 1 sessions emit zero here
+    // even if a host bug pushes a tiny non-zero zenith S10 through.
+    var artificial_radiance = vec3<f32>(0.0);
+    if camera.light_pollution_state.y > 0.5 {
+        artificial_radiance =
+            camera.light_pollution_tint.xyz * artificial_flux_per_pixel * attenuation;
+    }
+    let night_radiance =
+        (tint * flux_per_pixel + airglow_flux) * attenuation + artificial_radiance;
     let moon_radiance = moonlit_sky_radiance(ray_dir, sin_alt, zeropoint);
     let twilight_radiance = twilight_sky_radiance(ray_dir, sin_alt, zeropoint);
     let day_radiance = sunlit_scattering_radiance(ray_dir, sin_alt, zeropoint);

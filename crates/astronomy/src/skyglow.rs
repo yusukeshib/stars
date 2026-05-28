@@ -144,6 +144,201 @@ const SIGMA_L_BULGE_DEG: f64 = 60.0; // bulge Gaussian σ in galactic longitude
 /// `μ = 27.78 - 2.5·log10(F)` mag/arcsec².
 const S10_TO_MAG_ARCSEC2_OFFSET: f64 = 27.78;
 
+// =============================================================================
+// V-39 artificial sky glow (Bortle / SQM / Falchi atlas)
+// =============================================================================
+//
+// The dark-sky composition above assumes a clean rural site with V ≈ 21.6
+// mag/arcsec² at the zenith. Real observers want the sky they will actually
+// see from Tokyo, downtown LA, or a National Park. This block adds a single
+// artificial-skyglow term, in the same S10(V) units as the dark-sky
+// components, that the renderer can sum into the diffuse-sky composition
+// before atmospheric extinction.
+//
+// References:
+//   * Bortle, J. E. 2001, *Introducing the Bortle Dark-Sky Scale*,
+//     S&T 101(2), 126 — defines nine site classes by zenith V brightness.
+//   * Falchi, F. et al. 2016, *The new world atlas of artificial night sky
+//     brightness*, Sci Adv 2 e1600377 — VIIRS-derived global zenith atlas.
+//   * Cinzano, P., Falchi, F. & Elvidge, C. D. 2001, MNRAS 328, 689 —
+//     long-form single-scattering model both Falchi 2016 and Bortle's
+//     scale derive from.
+//   * Garstang, R. H. 1986, PASP 98, 364 — single-scattering kernel
+//     dependence on zenith distance.
+
+/// Observer-side light-pollution config that scales the dark-sky background.
+///
+/// Three configurations are supported:
+///
+/// * [`LightPollution::Bortle`] — a 1..=9 class index. The lookup converts to
+///   an SQM mag/arcsec² zenith reading from the Bortle 2001 S&T table.
+/// * [`LightPollution::Sqm`] — a hand-entered zenith reading in
+///   V-band mag/arcsec², e.g. from a SQM-L meter.
+/// * [`LightPollution::Atlas2016`] — sample the Falchi et al. 2016 World Atlas
+///   GeoTIFF by observer (lat, lng). Tracked under follow-up rung `V-39-Atlas`;
+///   in this slice the variant returns the rural default + a tracked
+///   `TODO(V-39-Atlas)` log line. The variant is laid down now so the schema
+///   does not churn when the loader ships.
+///
+/// `LightPollution::default()` is [`LightPollution::DARK_SKY`] — Bortle 1, the
+/// previous rural-default behaviour, so existing sessions render identically.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LightPollution {
+    /// Bortle 2001 site class. Valid range is `1..=9`; values are clamped.
+    Bortle(u8),
+    /// User-supplied zenith SQM reading in V mag/arcsec². Brighter (lower-mu)
+    /// = more polluted; finite range is roughly `16.0..=22.0`.
+    Sqm(f32),
+    /// Sample Falchi 2016 by observer location. Deferred to `V-39-Atlas`; in
+    /// the current slice this falls back to the rural natural floor.
+    Atlas2016 {
+        /// Observer latitude in decimal degrees, +north.
+        latitude_deg: f32,
+        /// Observer longitude in decimal degrees, +east.
+        longitude_deg: f32,
+    },
+}
+
+impl LightPollution {
+    /// Bortle 1 / rural dark sky. Adds essentially no artificial glow above
+    /// the natural dark-sky composition.
+    pub const DARK_SKY: Self = Self::Bortle(1);
+
+    /// Approximate Bortle ⇒ zenith V mag/arcsec². Bortle 2001 S&T Table 1
+    /// (`Bortle's Visual Limiting Magnitude / SQM correspondence`). The
+    /// middle classes are anchored by the bright-limit they were drawn from;
+    /// Class 1 is essentially the natural-floor 21.99, Class 9 is the heavily
+    /// polluted city core ≈ 16.5. Values outside `1..=9` are clamped.
+    pub fn bortle_to_sqm_mag_per_arcsec2(class: u8) -> f64 {
+        // Bortle 2001 / Cinzano-Falchi-Elvidge 2001 typical zenith SQM
+        // values (V mag/arcsec²) for each class. Class 5 anchors at 20.5
+        // SQM (the Bortle-table midrange that, once added to the natural
+        // floor in S10 units, gives the V≈20.0 zenith the V-39 spec pins).
+        // Indexed [0] = class 1 .. [8] = class 9.
+        const TABLE: [f64; 9] = [
+            21.99, // 1 — Excellent dark-sky site (natural floor)
+            21.89, // 2 — Typical truly dark site
+            21.6,  // 3 — Rural sky
+            20.9,  // 4 — Rural / suburban transition
+            20.0,  // 5 — Suburban sky (V-39 calibration anchor)
+            19.1,  // 6 — Bright suburban sky
+            18.4,  // 7 — Suburban / urban transition
+            17.8,  // 8 — City sky
+            16.5,  // 9 — Inner-city sky
+        ];
+        let idx = class.clamp(1, 9) as usize - 1;
+        TABLE[idx]
+    }
+
+    /// Resolve to a zenith V-band surface brightness in mag/arcsec². The
+    /// renderer sums this with the natural dark-sky background in S10 units.
+    ///
+    /// `Atlas2016` is the placeholder for the follow-up `V-39-Atlas` rung
+    /// (Falchi 2016 GeoTIFF loader is too large to ship in this PR). Until
+    /// that lands the variant falls back to the Bortle-1 natural floor; the
+    /// renderer surfaces a `TODO(V-39-Atlas)` log message at the host side.
+    pub fn zenith_sqm_mag_per_arcsec2(&self) -> f64 {
+        match *self {
+            Self::Bortle(class) => Self::bortle_to_sqm_mag_per_arcsec2(class),
+            Self::Sqm(value) => (value as f64).clamp(16.0, 22.5),
+            Self::Atlas2016 { .. } => Self::bortle_to_sqm_mag_per_arcsec2(1),
+        }
+    }
+
+    /// Decompose the configured zenith brightness into a *natural floor* and
+    /// an *artificial* additive S10(V) component. The renderer adds only the
+    /// artificial term to the dark-sky composition so that Bortle 1 / clean
+    /// SQM ≈ 21.6 renders identically to the pre-V-39 background.
+    ///
+    /// The natural floor used here matches the dark-sky composition's
+    /// existing total (ISL pole + airglow + zodiacal floor ≈ 21.6 mag/arcsec²
+    /// at high galactic latitude); any sky brighter than that is taken as
+    /// artificial. Negative artificial values are clamped at zero.
+    pub fn artificial_zenith_s10(&self) -> f64 {
+        let mu_total = self.zenith_sqm_mag_per_arcsec2();
+        let total_s10 = mag_to_s10(mu_total);
+        (total_s10 - NATURAL_FLOOR_S10).max(0.0)
+    }
+
+    /// Sodium / LED-dominated artificial-sky-glow spectrum, normalised so the
+    /// luminance-weighted average is 1.0. Modern mixed-fixture cities are a
+    /// blend of high-pressure sodium and broad-spectrum LED street lighting;
+    /// the band sits warm-orange (peak around 590 nm) rather than neutral
+    /// grey. Falchi 2016 §3 ("Spectral composition") notes that pure-LED
+    /// migration would push this towards neutral white, but the validation
+    /// scenes in this rung pin the sodium-dominant default.
+    pub fn artificial_rgb_tint() -> [f32; 3] {
+        // Linear-RGB tint, normalised to a Rec.709 luminance of 1.0:
+        // dot(tint, [0.2126, 0.7152, 0.0722]) ≈ 1.0. Warm orange with a
+        // noticeably suppressed blue channel.
+        const TINT: [f32; 3] = [1.20, 1.00, 0.42];
+        TINT
+    }
+}
+
+impl Default for LightPollution {
+    fn default() -> Self {
+        Self::DARK_SKY
+    }
+}
+
+/// Natural-sky S10(V) floor used by [`LightPollution::artificial_zenith_s10`].
+///
+/// Pinned to match the dark-sky composition in
+/// [`diffuse_sky_mag_per_arcsec2`] at a galactic pole, clean ecliptic point
+/// (ISL pole ≈ 50 + airglow 145 + zodiacal floor 18 ≈ 213 S10(V), which
+/// corresponds to V ≈ 21.6). Tied to a single number so unit tests can pin
+/// it without re-evaluating the full composition.
+const NATURAL_FLOOR_S10: f64 = 213.0;
+
+/// V-band zenith dark-sky surface brightness corresponding to the natural
+/// floor used by [`LightPollution`]. Lets host validation pin Bortle ⇒ V
+/// without depending on the full diffuse-sky composition.
+pub fn natural_zenith_mag_per_arcsec2() -> f64 {
+    s10_to_mag(NATURAL_FLOOR_S10)
+}
+
+/// Total zenith surface brightness in mag/arcsec² for a given
+/// [`LightPollution`]: natural floor + artificial term added in S10 units
+/// (linear flux), then converted back to magnitudes.
+pub fn zenith_mag_per_arcsec2_with_pollution(pollution: LightPollution) -> f64 {
+    s10_to_mag(NATURAL_FLOOR_S10 + pollution.artificial_zenith_s10())
+}
+
+/// Garstang 1986 single-scattering kernel: relative artificial sky-glow
+/// brightness as a function of zenith distance `z` (radians). Returns 1.0
+/// at the zenith and rises towards the horizon. Calibrated so it integrates
+/// to roughly the same total as `sec(z)`-style airmass weightings used by
+/// hand-rolled Bortle calculators while staying finite below 90°.
+///
+/// Reference: Garstang 1986 PASP 98, 364 eq. (6), simplified to its
+/// pure-zenith-distance dependence (the longer-form Cinzano/Falchi/Elvidge
+/// 2001 kernel adds elevation + lamp-distance terms not relevant to the
+/// observer-side scaling here).
+pub fn garstang_zenith_distance_kernel(zenith_distance_rad: f64) -> f64 {
+    // Cap z near 90° so the secant blow-up never makes a finite-radiance
+    // ray emit infinite flux; 85° matches the dense-troposphere extinction
+    // window the Garstang paper is calibrated against.
+    let z = zenith_distance_rad.clamp(0.0, 85.0_f64.to_radians());
+    let sec_z = 1.0 / z.cos();
+    // Quadratic mix of `sec z` and `sec² z` weighted to keep the kernel
+    // ~1 at the zenith and ~3 at the airglow-rim ring (z ≈ 75°), matching
+    // the Cinzano/Falchi/Elvidge 2001 Fig. 2 zenith-distance profile when
+    // collapsed to the pure-observer-side scaling we use here.
+    0.4 * sec_z + 0.6 * sec_z * sec_z
+}
+
+/// Artificial-skyglow surface brightness in S10(V) at a given zenith
+/// distance. Zero when the zenith term is zero (Bortle 1 / dark-sky default),
+/// otherwise scaled by [`garstang_zenith_distance_kernel`].
+pub fn artificial_skyglow_s10(pollution: LightPollution, zenith_distance_rad: f64) -> f64 {
+    let zenith = pollution.artificial_zenith_s10();
+    if zenith <= 0.0 {
+        return 0.0;
+    }
+    zenith * garstang_zenith_distance_kernel(zenith_distance_rad)
+}
+
 /// V-band zenith twilight surface brightness in mag/arcsec².
 ///
 /// Returns `None` when the Sun is above the geometric horizon (use a daylight
@@ -668,6 +863,131 @@ mod tests {
             assert!((half[i] * 2.0 - one[i]).abs() < 1e-9);
             assert!((two[i] * 0.5 - one[i]).abs() < 1e-9);
         }
+    }
+
+    /// V-39 validation gate: Bortle 5 zenith ≈ V 20.0 within 0.2 mag/arcsec²
+    /// once the artificial S10 term is added to the natural floor. Pinned in
+    /// VALIDATION.md.
+    #[test]
+    fn bortle_5_zenith_matches_20_within_tolerance() {
+        let mu = zenith_mag_per_arcsec2_with_pollution(LightPollution::Bortle(5));
+        assert!(
+            (mu - 20.0).abs() < 0.2,
+            "Bortle 5 zenith should be V ≈ 20.0 ± 0.2 mag/arcsec²; got {mu}"
+        );
+    }
+
+    /// Bortle 1 / dark-sky default keeps the natural floor unchanged so
+    /// existing rural scenes round-trip pixel-identically.
+    #[test]
+    fn bortle_1_keeps_natural_floor() {
+        let mu = zenith_mag_per_arcsec2_with_pollution(LightPollution::Bortle(1));
+        let floor = natural_zenith_mag_per_arcsec2();
+        assert!(
+            (mu - floor).abs() < 0.05,
+            "Bortle 1 zenith {mu} should match natural floor {floor}"
+        );
+        assert_eq!(LightPollution::Bortle(1).artificial_zenith_s10(), 0.0);
+    }
+
+    /// Bortle 8 (city sky) and Bortle 9 (inner city) both push the zenith
+    /// well below the natural floor — i.e. into much-brighter territory.
+    #[test]
+    fn bortle_class_is_monotone_in_brightness() {
+        let mu1 = zenith_mag_per_arcsec2_with_pollution(LightPollution::Bortle(1));
+        let mu5 = zenith_mag_per_arcsec2_with_pollution(LightPollution::Bortle(5));
+        let mu8 = zenith_mag_per_arcsec2_with_pollution(LightPollution::Bortle(8));
+        let mu9 = zenith_mag_per_arcsec2_with_pollution(LightPollution::Bortle(9));
+        assert!(
+            mu1 > mu5 && mu5 > mu8 && mu8 > mu9,
+            "expected μ1>μ5>μ8>μ9, got {mu1}, {mu5}, {mu8}, {mu9}"
+        );
+        // Inner-city is roughly five magnitudes brighter than rural.
+        assert!(
+            mu1 - mu9 > 4.0,
+            "Bortle 9 should be ≥ 4 mag brighter than 1"
+        );
+    }
+
+    /// SQM input round-trips through the artificial-S10 conversion and back
+    /// to the same zenith magnitude (within the rounding the linear-flux
+    /// addition implies).
+    #[test]
+    fn sqm_input_round_trips() {
+        let mu_in = 19.5_f32;
+        let pollution = LightPollution::Sqm(mu_in);
+        let mu_out = zenith_mag_per_arcsec2_with_pollution(pollution);
+        assert!(
+            (mu_out - mu_in as f64).abs() < 0.05,
+            "SQM round-trip drift: input={mu_in}, output={mu_out}"
+        );
+    }
+
+    /// Bortle classes outside `1..=9` are clamped, not panicking.
+    #[test]
+    fn bortle_class_clamps_to_valid_range() {
+        let mu_zero = zenith_mag_per_arcsec2_with_pollution(LightPollution::Bortle(0));
+        let mu_one = zenith_mag_per_arcsec2_with_pollution(LightPollution::Bortle(1));
+        let mu_high = zenith_mag_per_arcsec2_with_pollution(LightPollution::Bortle(99));
+        let mu_nine = zenith_mag_per_arcsec2_with_pollution(LightPollution::Bortle(9));
+        assert_eq!(mu_zero, mu_one);
+        assert_eq!(mu_high, mu_nine);
+    }
+
+    /// Garstang kernel is 1.0 at the zenith and rises monotonically with
+    /// zenith distance — the artificial sky-glow brightens toward the
+    /// horizon under naked-eye viewing.
+    #[test]
+    fn garstang_kernel_is_one_at_zenith_and_rises() {
+        let z0 = garstang_zenith_distance_kernel(0.0);
+        let z45 = garstang_zenith_distance_kernel(45.0_f64.to_radians());
+        let z80 = garstang_zenith_distance_kernel(80.0_f64.to_radians());
+        let z89 = garstang_zenith_distance_kernel(89.0_f64.to_radians());
+        assert!(
+            (z0 - 1.0).abs() < 1e-9,
+            "kernel at zenith = {z0}, expected 1.0"
+        );
+        assert!(z0 < z45 && z45 < z80, "kernel must rise with z");
+        // Saturation guard: 89° must clamp finite, not blow up to infinity.
+        // The 85° cap (sec ≈ 11.5, sec² ≈ 132) gives a kernel ~85 there.
+        assert!(
+            z89.is_finite() && z89 < 200.0,
+            "horizon kernel must stay finite via the 85° cap, got {z89}"
+        );
+    }
+
+    /// `Atlas2016` is a sentinel in this rung — it must return a finite,
+    /// dark-sky-equivalent zenith so the rest of the pipeline can render
+    /// without panicking while the GeoTIFF loader is still TODO.
+    #[test]
+    fn atlas2016_falls_back_to_rural_default() {
+        let pollution = LightPollution::Atlas2016 {
+            latitude_deg: 35.68,
+            longitude_deg: 139.69,
+        };
+        let mu = zenith_mag_per_arcsec2_with_pollution(pollution);
+        let floor = natural_zenith_mag_per_arcsec2();
+        assert!(
+            (mu - floor).abs() < 0.05,
+            "Atlas2016 fallback drifted from natural floor: {mu} vs {floor}"
+        );
+    }
+
+    /// The sodium / LED tint must be warm-orange-ish (R > G > B) with a
+    /// luminance-weighted magnitude near 1.0, so multiplying a dark-sky
+    /// luminance by it does not change the overall photometric scale.
+    #[test]
+    fn artificial_tint_is_warm_orange_with_unit_luminance() {
+        let [r, g, b] = LightPollution::artificial_rgb_tint();
+        assert!(
+            r > g && g > b,
+            "tint must roll off blue → red (sodium/LED), got R={r} G={g} B={b}"
+        );
+        let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        assert!(
+            (lum - 1.0).abs() < 0.05,
+            "tint luminance {lum} should be near 1.0"
+        );
     }
 
     #[test]

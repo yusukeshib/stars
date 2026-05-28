@@ -33,7 +33,9 @@ panel, or attached to a report.
 | Preset ID | Purpose | Main validation focus |
 |---|---|---|
 | `tokyo-tonight` | Fixed Tokyo summer evening scene. The name is mnemonic; the timestamp is pinned for reproducibility. | Default local perspective, overlays, labels, star/planet composition. |
+| `tokyo-bortle-8` | Same Tokyo evening framing as `tokyo-tonight`, pinned to V-39 Bortle 8 city-sky pollution + the hazy-urban atmosphere. | V-39 Bortle-8 artificial sky-glow: warm-orange sodium/LED tint, horizon-brighter Garstang fall-off, dimmed faint stars. |
 | `dark-sky` | Mauna Kea high-altitude dark-sky view. | Dark-sky glow, extinction, Milky Way band, high-altitude atmosphere. |
+| `dark-sky-bortle-1` | Same dark-sky scene pinned to V-39 Bortle 1 floor; equal to `dark-sky` by construction. | V-39 Bortle 1 default rendering pixel-identical to the pre-V-39 dark-sky pipeline. |
 | `noon` | Tokyo clear-sky local-noon view. | Daylight scattering, solar disk, star suppression by sky radiance. |
 | `sunset` | Tokyo western-horizon sunset. | Golden-hour colour, horizon haze, low-solar-altitude continuity. |
 | `civil-twilight` | Early post-sunset twilight. | Civil twilight band and day/night blend. |

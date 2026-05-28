@@ -6,14 +6,15 @@ use anyhow::Result;
 use astronomy::Observer;
 use clap::Parser;
 use renderer::{
-    Atmosphere, Camera, LocalView, OverlayConfig, Renderer, StarInstance,
+    Atmosphere, Camera, LightPollution, LocalView, OverlayConfig, Renderer, StarInstance,
     DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
-    atmosphere_from_args, eyepiece_from_args, load_session, load_star_instances_from_file,
-    overlay_config_from_args, parse_time_to_time_scales, scene_from_preset, scene_preset_infos,
-    scintillation_from_args, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
-    CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides, OverlayArg,
+    atmosphere_from_args, eyepiece_from_args, light_pollution_from_args, load_session,
+    load_star_instances_from_file, overlay_config_from_args, parse_time_to_time_scales,
+    scene_from_preset, scene_preset_infos, scintillation_from_args, viewpoint_from_args,
+    AtmosphereOverrides, AtmospherePresetArg, CatalogSnapshot, CorrectionSnapshot,
+    ExternalViewpointOverrides, EyepieceOverrides, LightPollutionOverrides, OverlayArg,
     ProjectionArg, ScenePresetArg, ScintillationOverrides, SessionScene, ViewpointArg,
 };
 use winit::application::ApplicationHandler;
@@ -169,6 +170,25 @@ struct Args {
     #[arg(long)]
     surface_albedo: Option<f32>,
 
+    /// V-39 light-pollution Bortle class (1..=9). Class 1 = rural dark sky
+    /// (default), Class 9 = inner-city. Mutually exclusive with `--sqm`.
+    #[arg(long)]
+    bortle: Option<u8>,
+
+    /// V-39 light-pollution manual zenith SQM reading in V mag/arcsec².
+    #[arg(long)]
+    sqm: Option<f32>,
+
+    /// V-39 light-pollution observer (lat, lng) for the Falchi 2016 atlas
+    /// (placeholder; falls back to Bortle 1 until V-39-Atlas ships).
+    #[arg(long, num_args = 2, value_names = ["LAT", "LNG"], allow_hyphen_values = true)]
+    light_pollution_atlas: Option<Vec<f32>>,
+
+    /// Disable V-39 artificial light pollution: forces the Bortle 1 / dark
+    /// sky floor regardless of other flags.
+    #[arg(long)]
+    no_light_pollution: bool,
+
     /// Disable Mercury-through-Neptune rendering.
     #[arg(long)]
     no_planets: bool,
@@ -261,6 +281,17 @@ fn main() -> Result<()> {
                 seed: args.scintillation_seed,
             },
         );
+        let light_pollution = light_pollution_from_args(
+            args.no_light_pollution,
+            LightPollutionOverrides {
+                bortle: args.bortle,
+                sqm_mag_per_arcsec2: args.sqm,
+                atlas_lat_lng_deg: args.light_pollution_atlas.as_deref().and_then(|v| match v {
+                    [lat, lng] => Some((*lat, *lng)),
+                    _ => None,
+                }),
+            },
+        );
         SessionScene {
             latitude_deg: args.lat,
             longitude_deg: args.lng,
@@ -273,6 +304,7 @@ fn main() -> Result<()> {
             overlays,
             atmosphere_preset: args.atmosphere_preset.into(),
             atmosphere,
+            light_pollution,
             scintillation,
             planets_enabled: !args.no_planets,
             projection: args.projection.into(),
@@ -323,6 +355,7 @@ fn main() -> Result<()> {
         scene.catalog.limiting_magnitude,
         scene.atmosphere,
         scene.scintillation,
+        scene.light_pollution,
         scene.planets_enabled,
         scene.projection,
         scene.viewpoint,
@@ -383,6 +416,7 @@ struct App {
     limiting_magnitude: f32,
     atmosphere: Atmosphere,
     scintillation: renderer::Scintillation,
+    light_pollution: LightPollution,
     planets_enabled: bool,
     projection: renderer::SkyProjection,
     viewpoint: renderer::SkyViewpoint,
@@ -453,6 +487,7 @@ impl App {
         limiting_magnitude: f32,
         atmosphere: Atmosphere,
         scintillation: renderer::Scintillation,
+        light_pollution: LightPollution,
         planets_enabled: bool,
         projection: renderer::SkyProjection,
         viewpoint: renderer::SkyViewpoint,
@@ -470,6 +505,7 @@ impl App {
             limiting_magnitude,
             atmosphere,
             scintillation,
+            light_pollution,
             planets_enabled,
             projection,
             viewpoint,
@@ -571,6 +607,7 @@ impl ApplicationHandler for App {
         camera.limiting_magnitude = self.limiting_magnitude;
         camera.atmosphere = self.atmosphere;
         camera.scintillation = self.scintillation;
+        camera.light_pollution = self.light_pollution;
         camera.planets_enabled = self.planets_enabled;
         camera.projection = self.projection;
         camera.viewpoint = self.viewpoint;

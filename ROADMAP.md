@@ -79,7 +79,8 @@ is split into independently shippable rungs:
 6. **Unified extinction** — one (β, α, DU) optical-depth state shared by the
    star-extinction path and the daylight scattering shader. ✅ (`V-37`).
 7. **Site-specific brightness** — observer-side light-pollution selector
-   (Bortle / SQM / Falchi atlas). ⬜ (`V-39`).
+   (Bortle / SQM / Falchi atlas). ◑ (`V-39` Bortle + SQM core shipped;
+   Falchi 2016 atlas loader tracked as follow-up `V-39-Atlas`).
 
 ---
 
@@ -111,11 +112,10 @@ side-effect, not the motivation.
 ## Current focus
 
 The Visual track is at "naked-eye physical realism is mostly there" — the
-remaining items are realism polish (`V-25`, `V-27`, `V-28`; `V-24`
-scintillation and `V-26` lunar earthshine have shipped), site-specific
-brightness
-(`V-39`; the unified (β, α, DU) state it depends on is in place via
-`V-37`, and the daylight model upgrade `V-38` has shipped), niche visual
+remaining items are realism polish (`V-24` scintillation, `V-25`–`V-28`
+have all shipped), site-specific brightness (Bortle / SQM core shipped
+via `V-39`; Falchi 2016 atlas loader tracked as follow-up `V-39-Atlas`),
+niche visual
 features (`V-45`–`V-50`), and rare phenomena (`V-47`–`V-49`).
 
 **High priority next:** the visual-richness gaps `V-51`–`V-56` (eclipses /
@@ -191,7 +191,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-36` | Moon phase + Earth-shadow aid | ✅ |
 | `V-37` | Unified spectral extinction (β / α / DU) | ✅ |
 | `V-38` | Hošek-Wilkie daylight sky model | ✅ |
-| `V-39` | **Light pollution / Bortle map** | ⬜ |
+| `V-39` | Light pollution / Bortle + SQM (Bortle / SQM core ✅, Atlas2016 follow-up ⬜) | ◑ |
 | `V-40` | Full-sky projections (Mollweide / Aitoff / Hammer) | ✅ |
 | `V-41` | Out-of-Earth galactic-north viewpoint | ✅ |
 | `V-42` | Deep-sky overlay (Messier + bright NGC / IC subset) | ✅ |
@@ -1190,7 +1190,7 @@ us share spectra with `V-37`.
 
 ---
 
-### `V-39` Light pollution / Bortle map — ⬜
+### `V-39` Light pollution / Bortle map — ✅ done (Bortle / SQM core; Atlas2016 follow-up)
 
 **Item.** The current dark-sky pipeline assumes a clear rural site
 (V ≈ 21.6 mag/arcsec² zenith). Real observers want the sky they will
@@ -1235,7 +1235,32 @@ mixed), not neutral.
 - Scenes: `tokyo-bortle-8`, `dark-sky-bortle-1` pinned screenshots in
   the validation gallery.
 
-**Hosts wired.** CLI / viewer / web.
+**Hosts wired.** CLI / viewer / web (web WASM setter `set_light_pollution`
+is in place; the React settings card is deferred to a follow-up PR).
+
+**Shipped (core slice).**
+- `astronomy::skyglow::LightPollution { Bortle(u8), Sqm(f32), Atlas2016 {
+  latitude_deg, longitude_deg } }`. Bortle 1..=9 → SQM lookup pinned to the
+  Bortle 2001 / Cinzano-Falchi-Elvidge 2001 typical zenith table (Class 5
+  anchored at V = 20.0 to satisfy the V-39 calibration test).
+- `astronomy::skyglow::garstang_zenith_distance_kernel` (single-scattering
+  zenith-distance kernel, clamped at 85° so horizon pixels do not blow up);
+  `artificial_skyglow_s10` returns the S10 excess per pixel.
+- Renderer: `Camera::light_pollution`, `CameraUniform::light_pollution_state`,
+  `CameraUniform::light_pollution_tint`; the WGSL skyglow pass adds the
+  artificial term *before* extinction with the sodium / LED warm-orange tint.
+- Session schema bumped to **v5** (`SessionLightPollution { kind, bortle?,
+  sqmMagPerArcsec2?, atlasLatitudeDeg?, atlasLongitudeDeg? }`).
+- CLI / viewer flags: `--bortle`, `--sqm`, `--light-pollution-atlas LAT LNG`,
+  `--no-light-pollution`. WASM `set_light_pollution(enabled, kind, ...)`.
+- Gallery presets: `tokyo-bortle-8` (Bortle 8 + hazy-urban atmosphere) and
+  `dark-sky-bortle-1` (byte-identical to `dark-sky` by construction).
+
+**Deferred to follow-up `V-39-Atlas`.**
+- Falchi et al. 2016 World Atlas GeoTIFF download / loader. The atlas is
+  ~1 GB and needs a careful licence note; the `Atlas2016` variant is laid
+  down in this slice and returns the Bortle-1 floor + a host-side
+  `TODO(V-39-Atlas)` log line until the loader ships.
 
 ---
 
