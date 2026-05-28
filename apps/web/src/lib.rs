@@ -8,8 +8,8 @@ use astronomy::{
 use catalog::load_embedded;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, ExternalViewpoint,
-    EyepieceSimulation, LocalView, OverlayConfig, OverlayKind, Renderer, Scintillation,
-    SkyProjection, SkyViewpoint, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    EyepieceSimulation, LightPollution, LocalView, OverlayConfig, OverlayKind, Renderer,
+    Scintillation, SkyProjection, SkyViewpoint, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -416,6 +416,40 @@ impl StarView {
         } else {
             Atmosphere::OFF
         };
+    }
+
+    /// Update V-39 light-pollution controls. `kind` is a kebab-case tag
+    /// matching the `SessionLightPollution.kind` field: `bortle`, `sqm`, or
+    /// `atlas-2016`. Only the field for the active variant is read;
+    /// passing `enabled = false` forces the Bortle-1 / dark-sky floor
+    /// regardless of the other parameters. Atlas sampling is deferred to
+    /// `V-39-Atlas`; on the web side it currently maps to Bortle 1.
+    pub fn set_light_pollution(
+        &self,
+        enabled: bool,
+        kind: String,
+        bortle_class: u8,
+        sqm_mag_per_arcsec2: f32,
+        atlas_latitude_deg: f32,
+        atlas_longitude_deg: f32,
+    ) {
+        let pollution = if !enabled {
+            LightPollution::DARK_SKY
+        } else {
+            match kind.as_str() {
+                "bortle" => LightPollution::Bortle(bortle_class),
+                "sqm" => LightPollution::Sqm(sqm_mag_per_arcsec2),
+                "atlas-2016" => LightPollution::Atlas2016 {
+                    latitude_deg: atlas_latitude_deg,
+                    longitude_deg: atlas_longitude_deg,
+                },
+                other => {
+                    log::warn!("set_light_pollution: unknown kind \"{other}\", falling back to Bortle 1");
+                    LightPollution::DARK_SKY
+                }
+            }
+        };
+        self.state.borrow_mut().camera.light_pollution = pollution;
     }
 
     /// Update V-24 scintillation controls. `enabled=false` matches the

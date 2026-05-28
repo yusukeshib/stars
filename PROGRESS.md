@@ -26,9 +26,12 @@ Shipped:
   path outright), full-sky projections (`V-40`), out-of-Earth galactic
   and custom external viewpoints (`V-41`, `V-44`),
   telescope eyepiece simulation (`V-43`), the deep-sky overlay with
-  Messier objects plus the bright NGC / IC subset (`V-42`), and the
+  Messier objects plus the bright NGC / IC subset (`V-42`), the
   resolved-open-cluster slice for Pleiades / Beehive / Double Cluster
-  (`V-53`).
+  (`V-53`), and the observer-side Bortle / SQM light-pollution scaling
+  of the dark-sky background with sodium / LED tint (`V-39`, Bortle /
+  SQM core; the Falchi 2016 GeoTIFF loader is tracked separately as
+  `V-39-Atlas`).
 - **Library track** — IAU-grade time / precession / nutation / aberration /
   proper motion (`L-01`–`L-05`), planning helpers (`L-07`, `L-08`),
   schema-versioned JSON sessions (`L-10`, `L-11`), deterministic scene
@@ -39,9 +42,9 @@ Shipped:
 
 Still open:
 
-- **Visual track** — dark-sky realism gaps (`V-25`, `V-27`, `V-28`;
-  `V-26` lunar earthshine has shipped), site-specific
-  brightness (`V-39`), niche visual features (`V-45`–`V-50`), rare
+- **Visual track** — Falchi 2016 World Atlas GeoTIFF loader
+  (`V-39-Atlas`; Bortle / SQM core of `V-39`, V-25, V-26, V-27, V-28
+  have shipped), niche visual features (`V-45`–`V-50`), rare
   phenomena (`V-47`–`V-49`). A follow-up PR will add a runtime streaming
   backend for the full ~14,000-entry OpenNGC catalogue on top of the
   embedded `V-42` subset shipped here.
@@ -262,6 +265,91 @@ Primary implementation areas:
 - `crates/renderer/src/camera.rs`
 - `crates/renderer/src/shaders/skyglow.wgsl`
 - `apps/{cli,viewer,web}` host wiring + web UI controls.
+
+### Observer-side light pollution — Bortle / SQM (`V-39` core)
+
+Added an observer-side artificial-skyglow scaling of the dark-sky
+background so the Bortle 8 Tokyo or downtown LA sky no longer renders as
+a clean rural dark sky. The previous pipeline assumed a single ~21.6 mag/
+arcsec² zenith for every observer regardless of location; V-39 lets a
+host pick a Bortle 1-9 class or a hand-entered SQM mag/arcsec² value and
+adds a sodium / LED warm-orange Garstang-scaled term into the diffuse-sky
+composition before atmospheric extinction.
+
+Shipped (core slice):
+
+- `astronomy::skyglow::LightPollution { Bortle(u8), Sqm(f32),
+  Atlas2016 { latitude_deg, longitude_deg } }` enum, plus
+  `LightPollution::bortle_to_sqm_mag_per_arcsec2` (Bortle 2001 /
+  Cinzano-Falchi-Elvidge 2001 typical zenith table; Class 5 anchored at
+  V = 20.0 to satisfy the spec's calibration test), `artificial_zenith_s10`
+  (excess over the natural floor), and `artificial_rgb_tint` (sodium / LED
+  warm-orange linear-RGB tint normalised to luminance 1.0).
+- `astronomy::skyglow::garstang_zenith_distance_kernel` ports the
+  Garstang 1986 PASP 98, 364 single-scattering zenith-distance kernel,
+  collapsed to the pure-observer-side scaling; clamped at 85° so the
+  horizon glow stays finite. `artificial_skyglow_s10(pollution, z)` is the
+  per-pixel evaluator.
+- Renderer: `Camera::light_pollution` field, plus two new vec4 uniform
+  fields `light_pollution_state` and `light_pollution_tint` in
+  `CameraUniform`. The WGSL skyglow shader ports the Garstang kernel and
+  adds the artificial term *before* extinction in the night-sky
+  composition; Bortle 1 / dark-sky emits zero excess and the existing
+  dark-sky composition stays bit-identical.
+- Session schema bumped to **v5**: `SessionLightPollution { kind, bortle?,
+  sqmMagPerArcsec2?, atlasLatitudeDeg?, atlasLongitudeDeg? }`. The `kind`
+  tag is one of `bortle`, `sqm`, `atlas-2016`; range-checks reject
+  out-of-band Bortle classes, SQM values, and lat/lng pairs.
+- Host wiring: CLI / viewer add `--bortle`, `--sqm`,
+  `--light-pollution-atlas LAT LNG`, and `--no-light-pollution` flags
+  through a shared `LightPollutionOverrides` / `light_pollution_from_args`
+  helper. Web exposes the matching WASM setter `set_light_pollution(
+  enabled, kind, bortle_class, sqm, atlas_lat, atlas_lng)`. The TS
+  declaration adds the new entry; the React settings card is deferred to
+  a follow-up PR but the default flow already round-trips Bortle 1
+  through the WASM ABI.
+- Gallery presets: `tokyo-bortle-8` (Bortle 8 + hazy-urban atmosphere over
+  Tokyo evening) and `dark-sky-bortle-1` (Bortle 1 pinned over the existing
+  dark-sky scene; expected to render byte-identically to `dark-sky.png`
+  and currently does).
+
+Tests pinned at the V-39 calibration / regression contracts:
+
+- `bortle_5_zenith_matches_20_within_tolerance` is the validation gate:
+  zenith V mag/arcsec² for Bortle 5 must land within ±0.2 of 20.0.
+- `bortle_1_keeps_natural_floor` and the byte-identical `dark-sky-bortle-1`
+  gallery PNG together pin that Bortle 1 emits zero artificial S10 and
+  preserves the pre-V-39 dark-sky composition.
+- `sqm_input_round_trips` checks that a hand-entered SQM reading round-trips
+  through the artificial-S10 conversion to within 0.05 mag.
+- `bortle_class_is_monotone_in_brightness` and `bortle_class_clamps_to_valid_range`
+  cover ordering and input clamping.
+- `garstang_kernel_is_one_at_zenith_and_rises` pins the horizon-brighter
+  behaviour while keeping the kernel finite under the 85° clamp.
+- `atlas2016_falls_back_to_rural_default` keeps the deferred follow-up's
+  sentinel renderable.
+
+Deferred to follow-up `V-39-Atlas`:
+
+- Falchi et al. 2016 World Atlas GeoTIFF download + sampler. The atlas is
+  ~1 GB and needs a careful licence note; the `Atlas2016` variant is laid
+  down in this slice and returns the Bortle-1 floor (with the host-side
+  `TODO(V-39-Atlas)` log line) until the loader ships.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/skyglow.rs` — `LightPollution` enum, Bortle ⇒ SQM
+  lookup, Garstang single-scattering kernel, `artificial_skyglow_s10`.
+- `crates/renderer/src/camera.rs` — `Camera::light_pollution`,
+  `CameraUniform::light_pollution_state`, `CameraUniform::light_pollution_tint`.
+- `crates/renderer/src/shaders/skyglow.wgsl` — WGSL artificial-skyglow
+  term added before extinction; `garstang_kernel` per-pixel evaluator.
+- `crates/common/src/{lib,session,presets}.rs` — `LightPollutionOverrides`,
+  `light_pollution_from_args`, `SessionLightPollution`, schema-v5 bump.
+- `apps/{cli,viewer}/src/main.rs` — `--bortle` / `--sqm` /
+  `--light-pollution-atlas` / `--no-light-pollution` flags.
+- `apps/web/src/lib.rs` + `apps/web/frontend/src/stars-web.d.ts` —
+  `set_light_pollution` WASM setter.
 
 ### Atmospheric scintillation (`V-24`)
 

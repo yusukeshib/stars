@@ -11,8 +11,8 @@ use std::path::Path;
 use anyhow::Result;
 use clap::ValueEnum;
 use renderer::{
-    Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation, LocalView, OverlayConfig,
-    OverlayKind, Scintillation, SkyProjection, SkyViewpoint,
+    Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView,
+    OverlayConfig, OverlayKind, Scintillation, SkyProjection, SkyViewpoint,
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +26,11 @@ use crate::{
 #[serde(rename_all = "kebab-case")]
 pub enum ScenePresetArg {
     TokyoTonight,
+    #[value(name = "tokyo-bortle-8")]
+    TokyoBortle8,
     DarkSky,
+    #[value(name = "dark-sky-bortle-1")]
+    DarkSkyBortle1,
     Noon,
     Sunset,
     CivilTwilight,
@@ -46,7 +50,9 @@ pub enum ScenePresetArg {
 impl ScenePresetArg {
     pub const ALL: &'static [Self] = &[
         Self::TokyoTonight,
+        Self::TokyoBortle8,
         Self::DarkSky,
+        Self::DarkSkyBortle1,
         Self::Noon,
         Self::Sunset,
         Self::CivilTwilight,
@@ -66,7 +72,9 @@ impl ScenePresetArg {
     pub const fn as_kebab_str(self) -> &'static str {
         match self {
             Self::TokyoTonight => "tokyo-tonight",
+            Self::TokyoBortle8 => "tokyo-bortle-8",
             Self::DarkSky => "dark-sky",
+            Self::DarkSkyBortle1 => "dark-sky-bortle-1",
             Self::Noon => "noon",
             Self::Sunset => "sunset",
             Self::CivilTwilight => "civil-twilight",
@@ -108,10 +116,22 @@ pub const SCENE_PRESET_INFOS: &[ScenePresetInfo] = &[
         validation_focus: "default local perspective, overlays, labels, star/planet composition",
     },
     ScenePresetInfo {
+        id: ScenePresetArg::TokyoBortle8,
+        title: "Tokyo (Bortle 8 city sky)",
+        description: "Same Tokyo evening framing as `tokyo-tonight` but with a Bortle-8 city-sky light-pollution overlay (V-39).",
+        validation_focus: "V-39 Bortle-8 artificial sky glow: warm-orange sodium/LED tint, horizon-brighter Garstang fall-off, dimmed faint stars",
+    },
+    ScenePresetInfo {
         id: ScenePresetArg::DarkSky,
         title: "High-altitude dark sky",
         description: "Mauna Kea dark-sky view using the high-altitude atmosphere preset and Milky Way-oriented overlays.",
         validation_focus: "dark-sky glow, extinction, Milky Way band, high-altitude atmosphere",
+    },
+    ScenePresetInfo {
+        id: ScenePresetArg::DarkSkyBortle1,
+        title: "Dark sky (Bortle 1 rural floor)",
+        description: "Mauna Kea dark-sky view pinned with the V-39 Bortle 1 / dark-sky floor — must render pixel-identically to `dark-sky` because Bortle 1 adds zero artificial glow.",
+        validation_focus: "V-39 Bortle 1 default: round-trips to the pre-V-39 dark-sky composition without spectral or photometric drift",
     },
     ScenePresetInfo {
         id: ScenePresetArg::Noon,
@@ -231,6 +251,34 @@ pub fn scene_from_preset(
             AtmospherePreset::ClearRural,
             catalog,
         )?,
+        ScenePresetArg::TokyoBortle8 => {
+            // V-39 validation: Tokyo evening with the city-sky (Bortle 8)
+            // artificial-skyglow overlay. The hazy-urban atmosphere preset is
+            // used because anyone seeing Bortle 8 is also looking through the
+            // associated aerosol load; sharing the preset makes the rendered
+            // colour balance reflect both effects at once.
+            let mut scene = earth_scene(
+                35.68,
+                139.69,
+                "2026-08-13T12:00:00Z",
+                180.0,
+                35.0,
+                75.0,
+                overlay_config(&[
+                    OverlayKind::Horizon,
+                    OverlayKind::Cardinals,
+                    OverlayKind::CardinalLabels,
+                    OverlayKind::Ecliptic,
+                    OverlayKind::GalacticEquator,
+                    OverlayKind::ConstellationLines,
+                    OverlayKind::PlanetLabels,
+                ]),
+                AtmospherePreset::HazyUrban,
+                catalog,
+            )?;
+            scene.light_pollution = LightPollution::Bortle(8);
+            scene
+        }
         ScenePresetArg::DarkSky => earth_scene(
             19.8207,
             -155.4681,
@@ -247,6 +295,32 @@ pub fn scene_from_preset(
             AtmospherePreset::HighAltitude,
             catalog,
         )?,
+        ScenePresetArg::DarkSkyBortle1 => {
+            // V-39 validation: same dark-sky scene, but explicitly pinned to
+            // the Bortle 1 floor. Bortle 1 emits zero artificial S10, so the
+            // gallery render of this scene must equal the `dark-sky` render
+            // byte-for-byte on a deterministic GPU; the dedicated entry
+            // exists so a future regression that accidentally biases the
+            // artificial term has a named target to fail on.
+            let mut scene = earth_scene(
+                19.8207,
+                -155.4681,
+                "2026-07-18T10:30:00Z",
+                155.0,
+                55.0,
+                85.0,
+                overlay_config(&[
+                    OverlayKind::Horizon,
+                    OverlayKind::CardinalLabels,
+                    OverlayKind::GalacticEquator,
+                    OverlayKind::ConstellationLabels,
+                ]),
+                AtmospherePreset::HighAltitude,
+                catalog,
+            )?;
+            scene.light_pollution = LightPollution::Bortle(1);
+            scene
+        }
         ScenePresetArg::Noon => earth_scene(
             35.68,
             139.69,
@@ -486,6 +560,7 @@ fn earth_scene(
         overlays,
         atmosphere_preset,
         atmosphere,
+        light_pollution: LightPollution::default(),
         scintillation: Scintillation::default(),
         planets_enabled: true,
         projection: SkyProjection::Perspective,
@@ -546,6 +621,7 @@ fn external_scene(
         },
         atmosphere_preset: AtmospherePreset::ClearRural,
         atmosphere: Atmosphere::OFF,
+        light_pollution: LightPollution::default(),
         scintillation: Scintillation::OFF,
         planets_enabled: false,
         projection,
@@ -603,7 +679,7 @@ mod tests {
             )
             .unwrap_or_else(|error| panic!("{preset} failed: {error:#}"));
             let json = serde_json::to_string(&session).unwrap();
-            assert!(json.contains("\"schemaVersion\":4"));
+            assert!(json.contains("\"schemaVersion\":5"));
             let parsed: StarSession = serde_json::from_str(&json).unwrap();
             let restored = parsed
                 .to_scene()

@@ -10,6 +10,7 @@ mod text;
 mod tonemap;
 mod vertex;
 
+pub use astronomy::skyglow::LightPollution;
 pub use camera::{
     Atmosphere, AtmospherePreset, Camera, ExternalViewpoint, EyepieceSimulation, LocalView,
     Scintillation, SkyProjection, SkyViewpoint,

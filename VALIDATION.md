@@ -281,13 +281,21 @@ Validation expectation:
 - Changes to coefficients should explain their source.
 - Discontinuities across day / twilight / night transitions should be tested or
   visually justified.
+- V-39 light-pollution gate: zenith brightness for Bortle 5 must lie within
+  ±0.2 mag/arcsec² of V = 20.0; Bortle 1 must reproduce the natural floor
+  (pinned by `astronomy::skyglow::tests::bortle_5_zenith_matches_20_within_tolerance`
+  and the byte-identical `dark-sky` / `dark-sky-bortle-1` gallery PNGs).
 
 Current limitation:
 
 - The atmosphere is a compact renderer-oriented model, not a full spectral
   radiative-transfer simulation.
-- Weather, clouds, local light pollution, and terrain obstruction are not
-  modeled.
+- Local light pollution is modelled as a Bortle-class / SQM zenith excess
+  with a Garstang single-scattering zenith-distance kernel (V-39 core).
+  Falchi et al. 2016 World Atlas sampling by observer lat / lng is laid
+  down as an `Atlas2016` sentinel variant; the GeoTIFF loader itself is
+  tracked as follow-up `V-39-Atlas` (the atlas is ~1 GB).
+- Weather, clouds, and terrain obstruction are not modeled.
 
 ### Photometry and tone reproduction
 
@@ -405,8 +413,9 @@ Current implementation includes:
 - schema-versioned JSON sessions that capture observer, time scales, view,
   overlays, projection/viewpoint, active corrections, atmosphere, catalog
   snapshot, and app version;
-- deterministic scene presets for Tokyo evening, dark sky, noon, sunset, civil /
-  nautical / astronomical twilight, moonlit night, a lunar eclipse aid, the
+- deterministic scene presets for Tokyo evening, Tokyo Bortle 8 (V-39),
+  dark sky, dark-sky Bortle 1 (V-39), noon, sunset, civil / nautical /
+  astronomical twilight, moonlit night, a lunar eclipse aid, the
   2024-04-08 Mazatl\u00e1n total solar eclipse (`SolarEclipse`, V-51c), all-sky
   maps, and external galactic viewpoints;
 - notebook examples in `examples/notebooks` that load the same JSON sessions,

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "appVersion": "0.1.0",
   "createdBy": "stars-cli",
   "observer": {
@@ -57,6 +57,10 @@
     "pressureHpa": 0.0,
     "temperatureC": 10.0,
     "surfaceAlbedo": 0.0
+  },
+  "lightPollution": {
+    "kind": "bortle",
+    "bortle": 1
   },
   "scintillation": {
     "enabled": false,

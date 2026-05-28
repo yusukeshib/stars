@@ -430,6 +430,14 @@ References named in roadmap:
 - Schlegel, Finkbeiner & Davis 1998;
 - Hošek & Wilkie 2012 (V-38 default daylight sky-dome model);
 - Krisciunas & Schaefer 1991;
+- Bortle, J. E. 2001, S&T 101(2), 126 — Bortle Dark-Sky Scale class →
+  zenith SQM table (V-39 core);
+- Cinzano, P., Falchi, F. & Elvidge, C. D. 2001, MNRAS 328, 689 —
+  long-form artificial-sky-glow scattering model the V-39 core simplifies;
+- Garstang, R. H. 1986, PASP 98, 364 — single-scattering zenith-distance
+  kernel (V-39 core);
+- Falchi, F. et al. 2016, *Science Advances* 2, e1600377 — World Atlas
+  GeoTIFF source for the deferred `V-39-Atlas` loader;
 - ASTM G-173 / CIE daylight-basis references where used by code comments.
 
 Implementation areas:
@@ -574,6 +582,17 @@ row to `data/manifest.toml`:
 - AAVSO variable-star light curves;
 - full OpenNGC ~14,000-entry NGC / IC catalog (runtime-loaded streaming
   backend, the V-42 follow-up to the shipped bright subset);
+- Falchi et al. 2016 World Atlas of artificial night-sky brightness
+  GeoTIFF (`V-39-Atlas` follow-up to the Bortle / SQM core shipped under
+  `V-39`). Source: Falchi, F. et al. 2016, *Science Advances* 2, e1600377,
+  doi 10.1126/sciadv.1600377; supplementary GeoTIFF distributed via the
+  Earth Observation Group / NCEI under the documented licence on the data
+  page. Shipping the atlas (~1 GB) is out of scope for the core slice; a
+  downloader script under `scripts/` is the planned path. The
+  `LightPollution::Atlas2016 { latitude_deg, longitude_deg }` schema variant
+  is already laid down in `crates/astronomy/src/skyglow.rs` so the loader
+  can ship without churning sessions, and currently returns the Bortle 1
+  natural floor with a host-side `TODO(V-39-Atlas)` log line.
 - telescope / eyepiece preset data;
 - curated public demo-gallery session files;
 - large-catalog spatial indexes, LOD subsets, or WASM-specific extracts.

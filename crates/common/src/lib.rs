@@ -20,7 +20,8 @@ mod session;
 pub use presets::*;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation,
-    OverlayConfig, OverlayKind, Scintillation, SkyProjection, SkyViewpoint, StarInstance,
+    LightPollution, OverlayConfig, OverlayKind, Scintillation, SkyProjection, SkyViewpoint,
+    StarInstance,
 };
 pub use session::*;
 
@@ -330,6 +331,69 @@ pub fn atmosphere_from_args(
         atmosphere.surface_albedo = surface_albedo;
     }
     atmosphere
+}
+
+/// Optional V-39 light-pollution overrides parsed by native hosts.
+///
+/// The three fields mirror the [`LightPollution`] enum variants — at most
+/// one is meant to be set. Precedence (if a host accidentally supplies more
+/// than one) is `bortle` first, then `sqm_mag_per_arcsec2`, then
+/// `atlas_lat_lng_deg`; everything past the first match is ignored. This
+/// keeps two unrelated CLI flags from contradicting each other silently.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LightPollutionOverrides {
+    /// Bortle 2001 class index (1..=9). Clamped on the astronomy side.
+    pub bortle: Option<u8>,
+    /// Hand-entered V-band zenith SQM reading in mag/arcsec².
+    pub sqm_mag_per_arcsec2: Option<f32>,
+    /// `(latitude_deg, longitude_deg)` for the Falchi 2016 atlas lookup.
+    /// Currently a `TODO(V-39-Atlas)` sentinel that falls back to the
+    /// rural default; the slice lays down the schema so the GeoTIFF
+    /// loader can ship without churning sessions.
+    pub atlas_lat_lng_deg: Option<(f32, f32)>,
+}
+
+impl LightPollutionOverrides {
+    pub fn has_any(self) -> bool {
+        self.bortle.is_some()
+            || self.sqm_mag_per_arcsec2.is_some()
+            || self.atlas_lat_lng_deg.is_some()
+    }
+}
+
+/// Build a renderer [`LightPollution`] from native-host CLI values.
+///
+/// `disabled` forces the rural [`LightPollution::DARK_SKY`] floor regardless
+/// of overrides, matching the `--no-extinction` / `--no-light-pollution`
+/// host conventions. Otherwise the first set override wins (`bortle` →
+/// `sqm` → `atlas`), and the default is the Bortle 1 dark-sky floor so
+/// existing sessions still render exactly the pre-V-39 way.
+pub fn light_pollution_from_args(
+    disabled: bool,
+    overrides: LightPollutionOverrides,
+) -> LightPollution {
+    if disabled {
+        return LightPollution::DARK_SKY;
+    }
+    if let Some(class) = overrides.bortle {
+        return LightPollution::Bortle(class);
+    }
+    if let Some(sqm) = overrides.sqm_mag_per_arcsec2 {
+        return LightPollution::Sqm(sqm);
+    }
+    if let Some((lat, lng)) = overrides.atlas_lat_lng_deg {
+        // Surface the deferred-loader notice once at the host side; the
+        // astronomy crate stays log-free so its dependency surface stays
+        // minimal.
+        log::info!(
+            "TODO(V-39-Atlas): Falchi 2016 atlas sampling at ({lat}, {lng}) is not yet implemented; falling back to Bortle 1"
+        );
+        return LightPollution::Atlas2016 {
+            latitude_deg: lat,
+            longitude_deg: lng,
+        };
+    }
+    LightPollution::DARK_SKY
 }
 
 /// Optional scintillation overrides parsed by native hosts (V-24).

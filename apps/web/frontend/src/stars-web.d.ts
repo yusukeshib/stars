@@ -45,6 +45,14 @@ declare module "stars-web" {
       temperatureC: number,
       surfaceAlbedo: number,
     ): void;
+    set_light_pollution(
+      enabled: boolean,
+      kind: string,
+      bortleClass: number,
+      sqmMagPerArcsec2: number,
+      atlasLatitudeDeg: number,
+      atlasLongitudeDeg: number,
+    ): void;
     set_scintillation(enabled: boolean, cN2Scale: number, seed: number): void;
     resize(width: number, height: number): void;
     sun_altitude_deg(): number;
