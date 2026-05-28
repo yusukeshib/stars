@@ -109,7 +109,7 @@ scripts            カタログ取得・README 画像生成・WASM build helper
 
 次に着手すべきは：
 
-1. 裸眼で見えるのに未実装の暗夜空現象：大気分散 (`V-25`)、地球照 (`V-26`)、ビーナスベルト・地球影帯 (`V-27`)、分光的 airglow (`V-28`)—裸眼シンチレーション (`V-24`) は出荷済み。
+1. 裸眼で見えるのに未実装の暗夜空現象：大気分散 (`V-25`)、ビーナスベルト・地球影帯 (`V-27`)、分光的 airglow (`V-28`)—裸眼シンチレーション (`V-24`) と地球照 (`V-26`) は出荷済み。
 2. 大気モデルの自己整合性：統一スペクトル消散 (`V-37`) と Hošek-Wilkie 昼間空 (`V-38`) は出荷済み、次は光害 / Bortle (`V-39`)。
 3. accessibility (`L-24`)、観測計画 polish (`L-09`)、変光星 light curve (`L-20`)、`V-42` 組込み subset の上に乗せる runtime OpenNGC streaming backend (次の PR)。
 4. Python bindings (`L-21`) と headless server mode (`L-22`)。

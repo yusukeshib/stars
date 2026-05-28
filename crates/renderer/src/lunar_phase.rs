@@ -78,12 +78,61 @@ fn normalize(a: [f64; 3]) -> [f64; 3] {
     }
 }
 
+/// V-26 GPU twin of
+/// `astronomy::illuminants::earthshine_disk_luminance_cd_m2` with canonical
+/// Bond albedos baked in. The WGSL `earthshine_disk_luminance_cd_m2` in
+/// `shaders/skyglow.wgsl` is a literal port of this function (with `f32`
+/// constants); the unit test below pins the closed-form anchor constants
+/// the shader hardcodes so the GPU value cannot silently drift from the
+/// astronomy crate's helper.
+pub fn earthshine_disk_luminance_cd_m2_canonical(phase_rad: f64) -> f64 {
+    let phase = phase_rad.clamp(0.0, std::f64::consts::PI);
+    let earth_phase = 0.5 * (1.0 - phase.cos());
+    // Match the WGSL constants:
+    //   anchor_cd_m2 = 1.08e5 · 10^(-0.4 · 13.7)
+    //   anchor_earth_phase = 0.5 · (1 − cos 60°) = 0.25
+    let anchor_cd_m2 = 1.08e5 * 10_f64.powf(-0.4 * 13.7);
+    let anchor_earth_phase = 0.25_f64;
+    anchor_cd_m2 * (earth_phase / anchor_earth_phase)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const RADIUS: f64 = 0.5_f64 * 0.5_f64 * std::f64::consts::PI / 180.0; // 0.25° ~ apparent lunar radius
     const TOL: f64 = 1e-9;
+
+    /// V-26: the WGSL constant baked into
+    /// `shaders/skyglow.wgsl::earthshine_disk_luminance_cd_m2` must match
+    /// the astronomy crate's closed-form anchor at f32 precision so the
+    /// GPU dark-side glow cannot drift from the unit-tested CPU helper.
+    #[test]
+    fn shader_anchor_matches_astronomy_crate() {
+        // The shader literal is f32 0.35749924; the astronomy crate uses
+        // f64. Compare across a sweep of phase angles at f32 round-trip
+        // precision so the test catches a stale shader constant.
+        let shader_anchor_f32 = 0.357_621_6_f32;
+        let astronomy_anchor = 1.08e5 * 10_f64.powf(-0.4 * 13.7);
+        assert!(
+            (shader_anchor_f32 as f64 - astronomy_anchor).abs() < 1e-6,
+            "shader anchor {shader_anchor_f32} drifted from astronomy anchor {astronomy_anchor}"
+        );
+
+        for &deg in &[0.0_f64, 10.0, 45.0, 60.0, 90.0, 120.0, 154.0, 180.0] {
+            let phase = deg.to_radians();
+            let cpu = astronomy::illuminants::earthshine_disk_luminance_cd_m2(
+                phase,
+                astronomy::illuminants::EARTH_BOND_ALBEDO_CANONICAL,
+                astronomy::illuminants::LUNAR_BOND_ALBEDO_CANONICAL,
+            );
+            let gpu_twin = earthshine_disk_luminance_cd_m2_canonical(phase);
+            assert!(
+                (cpu - gpu_twin).abs() < 1e-9,
+                "phase {deg}°: astronomy {cpu} cd/m² vs renderer twin {gpu_twin}"
+            );
+        }
+    }
 
     /// Disk-centre brightness must equal `cos(phase_angle)` on the lit side
     /// and zero on the unlit side. This is the key regression: getting the

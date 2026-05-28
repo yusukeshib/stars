@@ -111,8 +111,9 @@ side-effect, not the motivation.
 ## Current focus
 
 The Visual track is at "naked-eye physical realism is mostly there" — the
-remaining items are realism polish (`V-25`–`V-28`; `V-24` scintillation has
-shipped), site-specific brightness
+remaining items are realism polish (`V-25`, `V-27`, `V-28`; `V-24`
+scintillation and `V-26` lunar earthshine have shipped), site-specific
+brightness
 (`V-39`; the unified (β, α, DU) state it depends on is in place via
 `V-37`, and the daylight model upgrade `V-38` has shipped), niche visual
 features (`V-45`–`V-50`), and rare phenomena (`V-47`–`V-49`).
@@ -175,7 +176,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-23` | Catalogue colour pipeline (B−V → T → blackbody → sRGB) | ✅ |
 | `V-24` | Atmospheric scintillation | ✅ |
 | `V-25` | **Differential atmospheric dispersion** | ⬜ |
-| `V-26` | **Lunar earthshine** | ⬜ |
+| `V-26` | Lunar earthshine | ✅ |
 | `V-27` | **Belt of Venus + Earth-shadow band** | ⬜ |
 | `V-28` | **Spectral airglow decomposition** | ⬜ |
 | `V-29` | Atmospheric refraction | ✅ |
@@ -771,7 +772,7 @@ The "green flash" is the same effect taken to the limb of a setting Sun.
 
 ---
 
-### `V-26` Lunar earthshine — ⬜
+### `V-26` Lunar earthshine — ✅ done
 
 **Item.** The Moon's dark side glows faintly during crescent phases, lit
 by sunlight reflected from Earth (Da Vinci glow / ashen light). Currently

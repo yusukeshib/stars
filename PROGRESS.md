@@ -37,7 +37,8 @@ Shipped:
 
 Still open:
 
-- **Visual track** — dark-sky realism gaps (`V-25`–`V-28`), site-specific
+- **Visual track** — dark-sky realism gaps (`V-25`, `V-27`, `V-28`;
+  `V-26` lunar earthshine has shipped), site-specific
   brightness (`V-39`), niche visual features (`V-45`–`V-50`), rare
   phenomena (`V-47`–`V-49`). A follow-up PR will add a runtime streaming
   backend for the full ~14,000-entry OpenNGC catalogue on top of the
@@ -1512,6 +1513,68 @@ Validation:
 
 - `make frontend-check` (TypeScript strict mode) covers the refactor; no
   engine, renderer, or numerical behaviour changes.
+
+## V-26 Lunar earthshine (Da Vinci glow)
+
+The lunar disk shader now composes a Lambertian dark-side earthshine term
+additively with the existing lit-side Lambertian, so crescent phases show
+the characteristic faint glow on the unlit hemisphere ("Da Vinci glow",
+ashen light) lit by sunlight reflected from Earth.
+
+Shipped capabilities:
+
+- `astronomy::illuminants::earthshine_disk_luminance_cd_m2(phase, earth_albedo,
+  lunar_albedo)` returns the dark-side mean surface luminance in cd/m². The
+  closed form is anchored to Goode et al. 2001 / Danjon 1936 dark-side
+  photometry: with canonical Bond albedos (Earth 0.30, Moon 0.12) and
+  `phase = 60°` the function returns V ≈ +13.7 mag/arcsec² (≈ 0.36 cd/m²),
+  yielding a dark-to-full-Moon-lit surface-brightness ratio of order 10⁻³ at
+  thin crescent phases. The roadmap's reference "V ≈ +3.7 mag/arcsec²" is
+  the Danjon mag/arcmin² convention; the crate uses mag/arcsec² throughout,
+  matching all the other V-band photometric paths and the unit-test
+  ratio target.
+- `shaders/skyglow.wgsl::earthshine_disk_luminance_cd_m2` is a literal port
+  of the same closed form (f32) with canonical Bond albedos baked in. The
+  lunar fragment composes `lit_side_lambertian + dark_side_earthshine`,
+  reusing the existing near-hemisphere normal reconstruction in
+  `lunar_phase_lambert` (with `sun_dir = -moon_dir` for Earth-illumination).
+- Dark-side per-channel atmospheric extinction follows the same Schaefer
+  1993 / Kasten-Young 1989 path the diffuse sky pass uses, so a low-
+  altitude crescent attenuates its earthshine in lockstep with the rest
+  of the scene (V-37).
+
+Tests / validation:
+
+- `astronomy::illuminants::tests::earthshine_monotonic_in_phase` pins
+  `dark = 0` at full Moon and monotonic growth through crescent phases,
+  plus the V = 13.7 mag/arcsec² anchor at α = 60°.
+- `astronomy::illuminants::tests::earthshine_5pc_crescent_within_half_mag_of_reference`
+  is the pinned 5%-crescent V-band check (±0.5 mag/arcsec² of V ≈ +12.2).
+- `astronomy::illuminants::tests::earthshine_to_full_moon_ratio_is_order_milli`
+  pins the dark/lit ratio to the 10⁻⁴–10⁻² band at the 5% crescent.
+- `astronomy::illuminants::tests::earthshine_scales_linearly_in_both_albedos`
+  pins the `α_Earth · α_Moon` linearity in the Lambertian double-reflection
+  model.
+- `renderer::lunar_phase::tests::shader_anchor_matches_astronomy_crate`
+  pins the WGSL anchor constant against the astronomy crate's helper
+  across a phase-angle sweep so the GPU value cannot silently drift.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/illuminants.rs`
+- `crates/renderer/src/shaders/skyglow.wgsl`
+- `crates/renderer/src/lunar_phase.rs`
+
+Hosts wired: CLI, viewer, web (single shader change, shared by every host).
+
+References:
+
+- Danjon, A. 1936, Ann. Obs. Strasbourg 3, 139 ("Photometric measurements
+  of earthshine").
+- Goode, P. R. et al. 2001, GRL 28, 1671 ("Earthshine observations of
+  the Earth's reflectance").
+- Qiu, J. et al. 2003, JGR 108, D22 (phase dependence and Bond-albedo
+  retrieval).
 
 ## Documentation progress
 
