@@ -804,11 +804,65 @@ fn twilight_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> ve
     return hdr_flux_from_cd_m2(rgb_luminance, zeropoint) * solar_eclipse_daylight_factor();
 }
 
+// V-28: airglow is now decomposed into O I 557.7 nm + Na D 589 nm + OH
+// Meinel red/IR bands, with a per-line Van Rhijn limb-brightening factor
+// and a per-channel chromaticity vector. The Rust-side reference lives in
+// `astronomy::skyglow::airglow_components` / `airglow_rgb_s10`. We keep
+// `diffuse_sky_mag_per_arcsec2` for the ISL + zodiacal-light path; the
+// airglow term is added per channel in the fragment shader (see
+// `airglow_radiance_rgb`).
 fn diffuse_sky_mag_per_arcsec2(l_rad: f32, b_rad: f32, beta_rad: f32, sun_rel_lon_rad: f32) -> f32 {
     let isl = mag_to_s10(isl_mag_per_arcsec2(l_rad, b_rad)) * dust_transmission(l_rad, b_rad);
     let zl = zodiacal_light_s10(beta_rad, sun_rel_lon_rad);
-    let airglow = 145.0;
-    return s10_to_mag(isl + zl + airglow);
+    return s10_to_mag(isl + zl);
+}
+
+// Per-line zenith V-band surface brightness in S10(V) at moderate solar
+// activity. Total ≈ 145 S10(V), matching the Leinert §7 dark-site floor.
+const AIRGLOW_GREEN_ZENITH_S10: f32 = 80.0;
+const AIRGLOW_SODIUM_ZENITH_S10: f32 = 15.0;
+const AIRGLOW_OH_ZENITH_S10: f32 = 50.0;
+
+// Van Rhijn coefficient k = (R_earth / (R_earth + H))² per layer height.
+// H = 90 km (O I), 92 km (Na D), 87 km (OH).
+const AIRGLOW_GREEN_VR_K: f32 = 0.9722189;
+const AIRGLOW_SODIUM_VR_K: f32 = 0.9716166;
+const AIRGLOW_OH_VR_K: f32 = 0.9730228;
+
+// Per-line linear-sRGB chromaticity vectors, normalised so Rec.709
+// luminance Y = 1. Multiplying line V-band S10 by these gives per-channel
+// S10 while preserving the V-band luminance budget.
+const AIRGLOW_GREEN_RGB: vec3<f32> = vec3<f32>(0.000, 1.398, 0.000);
+const AIRGLOW_SODIUM_RGB: vec3<f32> = vec3<f32>(1.229, 1.033, 0.000);
+const AIRGLOW_OH_RGB: vec3<f32> = vec3<f32>(2.343, 0.703, 0.000);
+
+fn van_rhijn_factor_wgsl(altitude_rad: f32, k: f32) -> f32 {
+    let alt = max(altitude_rad, 0.0);
+    let cos_alt = cos(alt);
+    let denom = max(1.0 - k * cos_alt * cos_alt, 1e-6);
+    return inverseSqrt(denom);
+}
+
+// Per-channel airglow surface brightness in S10(V), summed over the three
+// emission systems with per-line Van Rhijn limb brightening. Activity is
+// fixed at the Leinert moderate-activity reference (1.0); a future uniform
+// could drive solar-cycle scaling without changing the colour split.
+fn airglow_rgb_s10(altitude_rad: f32) -> vec3<f32> {
+    let g = AIRGLOW_GREEN_ZENITH_S10 * van_rhijn_factor_wgsl(altitude_rad, AIRGLOW_GREEN_VR_K);
+    let n = AIRGLOW_SODIUM_ZENITH_S10 * van_rhijn_factor_wgsl(altitude_rad, AIRGLOW_SODIUM_VR_K);
+    let h = AIRGLOW_OH_ZENITH_S10 * van_rhijn_factor_wgsl(altitude_rad, AIRGLOW_OH_VR_K);
+    return g * AIRGLOW_GREEN_RGB + n * AIRGLOW_SODIUM_RGB + h * AIRGLOW_OH_RGB;
+}
+
+// Per-pixel airglow radiance in the renderer's HDR units. Each S10(V) unit
+// is a linear V-band flux per arcsec², so per-channel flux is linear in S10.
+fn airglow_radiance_rgb(altitude_rad: f32, zeropoint: f32, pixel_arcsec2: f32) -> vec3<f32> {
+    let s10_rgb = airglow_rgb_s10(altitude_rad);
+    // mag = OFFSET − 2.5 log10(s10);  flux = 10^(−0.4 (mag − zp − boost))
+    // ⇒ flux = s10 · 10^(0.4 (zp + boost − OFFSET))
+    let unit_flux = exp(NEG_OH_FOUR_LN10
+        * (S10_TO_MAG_ARCSEC2_OFFSET - PERCEPTUAL_BOOST_MAGS - zeropoint));
+    return s10_rgb * unit_flux * pixel_arcsec2;
 }
 
 fn isl_mag_per_arcsec2(l_rad: f32, b_rad: f32) -> f32 {
@@ -1064,7 +1118,13 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // remains V-band because the Leinert/SFD dark-sky fit is pinned there.
     let tint = vec3<f32>(0.92, 0.94, 1.00);
 
-    let night_radiance = tint * flux_per_pixel * attenuation;
+    // V-28: airglow is added per channel with its own chromaticity. The
+    // ISL + zodiacal-light term is the tinted broadband floor; the airglow
+    // term contributes the characteristic green/yellow/red emission-line
+    // mottle of a dark-site night sky.
+    let alt_rad_airglow = asin(sin_alt);
+    let airglow_flux = airglow_radiance_rgb(alt_rad_airglow, zeropoint, pixel_arcsec2);
+    let night_radiance = (tint * flux_per_pixel + airglow_flux) * attenuation;
     let moon_radiance = moonlit_sky_radiance(ray_dir, sin_alt, zeropoint);
     let twilight_radiance = twilight_sky_radiance(ray_dir, sin_alt, zeropoint);
     let day_radiance = sunlit_scattering_radiance(ray_dir, sin_alt, zeropoint);

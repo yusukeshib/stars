@@ -177,7 +177,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-25` | **Differential atmospheric dispersion** | ⬜ |
 | `V-26` | **Lunar earthshine** | ⬜ |
 | `V-27` | **Belt of Venus + Earth-shadow band** | ⬜ |
-| `V-28` | **Spectral airglow decomposition** | ⬜ |
+| `V-28` | **Spectral airglow decomposition** | ✅ |
 | `V-29` | Atmospheric refraction | ✅ |
 | `V-30` | Sun and Moon apparent topocentric state | ✅ |
 | `V-31` | Solar / lunar illuminants | ✅ |
@@ -869,7 +869,7 @@ resolution.
 
 ---
 
-### `V-28` Spectral airglow decomposition — ⬜
+### `V-28` Spectral airglow decomposition — ✅
 
 **Item.** Replace the single dark-sky airglow floor (currently one S10
 constant feeding all channels equally) with the three dominant atmospheric

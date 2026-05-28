@@ -606,6 +606,87 @@ Hosts wired: CLI / viewer / web.
 
 ---
 
+### Spectral airglow decomposition (`V-28`)
+
+Replaced the single dark-sky airglow floor (one S10 constant that fed all
+RGB channels equally through a cool-white tint) with the three dominant
+atmospheric emission systems: O I 557.7 nm green line, Na D 589 nm, and
+the OH Meinel red/IR bands. This is what gives a real dark-site night
+sky its characteristic faint green/red mottled tint and removes the
+unphysical pure-grey night floor.
+
+Scientific basis. Leinert et al. 1998 §7.5 tabulates the zenith airglow
+for a "moderate-activity" night: green line ≈ 250 R, Na D ≈ 30 R, OH
+Meinel ≈ 800 R integrated through the V band. The V-band-weighted S10(V)
+split used here — 80 + 15 + 50 — sums to the same ≈ 145 S10(V) floor
+that V-13 / V-21 were tuned against, so the total dark-sky luminance is
+preserved at zenith. Each layer is brightened toward the horizon by a
+Van Rhijn integral `1 / sqrt(1 − (R/(R+H))² sin² z)` evaluated with its
+own layer altitude (90 km O I, 92 km Na D, 87 km OH); at the geometric
+horizon every component reaches ≈ 5× its zenith value.
+
+Per-channel chromaticity uses fixed linear-sRGB tint vectors normalised
+to Rec. 709 luminance Y = 1, so multiplying the V-band S10 contribution
+of a line by its tint vector preserves the V-band luminance budget while
+giving each component its characteristic colour: green dominates G,
+Na D yellow contributes warm R + G, and the OH red/IR tail in V drives R.
+There is no B-channel contribution by construction.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/skyglow.rs`: new `airglow_components(altitude_rad,
+  activity_level) -> (green, sodium, oh)` and `airglow_rgb_s10(
+  altitude_rad, activity_level) -> [R, G, B]` evaluators plus the
+  `van_rhijn_factor(altitude_rad, layer_height_km)` helper and the
+  `AIRGLOW_{GREEN,SODIUM,OH}_RGB` chromaticity constants;
+  `diffuse_sky_mag_per_arcsec2` now folds in the V-band sum of the three
+  components instead of the hard-coded `145 S10(V)` floor.
+- `crates/renderer/src/shaders/skyglow.wgsl`: removed the
+  `let airglow = 145.0` term from `diffuse_sky_mag_per_arcsec2` and added
+  a parallel `airglow_radiance_rgb(altitude_rad, zeropoint,
+  pixel_arcsec2)` evaluator that mirrors the Rust API. The fragment
+  shader now sums `tint * isl_zl_flux + airglow_rgb_flux` before
+  applying the per-channel Kasten-Young extinction, so the airglow tint
+  remains visible exactly where the rest of the dark-sky model is
+  visible (above the geometric horizon under any non-OFF atmosphere
+  preset).
+
+Validation (`crates/astronomy/src/skyglow.rs::tests`):
+
+- `airglow_zenith_total_matches_leinert` — zenith total integrated
+  airglow in V band is within 10 % of the Leinert §7 reference
+  (145 S10(V) at moderate activity). Pinned per the ROADMAP V-28 spec.
+- `airglow_chromaticity_differs_from_neutral_grey` — |R−G|/Y ≥ 0.10
+  (documented threshold for the V-28 "removes the grey-floor"
+  acceptance), B/Y < 0.02, and per-channel V-band luminance equals the
+  V-band S10 sum (the chromaticity vectors are luminance-preserving by
+  construction).
+- `airglow_horizon_brighter_than_zenith` — every component is 4.5–6.5 ×
+  zenith at the geometric horizon (Van Rhijn limb brightening).
+- `van_rhijn_zenith_to_horizon` — the closed-form Van Rhijn factor
+  reproduces 1.0 at zenith and ≈5–6 at the horizon for a 90 km layer.
+- `airglow_activity_scaling_is_linear` — the `activity_level` knob is a
+  uniform multiplier across the three components.
+
+Deliberately out of scope for this slice. Activity-level scaling is a
+Rust API knob; no host uniform / UI control is added yet. The shader
+path hard-codes the Leinert moderate-activity reference. A follow-up
+could plumb the activity scale through the V-37 atmosphere state if a
+user-visible "solar-cycle" knob is wanted; the colour split would not
+need to change.
+
+References (also pinned in ROADMAP `V-28`):
+
+- Leinert, Ch. et al. 1998, A&AS 127, 1, §7.4–7.6.
+- Krassovsky, V. I., Shefov, N. N., Yarin, V. I. 1962, Planet. Space
+  Sci. 9, 883 (OH Meinel bands).
+- Roach, F. E. & Gordon, J. L. 1973, *The Light of the Night Sky*.
+
+Hosts wired: CLI / viewer / web (all driven through the existing
+skyglow shader pass).
+
+---
+
 ### Mutual planetary occultation (`V-51f`)
 
 Sixth slice of `V-51` and the last open producer in the unified
