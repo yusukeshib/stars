@@ -2606,6 +2606,74 @@ future renderer slices that visibly change a curated scene must
 regenerate `docs/assets/demo-gallery/<scene>.png` and update its
 manifest hash in the same PR.
 
+## Python bindings (`L-21`)
+
+First rung of the PyO3 binding plan. Adds a self-contained
+`bindings/python/` crate (`stars-py`) that wraps the read-only
+`astronomy` + `catalog` public surface and is callable from a Jupyter
+notebook so reviewers can reproduce the renderer's apparent positions
+and magnitudes without spawning the CLI.
+
+What shipped:
+
+- `bindings/python/Cargo.toml`: `cdylib + rlib` PyO3 0.22 crate with
+  the `extension-module` feature gated behind a default-off flag so
+  `cargo check` does not need to find a Python interpreter. `abi3-py39`
+  is enabled so one wheel works on every supported interpreter.
+- `bindings/python/src/lib.rs`: `#[pyclass]` wrappers for `Observer`,
+  `ApparentSun`, `ApparentMoon`, `SunMoon`, `ApparentPlanet`,
+  `ApparentGalileanMoon`, `ApparentTitan`, `StarCatalog`, and `Star`,
+  plus module-level `apparent_sun_moon`, `apparent_planets`,
+  `apparent_galilean_moons`, `apparent_titan`, and
+  `observer_from_unix_seconds` entry points. Every apparent-body class
+  carries an `.altaz(observer)` method that runs the same
+  `equatorial_to_horizontal` helper the renderer uses, so notebook
+  altitudes round-trip with the V-23 / V-24 / V-29 paths.
+- `bindings/python/tests/smoke.py`: importable smoke test at the
+  V-27 Tokyo civil-twilight epoch (2026-06-21T10:20:00Z), prints the
+  Sun / Moon altitude and the first three planets plus the embedded
+  catalog size. The script is what `maturin develop --features
+  extension-module && python tests/smoke.py` verifies locally.
+- `bindings/python/README.md`: build instructions, API surface table,
+  scope and non-goals.
+- `Makefile`: new `pyo3-check` target (`cargo check -p stars-py`)
+  appended to `ci`. The wheel build is documented but **not** wired
+  into CI — the GitHub Actions runner does not currently ship a
+  Python toolchain.
+- Workspace member: `bindings/python` added to root `Cargo.toml`.
+
+Validation (4 unit tests in `bindings/python/src/lib.rs::tests`):
+
+- `observer_round_trips_lat_lon_degrees` — lat/lon degree
+  round-trip through the constructor matches inputs to < 1e-9.
+- `apparent_planets_match_astronomy_order` — binding planet vector is
+  byte-equivalent to `apparent_planets_topocentric` in both order and
+  apparent RA.
+- `embedded_catalog_loads_and_index_errors_safely` — catalog is
+  non-empty, valid indices succeed, out-of-range index raises a
+  `PyIndexError` (mapped to Python `IndexError`) rather than panicking.
+- `moon_altitude_from_pure_rust_entry_point_is_finite` — the same
+  pure-Rust entry point the Python `smoke.py` calls produces a finite
+  Moon altitude within ±π/2 at the V-27 Tokyo epoch. This is the
+  pinning gate the L-21 follow-up will tighten once a wheel matrix is
+  in CI and the notebook side starts cross-checking.
+
+Hosts wired: bindings live alongside the existing hosts; not a host
+itself. CLI / viewer / web unchanged.
+
+Docs updated: `ROADMAP.md` (`L-21` moved to `⏳ read-only surface
+shipped`, follow-up scope tightened to wheel matrix + notebook port +
+planning-helper expansion), `ARCHITECTURE.md` (new `bindings/python/`
+row in the crate map), `bindings/python/README.md` (new).
+
+Files touched:
+
+- `bindings/python/Cargo.toml`, `bindings/python/src/lib.rs`,
+  `bindings/python/tests/smoke.py`, `bindings/python/README.md`.
+- `Cargo.toml` (workspace `members`).
+- `Makefile` (`pyo3-check` target, `ci` append).
+- `ROADMAP.md`, `ARCHITECTURE.md`, `PROGRESS.md`.
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

@@ -233,7 +233,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-18` | Identifier preservation through the renderer | ⬜ |
 | `L-19` | SIMBAD / VizieR deep links | ⬜ |
 | `L-20` | Variable star light curves | ⬜ |
-| `L-21` | Python bindings (PyO3) | ⬜ |
+| `L-21` | Python bindings (PyO3) | ⏳ read-only surface shipped |
 | `L-22` | Headless server mode | ⬜ |
 | `L-23` | Guided education mode | ⬜ |
 | `L-24` | Accessibility pass | ⬜ |
@@ -2958,24 +2958,50 @@ predicted Δm in metadata JSON; viewer follows.
 
 ## Bindings and hosts
 
-### `L-21` Python bindings (PyO3) — ⬜
+### `L-21` Python bindings (PyO3) — ⏳ read-only surface shipped
 
-**Item.** `astronomy` + `catalog` callable from Jupyter via PyO3 / maturin,
-so a notebook can reproduce the same numbers the rendering pipeline
-consumes. Early notebook examples in `examples/notebooks` use CLI renders
-+ JSON sessions until full bindings land.
+**Shipped this rung.** A self-contained `bindings/python/` crate
+(`stars-py`, `cdylib + rlib`) wrapping the read-only `astronomy` +
+`catalog` public surface through PyO3 0.22 with an `abi3-py39`
+ABI-stable build. The wrapper exposes:
 
-**Scientific basis.** Reproducibility-by-binding: a teacher / reviewer
-should be able to call the exact functions the renderer calls.
+- `Observer` (lat / lon / UTC JD, plus a `from_unix_seconds` ctor for
+  `datetime.timestamp()` notebook patterns),
+- `apparent_sun_moon`, `apparent_planets`, `apparent_galilean_moons`,
+  `apparent_titan` topocentric helpers,
+- `StarCatalog.load_embedded` over the V-23 compact binary baked at
+  build time,
+- `.altaz(observer)` on every apparent-body class so a notebook can
+  read horizontal coordinates without re-implementing
+  `equatorial_to_horizontal`.
 
-**Implementation scope.**
-- New crate `crates/pyastronomy` exposing the `astronomy` public API
-  through PyO3.
-- `crates/pycatalog` similarly for catalog access.
-- `pip install stars-astronomy` wheel built via maturin in CI for
-  Linux / macOS / Windows.
-- Notebook examples in `examples/notebooks` consume the bindings and
-  match the corresponding CLI session render.
+The binding is read-only and side-effect-free — no rendering, no scene
+JSON parsing, no GPU — so reviewers get reproducibility-by-binding
+without dragging in the renderer / WGPU graph. Wheel build is
+documented in `bindings/python/README.md` (`maturin develop
+--features extension-module`); a CI wheel matrix and the notebook-
+side consumer port are tracked as the L-21 follow-up scope.
+
+**Gate.** `make pyo3-check` (`cargo check -p stars-py`) plus four
+in-crate Rust unit tests — Observer round-trip, planet-order match
+with `apparent_planets_topocentric`, embedded-catalog load + index
+error, and a pure-Rust Moon-altitude smoke probe at the V-27 Tokyo
+epoch — are wired into `make ci`. The Python-toolchain wheel build is
+opt-in via the `extension-module` feature and **not** required by CI.
+
+**Follow-up scope (still ⬜).**
+
+- `pip install stars-py` wheel matrix built via maturin in CI for
+  Linux / macOS / Windows. Needs a Python toolchain in the GitHub
+  Actions job; the current rung documents the local `maturin develop`
+  path only.
+- Port `examples/notebooks/session_reproducibility.py` from CLI-render
+  + JSON parsing onto the binding so the notebook directly cross-
+  checks the renderer's numbers without a CLI shell-out.
+- Expand the surface to occultation / planning helpers (`active_occluders`,
+  `find_lunar_occultation`, `evening_plan`) once the read-only base
+  has stabilised. The shipped surface is intentionally limited to the
+  apparent-body and catalog calls a notebook reviewer needs first.
 
 **Tests / validation.**
 - Bind-time tests on representative functions

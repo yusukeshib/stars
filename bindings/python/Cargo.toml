@@ -1,0 +1,22 @@
+[package]
+name = "stars-py"
+version = "0.1.0"
+edition = "2021"
+description = "Read-only Python bindings (PyO3) for the stars astronomy + catalog API (L-21)."
+license = "see-upstream"
+
+[lib]
+name = "stars_py"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# `extension-module` is required when building the cdylib loadable from Python
+# (via maturin). Plain `cargo check` / `cargo test` does not enable it so the
+# binding stays self-contained in `make ci` without a Python toolchain.
+default = []
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["abi3-py39"] }
+astronomy = { path = "../../crates/astronomy" }
+catalog = { path = "../../crates/catalog", default-features = false, features = ["embedded"] }

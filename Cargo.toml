@@ -8,6 +8,7 @@ members = [
     "crates/renderer",
     "apps/cli",
     "apps/viewer",
+    "bindings/python",
 ]
 # apps/web is excluded from the workspace because it only compiles for wasm32-unknown-unknown.
 # Build it with: wasm-pack build apps/web --target web --out-dir frontend/pkg
