@@ -1,4 +1,4 @@
-.PHONY: cli viewer dev web web-build web-install web-dev frontend-check setup scene-presets validation-gallery validation-gallery-check demo-gallery demo-gallery-check notebook-check manifest-check fmt clippy test ci clean
+.PHONY: cli viewer dev web web-build web-install web-dev frontend-check setup scene-presets validation-gallery validation-gallery-check demo-gallery demo-gallery-check notebook-check manifest-check pyo3-check fmt clippy test ci clean
 
 # PNG-output CLI (override ARGS, e.g. `make cli ARGS="--lat 35.68 --lng 139.69 -o /tmp/sky.png"`).
 ARGS ?= --lat 35.68 --lng 139.69 --azimuth 180 --altitude 30 -o stars.png
@@ -59,6 +59,14 @@ notebook-check:
 manifest-check:
 	cargo run -q -p stars-manifest --bin check-manifest
 
+# L-21 PyO3 binding: type-check the wrapper crate without requiring a Python
+# toolchain. The wheel build (`maturin develop --features extension-module`)
+# is documented in bindings/python/README.md and is not part of `make ci`
+# yet — the cargo check below + the binding's pure-Rust unit tests are the
+# present gate.
+pyo3-check:
+	cargo check -p stars-py
+
 # Lint & test
 fmt:
 	cargo fmt --all
@@ -77,6 +85,7 @@ ci: fmt
 	$(MAKE) notebook-check
 	cargo check -p stars-web --target wasm32-unknown-unknown --manifest-path apps/web/Cargo.toml
 	$(MAKE) frontend-check
+	$(MAKE) pyo3-check
 
 # Clean
 clean:

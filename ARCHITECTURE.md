@@ -34,6 +34,10 @@ between engine crates and host applications.
           ▼                      ▼                      ▼
       apps/cli               apps/viewer             apps/web
       PNG output             native window           WASM + canvas
+
+                  bindings/python  (read-only PyO3 wrapper, L-21)
+                  ▲
+                  └── calls astronomy + catalog directly; no renderer.
 ```
 
 `crates/common` is intentionally outside the engine tier even though it lives
@@ -122,6 +126,21 @@ Hosts own platform lifecycle:
   surface resize, input, and frame pacing;
 - `apps/web`: expose a WASM `StarView`, keep JS/UI state, load/copy/download
   JSON sessions, resize the canvas, and call into the shared renderer.
+
+### `bindings/python` (L-21, read-only)
+
+PyO3 wrapper around the **read-only** `astronomy` + `catalog` public
+surface. Built as a `cdylib + rlib` (`stars-py`) and loaded from a
+Python interpreter via `maturin develop --features extension-module`;
+`cargo check -p stars-py` is the plain `make ci` gate via
+`make pyo3-check`. The binding sits **outside** the engine tier: it
+calls `Observer`, `apparent_sun_moon`, `apparent_planets`,
+`apparent_galilean_moons`, `apparent_titan`, and `StarCatalog`, plus
+`.altaz(observer)` projections, but does not pull in `renderer`,
+`common`, or any host crate. Notebook reviewers can therefore
+reproduce the exact apparent positions and magnitudes the renderer
+consumes without dragging in WGPU. Wheel-matrix CI and the
+notebook-side consumer port are tracked as the L-21 follow-up.
 
 ## Coordinate and time conventions
 
