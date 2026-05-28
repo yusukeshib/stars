@@ -1,20 +1,16 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use astronomy::Observer;
 use clap::Parser;
-use renderer::{
-    Atmosphere, Camera, LocalView, OverlayConfig, Renderer, StarInstance,
-    DEFAULT_SCREEN_LIMITING_MAGNITUDE,
-};
+use renderer::{LocalView, DEFAULT_SCREEN_LIMITING_MAGNITUDE};
 use stars_host_common::{
     atmosphere_from_args, eyepiece_from_args, hyg_catalog_snapshot, light_pollution_from_args,
-    load_session, load_star_instances_from_file, overlay_config_from_args,
-    parse_time_to_time_scales, save_session, scene_from_preset, scene_preset_infos,
+    load_session, overlay_config_from_args, parse_time_to_time_scales,
+    render_scene_from_catalog_path, save_session, scene_from_preset, scene_preset_infos,
     scintillation_from_args, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
     CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides, LightPollutionOverrides,
-    OverlayArg, ProjectionArg, ScenePresetArg, ScintillationOverrides, SessionScene, StarSession,
-    ViewpointArg,
+    OverlayArg, ProjectionArg, RenderOptions, ScenePresetArg, ScintillationOverrides, SessionScene,
+    StarSession, ViewpointArg,
 };
 
 /// Render the night sky as seen from a given observer to a PNG.
@@ -409,34 +405,14 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let catalog_path = scene
-        .catalog
-        .path
-        .as_deref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| args.catalog.clone());
-    let instances = load_star_instances_from_file(&catalog_path, scene.catalog.limiting_magnitude)?;
-    log::info!("Loaded {} stars", instances.len());
-
-    let observer =
-        Observer::from_degrees_with_time(scene.latitude_deg, scene.longitude_deg, scene.time);
-    let pixels = pollster::block_on(render_to_pixels(
-        observer,
-        scene.view,
-        scene.atmosphere,
-        scene.scintillation,
-        scene.light_pollution,
-        !args.no_skyglow,
-        scene.planets_enabled,
-        scene.projection,
-        scene.viewpoint,
-        scene.external_viewpoint,
-        scene.eyepiece,
-        scene.catalog.limiting_magnitude,
-        args.width,
-        args.height,
-        &instances,
-        &scene.overlays,
+    let pixels = pollster::block_on(render_scene_from_catalog_path(
+        &scene,
+        &args.catalog,
+        RenderOptions {
+            width: args.width,
+            height: args.height,
+            skyglow_enabled: !args.no_skyglow,
+        },
     ))?;
 
     let img = image::RgbaImage::from_raw(args.width, args.height, pixels)
@@ -464,136 +440,4 @@ fn vec3_arg(values: &Option<Vec<f32>>) -> Option<[f32; 3]> {
         return None;
     };
     Some([*x, *y, *z])
-}
-
-const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
-
-#[allow(clippy::too_many_arguments)]
-async fn render_to_pixels(
-    observer: Observer,
-    view: LocalView,
-    atmosphere: Atmosphere,
-    scintillation: renderer::Scintillation,
-    light_pollution: renderer::LightPollution,
-    skyglow_enabled: bool,
-    planets_enabled: bool,
-    projection: renderer::SkyProjection,
-    viewpoint: renderer::SkyViewpoint,
-    external_viewpoint: renderer::ExternalViewpoint,
-    eyepiece: renderer::EyepieceSimulation,
-    limiting_mag: f32,
-    width: u32,
-    height: u32,
-    stars: &[StarInstance],
-    overlays: &OverlayConfig,
-) -> Result<Vec<u8>> {
-    let instance = wgpu::Instance::default();
-    let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions::default())
-        .await
-        .context("No suitable GPU adapter found")?;
-    let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            label: Some("Stars Headless Device"),
-            ..Default::default()
-        })
-        .await
-        .context("Failed to create device")?;
-
-    let target = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Render Target"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: TEXTURE_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
-
-    let bytes_per_pixel: u32 = 4;
-    let unpadded_bytes_per_row = width * bytes_per_pixel;
-    let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
-        * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-
-    let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Readback Buffer"),
-        size: (padded_bytes_per_row * height) as u64,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-
-    let mut renderer = Renderer::new(&device, TEXTURE_FORMAT, width, height, stars);
-    renderer.set_overlays(&device, overlays);
-    renderer.set_skyglow_enabled(skyglow_enabled);
-    let mut camera = Camera::new(observer, view, width as f32 / height as f32);
-    camera.atmosphere = atmosphere;
-    camera.scintillation = scintillation;
-    camera.light_pollution = light_pollution;
-    camera.planets_enabled = planets_enabled;
-    camera.projection = projection;
-    camera.viewpoint = viewpoint;
-    camera.external_viewpoint = external_viewpoint;
-    camera.eyepiece = eyepiece;
-    camera.limiting_magnitude = limiting_mag;
-    renderer.update_camera(&queue, &camera, width, height);
-
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("Headless Encoder"),
-    });
-
-    renderer.render(&mut encoder, &target_view);
-
-    encoder.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo {
-            texture: &target,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &output_buffer,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(padded_bytes_per_row),
-                rows_per_image: Some(height),
-            },
-        },
-        wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-
-    queue.submit(std::iter::once(encoder.finish()));
-
-    let buffer_slice = output_buffer.slice(..);
-    let (tx, rx) = std::sync::mpsc::channel();
-    buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-        let _ = tx.send(result);
-    });
-    device
-        .poll(wgpu::PollType::wait_indefinitely())
-        .context("device.poll failed")?;
-    rx.recv()
-        .context("Buffer mapping channel closed")?
-        .context("Buffer mapping failed")?;
-
-    let data = buffer_slice.get_mapped_range();
-    let mut pixels = Vec::with_capacity((width * height * bytes_per_pixel) as usize);
-    for row in 0..height {
-        let start = (row * padded_bytes_per_row) as usize;
-        let end = start + unpadded_bytes_per_row as usize;
-        pixels.extend_from_slice(&data[start..end]);
-    }
-    drop(data);
-    output_buffer.unmap();
-
-    Ok(pixels)
 }

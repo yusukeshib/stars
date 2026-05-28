@@ -15,7 +15,6 @@ path = "examples/session_table.rs"
 renderer = { path = "../../crates/renderer" }
 astronomy = { path = "../../crates/astronomy" }
 stars-host-common = { path = "../../crates/common" }
-wgpu = { workspace = true }
 pollster = "0.4"
 env_logger = "0.11"
 log = { workspace = true }

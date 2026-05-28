@@ -115,8 +115,9 @@ crates/astronomy   astronomical time, coordinates, corrections, ephemerides,
                    photometry, atmosphere, skyglow, planning helpers
 crates/catalog     HYG catalog loading and colour / coordinate conversion
 crates/renderer    wgpu renderer, camera, overlays, tonemap, star instances
-crates/common      native-host glue shared by CLI and desktop viewer
+crates/common      native-host glue shared by CLI, desktop viewer, and server
 apps/cli           headless PNG renderer
+apps/server        headless HTTP host (axum)
 apps/viewer        native winit desktop viewer
 apps/web           WASM engine wrapper and frontend UI
 scripts            catalog download, README image generation, and WASM build helpers

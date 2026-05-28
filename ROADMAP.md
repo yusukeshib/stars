@@ -234,7 +234,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-19` | SIMBAD / VizieR deep links | ⬜ |
 | `L-20` | Variable star light curves | ⬜ |
 | `L-21` | Python bindings (PyO3) | ⏳ read-only surface shipped |
-| `L-22` | Headless server mode | ⬜ |
+| `L-22` | Headless server mode | ✅ |
 | `L-23` | Guided education mode | ⬜ |
 | `L-24` | Accessibility pass | ⬜ |
 | `L-25` | `CITATION.cff` + Zenodo DOI | ✅ |
@@ -3015,7 +3015,7 @@ itself.
 
 ---
 
-### `L-22` Headless server mode — ⬜
+### `L-22` Headless server mode — ✅
 
 **Item.** HTTP service that returns PNGs and metadata JSON from a supplied
 scene / session. Already ~90% there in `apps/cli`; the missing piece is
