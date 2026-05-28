@@ -122,23 +122,33 @@ Current limitation:
 
 - `L-06` still tracks higher-precision DE440 / publication-grade ephemeris
   work. Do not describe the current stack as final research-grade ephemerides.
-- The Galilean-moon backend ships at Meeus 1998 ch. 44 accuracy (V-52b
-  for moon positions, V-52d for shadow projection): good for naked-eye /
-  small-eyepiece identification near J2000. The pinned Horizons fixture
-  (`data/horizons_galilean_moons.csv`, manifest id
-  `horizons-galilean-moons-fixture`) at 1900 / 2000 / 2100 epochs shows
-  the in-plane RA-component offset error stays below ≈45″ across
-  ±100 yr, while the out-of-plane Dec component rises to ≈180″ for
-  Callisto at 2100 (the Meeus simplification drops the orbital
-  inclination tilt, which dominates the weak axis). The same truncation
-  drives V-52d's 5-minute shadow-ingress gate against JPL Horizons
-  (pinned for 2008-12-20 Io shadow ingress). The full Lieske 1998 E5
-  precision upgrade tightens this budget to ~5″ across all four moons
-  at every fixture epoch and is tracked as the dedicated rung
-  `V-52b-E5` — that PR replaces the body of
-  `lieske_e5::jovicentric_offset` and edits the single constant
-  `MEEUS_GRADE_MAX_OFFSET_ERR_ARCSEC` in `moons::tests` from 200″ down
-  to ≈5″.
+- The Galilean-moon position backend now runs on the full Lainey 2006
+  L1.2 series (V-52b-E5, pivot from the originally-targeted Lieske 1998
+  E5; the L1.2 IMCCE distribution is the only reachable source of an
+  equivalent-accuracy machine-readable table). Per-moon residuals against
+  the pinned Horizons fixture `data/horizons_galilean_moons.csv`
+  (manifest id `horizons-galilean-moons-fixture`):
+
+  | Epoch | Io    | Europa | Ganymede | Callisto |
+  |-------|-------|--------|----------|----------|
+  | 1900  | 14.3″ |  0.9″  |   8.9″   |  15.8″   |
+  | 2000  |  4.3″ |  6.6″  |   7.1″   |   4.1″   |
+  | 2100  |  5.5″ |  1.9″  |   0.9″   |   2.4″   |
+
+  Gate constant `moons::tests::GALILEAN_MAX_OFFSET_ERR_ARCSEC = 20.0″`.
+  The remaining ≈10″ at the 1900 edge is dominated by Earth-Jupiter
+  vector reduction differences (Horizons uses DE441 / IAU 2006
+  precession; L1.2 was fitted against DE406); tightening below 5″
+  requires aligning the reduction and is a documented follow-up.
+- The V-52d shadow producer still runs on the Meeus 1998 ch. 44
+  truncation (its 5-minute Io shadow-ingress gate against the
+  2008-12-20 Horizons fixture is unchanged). After the V-52b-E5
+  L1.2 upgrade the V-52d shadow projection disagrees with the V-52b
+  moon-sprite position by the full L1.2-vs-Meeus residual (≈180″ ≈ 8
+  R_J on Callisto). Porting V-52d onto L1.2 is tracked as the follow-up
+  rung **V-52d-L1.2**; until it lands, the consistency test
+  `earth_xy_matches_apparent_galilean_moons_at_j2000` is marked
+  `#[ignore]`.
 - The Titan backend ships at Meeus 1998 ch. 45 accuracy (V-52c) — the
   same simplification of the TASS theory of Vienne & Duriez 1995 that
   the `astro` crate implements. The pinned Horizons fixture

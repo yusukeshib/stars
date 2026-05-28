@@ -266,8 +266,23 @@ point-in-region test.
 # ---------------------------------------------------------------------------
 
 [[artifact]]
+id = "lainey-2006-l12-galilean-coeffs"
+description = "IMCCE Lainey 2006 L1.2 semi-analytic Galilean-satellite coefficient table (Lainey, Duriez, Vienne 2006, A&A 456, 783). Embedded at compile time via include_str! into crates/astronomy/src/moons/lainey_l1.rs to back the V-52b-E5 precision upgrade."
+kind = "embedded"
+path = "crates/astronomy/data/BisL1.2.dat"
+sha256 = "4b72cf1a4e5f9cc9ebe00ebe66f740d408535938bf52ae4cd63584d872a90d06"
+bytes = 84384
+source = "ftp://ftp.imcce.fr/pub/ephem/satel/galilean/L1/L1.2/BisL1.2.dat"
+archive_id = "IMCCE L1.2 distribution, 2006-02-14"
+citation = "Lainey, V., Duriez, L., Vienne, A. 2006, A&A 456, 783 — 'Synthetic representation of the galilean satellites orbital motions from L1 ephemerides'."
+license = "see-upstream"
+license_url = "https://ftp.imcce.fr/pub/ephem/satel/galilean/L1/L1.2/README_L1.2"
+preprocessing = "curl -sSL -o crates/astronomy/data/BisL1.2.dat https://ftp.imcce.fr/pub/ephem/satel/galilean/L1/L1.2/BisL1.2.dat"
+used_by = ["crates/astronomy/src/moons/lainey_l1.rs"]
+
+[[artifact]]
 id = "horizons-galilean-moons-fixture"
-description = "JPL Horizons reference fixture for the Galilean moons (Jupiter + Io/Europa/Ganymede/Callisto) at three geocentric epochs spanning the ROADMAP ±100-yr budget: 1900-01-01, 2000-01-01, 2100-01-01 (all 00:00 UT). Pinned target for the V-52b-E5 Lieske 1998 E5 precision upgrade."
+description = "JPL Horizons reference fixture for the Galilean moons (Jupiter + Io/Europa/Ganymede/Callisto) at three geocentric epochs spanning the ROADMAP ±100-yr budget: 1900-01-01, 2000-01-01, 2100-01-01 (all 00:00 UT). Pinned target for the V-52b-E5 precision upgrade (Lainey 2006 L1.2)."
 kind = "generated"
 path = "data/horizons_galilean_moons.csv"
 sha256 = "d64090d295427897de7a583b17f916e227f0db31cc99688cfe682abe8388b672"

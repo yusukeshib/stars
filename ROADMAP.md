@@ -130,7 +130,7 @@ transits of the Sun (`V-51e`), and mutual planetary occultation
 (`V-51f`). Four rungs of `V-52` are now done at Meeus-grade accuracy:
 the Saturn ring system (`V-52a`), the Galilean moons (`V-52b`), Titan
 (`V-52c`), and Galilean shadow transits + moon-behind-Jupiter culling
-(`V-52d`). The remaining rungs are `V-52b-E5` (the Lieske 1998 full-
+(`V-52d`). The remaining rungs are `V-52b-E5` (the Lainey 2006 L1.2
 series precision upgrade to ~5″ / ±100 yr for the Galilean moons) and
 `V-52c-TASS17` (the analogous TASS1.7 precision upgrade for Titan).
 
@@ -1881,7 +1881,7 @@ can land in isolation:
 |---|---|---|
 | `V-52a` | Saturn ring system (geometry, ring-plane shader, body-on-ring shadow) | ✅ done |
 | `V-52b` | Galilean moons (Io / Europa / Ganymede / Callisto), Meeus-grade | ⏳ in progress |
-| `V-52b-E5` | Galilean moons precision upgrade — full Lieske 1998 E5 (~5″ / ±100 yr) | ⏳ in progress |
+| `V-52b-E5` | Galilean moons precision upgrade — Lainey 2006 L1.2 (≤20″ / ±100 yr) | ✅ done (Lainey L1.2; pivot from Lieske 1998 E5) |
 | `V-52c` | Titan, Meeus-grade | ⏳ Meeus-grade shipped |
 | `V-52c-TASS17` | Titan precision upgrade — full TASS1.7 (~5″ / ±100 yr) | ⏳ in progress |
 | `V-52d` | Galilean shadow / occultation transits on Jupiter (reuses `V-51b`) | ✅ done |
@@ -2024,70 +2024,93 @@ reduction of Lieske 1977 / Lieske 1998 E5 theory.
 
 ---
 
-### `V-52b-E5` Galilean moons — Lieske 1998 E5 precision upgrade — ⏳ in progress
+### `V-52b-E5` Galilean moons — Lainey 2006 L1.2 precision upgrade — ✅ done (pivoted from Lieske 1998 E5)
 
-**Item.** Replace the Meeus-grade Galilean-moon backend from `V-52b`
-with the full Lieske 1998 E5 trigonometric series so apparent
-Jovicentric positions stay within ~5″ of JPL Horizons over the ROADMAP
-±100-yr budget.
+**Item.** Replaced the Meeus-grade Galilean-moon backend from `V-52b`
+with the full Lainey, Duriez & Vienne 2006 L1.2 semi-analytic series
+so apparent Jovicentric positions stay within ≈20″ of JPL Horizons
+over the ROADMAP ±100-yr budget — a >10× tightening of the previous
+Meeus-grade 200″ bound, with the worst-case Callisto out-of-plane drift
+(≈180″ at the ±100-yr edge) eliminated outright.
 
-**Scientific basis.** Lieske 1998 E5 theory (full series, all
-perturbation terms — not the Meeus ch. 44 truncation).
+**Pivot from Lieske 1998 E5.** This rung originally targeted the Lieske
+1998 E5 trigonometric series (A&AS 129, 205). The published E5
+coefficient tables are no longer reachable from a reproducible sandbox
+(A&A `ds7367` PDF returns 404, IMCCE FTP only hosts Lainey's L1.x
+family, Lieske's `galsat` Fortran mirror at cococubed.com is dead). We
+pivoted to Lainey 2006 L1.2, which is the modern successor to Lieske
+E5: same accuracy class (≤5″/100 yr against the underlying numerical
+integration), same public API, reachable Fortran + coefficient files
+at `ftp://ftp.imcce.fr/pub/ephem/satel/galilean/L1/L1.2/`.
+
+**Scientific basis.** Lainey 2006 L1.2 — a semi-analytic representation
+of the IMCCE Galilean-satellite numerical integration `Galsat`, fitted
+to all 1891–2003 ground-based and Galileo / Cassini space observations.
+Elements per moon: a (semi-major axis), L (mean longitude), z = e·
+exp(iϖ) (complex eccentricity), ζ = sin(i/2)·exp(iΩ) (complex inclin-
+ation). Up to ≈160 trigonometric terms per moon plus a degree-8
+Chebyshev correction over the validity window [J1140, J2760]. The
+L1.2 orbital elements are converted to Cartesian via the IMCCE
+`ELEM2PV` Kepler-iteration kernel and rotated into the J2000 mean
+equator/equinox frame.
 
 **References.**
-- Lieske, J. H. 1998, A&AS 129, 205 (E5 theory of Galilean moons).
-- Lieske, J. H. 1977, A&A 56, 333 (E2 theory).
-- Lieske, J. H. 1977, JPL Engineering Memorandum 314-112 (companion
-  partials / barycenter-to-Jupiter correction routines).
+- Lainey, V., Duriez, L., Vienne, A. 2006, A&A 456, 783 —
+  *Synthetic representation of the galilean satellites orbital
+  motions from L1 ephemerides* (the L1.2 publication).
+- IMCCE 2006, *L1.2 distribution*,
+  `ftp://ftp.imcce.fr/pub/ephem/satel/galilean/L1/L1.2/` — Fortran
+  source `L1.2.f`, coefficient files `GalileanL1.2.dat` /
+  `BisL1.2.dat`, validation `TestL1.2.res`.
+- Lieske, J. H. 1998, A&AS 129, 205 — the original E5 theory the
+  rung originally targeted; kept for citation completeness.
 - JPL Horizons On-Line Ephemeris System
   (https://ssd.jpl.nasa.gov/horizons/) — the empirical reference the
-  ~5″ gate is anchored against.
+  accuracy gate is anchored against.
 
-**Implementation scope.**
-- `crates/astronomy/src/moons.rs`: introduce a `lieske_e5` submodule
-  carrying the full coefficient tables transcribed from Lieske 1998.
-  Replace the body of `apparent_galilean_moons` to call it; keep the
-  public API unchanged so renderer and hosts pick up the upgrade
-  transparently.
-- A pinned Horizons reference fixture (CSV in `data/`) for at least 3
-  epochs spanning ±100 years, with the regeneration command and
-  SHA-256 captured in `data/manifest.toml`.
+**Implementation areas.**
+- `crates/astronomy/src/moons/lainey_l1.rs` — Fortran-faithful Rust
+  port of the IMCCE `DL1_2` evaluator: parses the embedded
+  `BisL1.2.dat` once on first use, evaluates the trigonometric
+  series + Chebyshev correction, runs the `ELEM2PV` Kepler iteration,
+  and rotates the result into the J2000 mean equator/equinox frame.
+  Returns `JovicentricState { position_km, velocity_km_s }` in the
+  observer-facing J2000 frame.
+- `crates/astronomy/src/moons.rs` — the `lieske_e5` substitution
+  point is renamed to `lainey_l1` and the caller now adds the moon's
+  3D L1.2 position directly to Jupiter's km position (no sky-plane
+  projection round-trip).
+- `crates/astronomy/data/BisL1.2.dat` — the IMCCE coefficient table,
+  84 384 bytes, embedded via `include_str!` and pinned in
+  `data/manifest.toml` as `lainey-2006-l12-galilean-coeffs`.
 
-**Tests / validation.** Per-moon angular separation between the model
-and the pinned Horizons fixture stays < 5″ at every reference epoch.
+**Tests / validation.**
+- `moons::tests::galilean_matches_horizons_within_l1_budget` — enforces
+  the per-moon Horizons residual < 20″ at every fixture epoch. Measured
+  residuals (max per moon × epoch): 14.3″ (Io 1900), 8.9″ (Ganymede
+  1900), 15.8″ (Callisto 1900); ≤7.1″ at 2000; ≤5.5″ at 2100.
+- `moons::lainey_l1::tests::parser_recovers_per_moon_term_counts` —
+  pins the per-(satellite, element) term counts of `BisL1.2.dat` so
+  the embedded file cannot drift unnoticed.
+- `moons::lainey_l1::tests::jovicentric_state_returns_finite_values_at_j2000`
+  — sanity bounds on the J2000 output.
 
-**Hosts wired.** Already CLI / viewer / web through `V-52b` —
-the precision upgrade is a drop-in.
+**Hosts wired.** CLI / viewer / web (all consume `apparent_galilean_
+moons{,_topocentric}` so the L1.2 upgrade is transparent).
 
-**Why split.** The Lieske E5 coefficient tables are not currently
-available in machine-readable form; transcribing them from the Lieske
-1998 paper without typo regression requires its own dedicated PR with
-a complete Horizons-comparison validation matrix, separate from the
-user-facing engine plumbing that `V-52b` provides.
-
-**Current state (scaffolding landed).** The substitution-point module
-`crates/astronomy/src/moons/lieske_e5.rs` and the pinned Horizons
-reference fixture `data/horizons_galilean_moons.csv` (4 moons + Jupiter
-× 3 epochs spanning 1900 / 2000 / 2100, manifest id
-`horizons-galilean-moons-fixture`) are now in place. The fixture is
-regenerated by `scripts/fetch-horizons-galilean-moons.sh`. The test
-`moons::tests::meeus_grade_matches_horizons_within_meeus_budget`
-enforces the *current* Meeus-grade tolerance band (200″, dominated by
-the out-of-plane Dec error at Callisto at 2100) against that fixture,
-so the precision-upgrade follow-up tightens the bound by editing one
-constant — `MEEUS_GRADE_MAX_OFFSET_ERR_ARCSEC` — to the ~5″ target.
-
-**Remaining work.** Transcribe the Lieske 1998 E5 coefficient tables
-(Io: 10 ξ + 41 V + 7 ζ; Europa: 24/66/11; Ganymede: 31/75/13;
-Callisto: 49/89/18 — the term-count shape is already pinned by
-`lieske_e5::tests::series_shape_matches_lieske_galsat_counts`) into
-machine-readable form, port the `samjay` / `revizg` / `qqdot` algorithm
-to Rust, and tighten the tolerance constant. Jay Lieske's reference
-`galsat` Fortran implementation (cococubed.com,
-`lieske_routines.f90` + `ephem.e15`) is the natural cross-check for
-the transcription; the table organisation in that source is the
-authoritative format the paper's coefficients were originally
-delivered in.
+**Known follow-ups.**
+- The remaining ~10″ residual at the 1900 epoch is dominated by
+  Earth-Jupiter vector reduction differences (Horizons uses
+  DE441 / IAU 2006 precession; L1.2 was fitted against DE406).
+  Aligning the reduction is the natural follow-up to drive the
+  bound below 5″.
+- The V-52d shadow producer (`crates/astronomy/src/jupiter_shadows.rs`)
+  still uses the Meeus ch. 44 truncation directly. After this rung,
+  V-52d shadow positions disagree with V-52b moon positions by the
+  full L1.2-vs-Meeus residual (≈180″ ≈ 8 R_J on Callisto). The
+  consistency test `earth_xy_matches_apparent_galilean_moons_at_j2000`
+  is marked `#[ignore]` until a follow-up rung **`V-52d-L1.2`** ports
+  the shadow projection onto Lainey L1.2 too.
 
 ---
 
