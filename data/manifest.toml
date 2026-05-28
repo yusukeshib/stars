@@ -191,6 +191,35 @@ OpenNGC's per-row photometric caveats.
 """
 
 [[artifact]]
+id = "named-stars-search-index"
+description = "Bright named-star index for V-56 object search: proper / Bayer / Flamsteed / HR / HD / HIP identifiers for stars with V <= 6.0 (proper name) or V <= 5.0 (Bayer) or V <= 4.5 (Flamsteed) extracted from HYG v4.2."
+kind = "embedded"
+path = "crates/catalog/data/named_stars.tsv"
+sha256 = "02af7a972f4d5f384f6478c3d9bb5c43697f8b9f231ca4bd731eccb525f6e8e5"
+bytes = 76993
+source = "https://github.com/astronexus/HYG-Database"
+archive_id = "HYG v4.2 (hyg_v42.csv)"
+citation = "Hoffleit, D. & Warren, W. H. 1991, *Bright Star Catalogue, 5th Revised Ed.* (Yale); ESA 1997, *The Hipparcos and Tycho Catalogues* (ESA SP-1200); HYG v4.2 (https://github.com/astronexus/HYG-Database)."
+version = "HYG v4.2 snapshot 2024"
+retrieved = "2026-05"
+license = "CC0-1.0"
+license_url = "https://github.com/astronexus/HYG-Database/blob/main/LICENSE"
+preprocessing = "scripts/extract-named-stars.py"
+fields_used = ["proper", "bayer", "flam", "hr", "hd", "hip", "con", "rarad", "decrad", "mag", "dist"]
+used_by = [
+    "crates/catalog/src/search.rs",
+    "apps/web/src/lib.rs",
+]
+limitations = """
+Search is intentionally scoped to naked-eye / small-telescope identification
+(~1.2k entries). The full HYG catalog is still consumed for rendering via
+the compact binary path; the search table is a separate, narrower view
+because the rendered catalog has no name preservation in the embedded
+build (Phase 3 `L-18` will close that gap). The compact filter rules
+are encoded in `scripts/extract-named-stars.py`.
+"""
+
+[[artifact]]
 id = "open-cluster-membership-bootstrap"
 description = "Open-cluster membership table joining HYG / Hipparcos IDs to V-42 DSO IDs for the V-53 showpiece bootstrap slice (Pleiades, Beehive, Double Cluster)."
 kind = "embedded"

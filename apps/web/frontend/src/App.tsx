@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { StarCanvas } from "./components/StarCanvas";
+import { SearchPanel } from "./components/SearchPanel";
 import { StatusBar } from "./components/StatusBar";
 import {
   clampAltitude,
@@ -324,6 +325,13 @@ export function App() {
   const [sunAltitudeDeg, setSunAltitudeDeg] = useState<number | null>(null);
   const [planning, setPlanning] = useState<PlanningTable | null>(null);
   const lastTickRef = useRef<number>(performance.now());
+  // V-56 search/GoTo: the WASM `StarView` is owned by `StarCanvas`. We hold
+  // a stable proxy in a ref so the search panel can call into it without
+  // forcing a re-render of the renderer on every search-state change.
+  const searchApiRef = useRef<
+    | { lookup: (query: string, limit: number) => string; goto: (id: string) => string }
+    | null
+  >(null);
 
   // Persist observer + view + overlays + atmosphere + planets + projection + eyepiece whenever they change. We debounce
   // because the view updates on every mouse/touch frame during a drag, and
@@ -430,6 +438,24 @@ export function App() {
         }
         onSunAltitude={setSunAltitudeDeg}
         onPlanning={setPlanning}
+        onSearchReady={(api) => {
+          searchApiRef.current = api;
+        }}
+      />
+      <SearchPanel
+        onLookup={(query, limit) => searchApiRef.current?.lookup(query, limit) ?? "{\"matches\":[]}"}
+        onGoto={(id) => searchApiRef.current?.goto(id) ?? "null"}
+        onApplyView={(azRad, altRad) => {
+          // V-56 GoTo: snap-and-recentre. A smooth interpolation is the
+          // host's job in a follow-up; this slice keeps the wiring linear.
+          const azDeg = ((azRad * 180) / Math.PI + 360) % 360;
+          const altDeg = (altRad * 180) / Math.PI;
+          setView((v) => ({
+            ...v,
+            azimuthDeg: wrapAzimuth(azDeg),
+            altitudeDeg: clampAltitude(altDeg),
+          }));
+        }}
       />
       <StatusBar
         observer={observer}

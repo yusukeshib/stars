@@ -56,6 +56,12 @@ declare module "stars-web" {
     set_scintillation(enabled: boolean, cN2Scale: number, seed: number): void;
     resize(width: number, height: number): void;
     sun_altitude_deg(): number;
+    /// V-56 search: free-text lookup over named stars, deep-sky catalogs,
+    /// and solar-system bodies. Returns JSON.
+    lookup_object(query: string, limit: number): string;
+    /// V-56 GoTo: resolve a search id to an apparent topocentric
+    /// (alt, az) plus an info-panel payload. Returns JSON or `"null"`.
+    goto_object(id: string): string;
     render_frame(): void;
   }
 }

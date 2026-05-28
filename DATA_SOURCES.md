@@ -64,7 +64,13 @@ Used for:
 - HYG `id`, `hip`, and `hd` numeric identifier preservation in
   `catalog::CatalogIdentifiers` for future hover/copy/session work;
 - generated top-50 bright-star labels and bright-star-weighted constellation
-  label anchors in `crates/renderer/build.rs`.
+  label anchors in `crates/renderer/build.rs`;
+- bright named-star search index emitted as
+  `crates/catalog/data/named_stars.tsv` (~1.2k entries with proper /
+  Bayer / Flamsteed / HR / HD / HIP identifiers; manifest id
+  `named-stars-search-index`) for the V-56 object-search rung. The compact
+  rendered catalog is anonymous on the embedded path, so this narrower
+  TSV is the only place where catalog names survive into the WASM build.
 
 Acquisition:
 

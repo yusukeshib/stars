@@ -207,7 +207,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** (showpiece bootstrap done) | ✅ |
 | `V-54` | **Double / binary star resolution** | ⬜ |
 | `V-55` | **Artificial satellites (TLE / SGP4)** | ⬜ |
-| `V-56` | **Object search, GoTo, and info panel** | ⬜ |
+| `V-56` | **Object search, GoTo, and info panel** | ⏳ web shipped |
 
 ### Library track
 
@@ -2476,7 +2476,16 @@ utility with `V-36`.
 
 ## Interactive UX
 
-### `V-56` Object search, GoTo, and info panel — ⬜
+### `V-56` Object search, GoTo, and info panel — ⏳ web host shipped
+
+**Status.** Web-host MVP: search box, ranked dropdown, click-to-`goto`
+slew, and apparent-state info panel are live in `apps/web`. Desktop
+viewer + CLI follow-up are still tracked open (the inverted index +
+resolver are engine-side so wiring them is the small remaining job).
+The CPU-side `crates/catalog/src/search.rs` index covers ~1.2k bright
+named stars, the 110 Messier objects, the bright NGC / IC subset, and
+the nine solar-system bodies (Sun + Moon + planets minus Earth) with
+Japanese aliases.
 
 **Item.** Today the loaded catalog data (HYG star magnitudes, spectral
 classes, distances; Messier / NGC / IC IDs; planet ephemerides) has no

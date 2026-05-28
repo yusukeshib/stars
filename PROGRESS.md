@@ -2736,6 +2736,86 @@ Validation:
 Hosts wired: server (new), CLI (refactored to reuse shared render),
 viewer / web unchanged.
 
+### `V-56` Object search, GoTo, and info panel — web host shipped
+
+The loaded catalog data and apparent-position pipeline now has a search
+surface in the web app. Typing into the top-of-canvas search box debounces
+a lookup against an in-memory inverted index covering ~1.2k bright named
+stars (HYG `proper` / Bayer / Flamsteed / HR / HD / HIP), the 110 Messier
+objects, the bright NGC / IC subset, and the nine solar-system bodies
+(Sun + Moon + planets minus Earth). Picking a result calls into the WASM
+GoTo path, which evaluates the apparent topocentric direction at the
+current observer + clock and slews the camera azimuth / altitude to match.
+A non-modal info panel echoes RA / Dec (J2000), Alt / Az, magnitude where
+available, observer-relative distance for solar-system bodies, and the
+rise / transit / set times reused from `L-07`.
+
+Ranking is intentionally simple and deterministic so the dropdown does
+not reorder on minor query changes:
+
+1. exact (case-insensitive) match on any identifier — score 0;
+2. prefix match on a single identifier token — score 1;
+3. case-insensitive substring match on the canonical name — score 2;
+4. token-by-token substring match on Bayer / Flamsteed (`"alp cma"`
+   matches `"Alp"` + `"CMa"`) — score 3.
+
+Ties break on magnitude (brighter wins), then identifier ordering. The
+top [`SEARCH_LIMIT_DEFAULT`](crates/catalog/src/search.rs) = 12 hits are
+returned. Solar-system bodies carry both English and Japanese aliases
+(`Saturn` / `土星` / `どせい`) so bilingual users do not have to switch
+input mode mid-search.
+
+Primary implementation areas:
+
+- `crates/catalog/data/named_stars.tsv` (manifest id
+  `named-stars-search-index`): committed search index data extracted from
+  HYG v4.2 by `scripts/extract-named-stars.py` with `proper`,
+  `bayer + constellation`, `flam + constellation`, `HR`, `HD`, `HIP`
+  columns plus J2000 RA / Dec / magnitude / distance. The compact rendered
+  catalog is anonymous on the embedded path; this narrower TSV is the
+  only place where catalog names survive into the WASM bundle until
+  `L-18` (identifier preservation) lands.
+- `crates/catalog/src/search.rs`: inverted-index + ranker; public
+  `search(query, limit) -> Vec<SearchMatch>` API; stable `SearchId`
+  encoding (`star:<idx>`, `m:<n>`, `ngc:<n>`, `ic:<n>`, `ss:<name>`) so
+  the host round-trips ids through clicks and (future) URL parameters.
+- `apps/web/src/lib.rs`: `StarView::lookup_object(query, limit) -> String`
+  and `StarView::goto_object(id) -> String`. GoTo resolves the id back to
+  a topocentric apparent `(alt, az)` via the existing
+  `apparent_sun_topocentric` / `apparent_moon_topocentric` /
+  `apparent_planet_topocentric` paths so the info panel sees the same
+  ephemeris the renderer does, and packages a planning row reused from
+  `rise_transit_set`.
+- `apps/web/frontend/src/components/SearchPanel.tsx`: debounced input,
+  ranked dropdown, info panel; pure inline styles consistent with the
+  rest of the web HUD.
+- `apps/web/frontend/src/App.tsx`: pulls the WASM proxy via a new
+  `onSearchReady` callback on `StarCanvas`, then applies `(az, alt)` to
+  the existing camera state setters — reusing the renderer's `LocalView`
+  clamps without duplicating them in JS.
+
+Validation (16 new tests in `catalog::search::tests`):
+
+- proper-name lookup for Sirius (case-insensitive, brightest-star
+  acceptance criterion);
+- Bayer / Flamsteed / HD / HIP identifier round-trip (Sirius via
+  `"Alp CMa"` / `"HD 48915"`, Vega via `"HIP 91262"`);
+- token-by-token Bayer lookup (`"alp cen"` → Alpha Centauri);
+- Messier and NGC by identifier and by nickname
+  (`"M31"` / `"Pleiades"` / `"NGC 869"` / `"North America"`);
+- planet / Sun / Moon lookup, including `"土星"` (Saturn);
+- ranking-tie test pins the brighter-wins policy via Rigel ahead of
+  fainter Beta-Orionis-like rows;
+- empty / whitespace queries return zero hits;
+- `SearchId::encode` ⇄ `SearchId::parse` round-trips for every variant.
+
+Hosts wired: web (search panel + GoTo + info panel). Desktop viewer and
+CLI are still open: the engine surface is already in `crates/catalog`,
+so both wires up by sharing the same `search()` call with their own UI
+/ flag plumbing.
+
+---
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

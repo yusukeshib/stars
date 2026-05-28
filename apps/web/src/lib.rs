@@ -2,10 +2,17 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use astronomy::{
-    apparent_sun_topocentric, equatorial_to_horizontal, evening_plan, jd_utc_to_unix_ms,
-    lmst_radians, Observer, TimeScales,
+    apparent_moon_topocentric, apparent_planet_topocentric, apparent_sun_topocentric,
+    equatorial_to_horizontal, evening_plan, jd_utc_to_unix_ms, lmst_radians, rise_transit_set,
+    Observer, Planet, PlanningBody, TimeScales,
 };
 use catalog::load_embedded;
+use catalog::{
+    DeepSkyCatalog, DeepSkyId, DeepSkyObject, MessierCatalog, NgcBrightCatalog,
+};
+use catalog::search::{
+    named_star, search as catalog_search, SearchId, SearchKind, SearchMatch, SOLAR_SYSTEM_BODIES,
+};
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, ExternalViewpoint,
     EyepieceSimulation, LightPollution, LocalView, OverlayConfig, OverlayKind, Renderer,
@@ -38,6 +45,269 @@ fn push_opt_jd_ms(out: &mut String, jd_utc: Option<f64>) {
         Some(jd) => push_num(out, jd_utc_to_unix_ms(jd)),
         None => out.push_str("null"),
     }
+}
+
+fn push_json_string(out: &mut String, value: &str) {
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
+fn push_search_match(out: &mut String, hit: &SearchMatch) {
+    out.push('{');
+    out.push_str("\"id\":");
+    push_json_string(out, &hit.id.encode());
+    out.push_str(",\"kind\":");
+    push_json_string(out, hit.kind.label());
+    out.push_str(",\"display\":");
+    push_json_string(out, &hit.display);
+    out.push_str(",\"aka\":");
+    push_json_string(out, &hit.aka);
+    out.push_str(",\"score\":");
+    out.push_str(&hit.score.to_string());
+    out.push_str(",\"raRad\":");
+    push_num(out, hit.right_ascension_rad);
+    out.push_str(",\"decRad\":");
+    push_num(out, hit.declination_rad);
+    out.push_str(",\"magnitude\":");
+    match hit.magnitude {
+        Some(m) => push_num(out, m as f64),
+        None => out.push_str("null"),
+    }
+    out.push('}');
+}
+
+/// Resolved apparent position used by `goto_object`. Keeps the JSON
+/// emission code in one place.
+struct GotoRecord {
+    id: String,
+    kind: SearchKind,
+    display: String,
+    aka: String,
+    right_ascension_rad: f64,
+    declination_rad: f64,
+    magnitude: Option<f64>,
+    distance: Option<(f64, &'static str)>,
+    planning: Option<PlanningBody>,
+}
+
+fn resolve(id: SearchId, observer: Observer) -> Option<GotoRecord> {
+    match id {
+        SearchId::NamedStar(idx) => {
+            let star = named_star(SearchId::NamedStar(idx))?;
+            Some(GotoRecord {
+                id: SearchId::NamedStar(idx).encode(),
+                kind: SearchKind::Star,
+                display: star.display(),
+                aka: star
+                    .bayer
+                    .as_deref()
+                    .zip(star.constellation.as_deref())
+                    .map(|(b, c)| format!("{b} {c}"))
+                    .unwrap_or_default(),
+                right_ascension_rad: star.right_ascension_rad,
+                declination_rad: star.declination_rad,
+                magnitude: Some(star.magnitude as f64),
+                distance: if star.distance_pc > 0.0 {
+                    Some((star.distance_pc as f64, "pc"))
+                } else {
+                    None
+                },
+                planning: None,
+            })
+        }
+        SearchId::Messier(n) => {
+            let object = MessierCatalog
+                .objects(99.0)
+                .into_iter()
+                .find(|o| o.id == DeepSkyId::Messier(n))?;
+            Some(deepsky_goto(id, object))
+        }
+        SearchId::Ngc(n) => {
+            let object = NgcBrightCatalog
+                .objects(99.0)
+                .into_iter()
+                .find(|o| o.id == DeepSkyId::Ngc(n))?;
+            Some(deepsky_goto(id, object))
+        }
+        SearchId::Ic(n) => {
+            let object = NgcBrightCatalog
+                .objects(99.0)
+                .into_iter()
+                .find(|o| o.id == DeepSkyId::Ic(n))?;
+            Some(deepsky_goto(id, object))
+        }
+        SearchId::SolarSystem(name) => {
+            let body = SOLAR_SYSTEM_BODIES
+                .iter()
+                .find(|b| b.canonical == name)?;
+            let (ra, dec, magnitude, distance, planning): (
+                f64,
+                f64,
+                Option<f64>,
+                (f64, &'static str),
+                PlanningBody,
+            ) = match name {
+                "sun" => {
+                    let sun = apparent_sun_topocentric(observer);
+                    (
+                        sun.right_ascension_rad,
+                        sun.declination_rad,
+                        Some(-26.74_f64),
+                        (sun.distance_au, "AU"),
+                        PlanningBody::Sun,
+                    )
+                }
+                "moon" => {
+                    let moon = apparent_moon_topocentric(observer);
+                    (
+                        moon.right_ascension_rad,
+                        moon.declination_rad,
+                        None,
+                        (moon.distance_km, "km"),
+                        PlanningBody::Moon,
+                    )
+                }
+                other => {
+                    let planet = match other {
+                        "mercury" => Planet::Mercury,
+                        "venus" => Planet::Venus,
+                        "mars" => Planet::Mars,
+                        "jupiter" => Planet::Jupiter,
+                        "saturn" => Planet::Saturn,
+                        "uranus" => Planet::Uranus,
+                        "neptune" => Planet::Neptune,
+                        _ => return None,
+                    };
+                    let p = apparent_planet_topocentric(observer, planet);
+                    (
+                        p.right_ascension_rad,
+                        p.declination_rad,
+                        Some(p.magnitude),
+                        (p.distance_au, "AU"),
+                        PlanningBody::Planet(planet),
+                    )
+                }
+            };
+            Some(GotoRecord {
+                id: SearchId::SolarSystem(body.canonical).encode(),
+                kind: SearchKind::SolarSystem,
+                display: body.display_en.to_string(),
+                aka: body.display_ja.to_string(),
+                right_ascension_rad: ra,
+                declination_rad: dec,
+                magnitude,
+                distance: Some(distance),
+                planning: Some(planning),
+
+            })
+        }
+    }
+}
+
+fn deepsky_goto(id: SearchId, object: DeepSkyObject) -> GotoRecord {
+    let position = object.position;
+    let x = position[0] as f64;
+    let y = position[1] as f64;
+    let z = position[2] as f64;
+    let len = (x * x + y * y + z * z).sqrt().max(1e-12);
+    let ra = y.atan2(x).rem_euclid(std::f64::consts::TAU);
+    let dec = (z / len).clamp(-1.0, 1.0).asin();
+    let kind = match id {
+        SearchId::Messier(_) => SearchKind::Messier,
+        SearchId::Ic(_) => SearchKind::Ic,
+        _ => SearchKind::Ngc,
+    };
+    let label = match object.id {
+        DeepSkyId::Messier(n) => format!("M{n}"),
+        DeepSkyId::Ngc(n) => format!("NGC {n}"),
+        DeepSkyId::Ic(n) => format!("IC {n}"),
+    };
+    GotoRecord {
+        id: id.encode(),
+        kind,
+        display: label.clone(),
+        aka: label,
+        right_ascension_rad: ra,
+        declination_rad: dec,
+        magnitude: if object.magnitude < 90.0 {
+            Some(object.magnitude as f64)
+        } else {
+            None
+        },
+        distance: None,
+        planning: None,
+    }
+}
+
+fn push_goto_record(out: &mut String, record: &GotoRecord, observer: Observer) {
+    let lst = lmst_radians(observer.time.jd_ut1, observer.longitude_rad);
+    let altaz = equatorial_to_horizontal(
+        record.right_ascension_rad,
+        record.declination_rad,
+        lst,
+        observer.latitude_rad,
+    );
+    out.push('{');
+    out.push_str("\"id\":");
+    push_json_string(out, &record.id);
+    out.push_str(",\"kind\":");
+    push_json_string(out, record.kind.label());
+    out.push_str(",\"display\":");
+    push_json_string(out, &record.display);
+    out.push_str(",\"aka\":");
+    push_json_string(out, &record.aka);
+    out.push_str(",\"raRad\":");
+    push_num(out, record.right_ascension_rad);
+    out.push_str(",\"decRad\":");
+    push_num(out, record.declination_rad);
+    out.push_str(",\"azimuthRad\":");
+    push_num(out, altaz.azimuth);
+    out.push_str(",\"altitudeRad\":");
+    push_num(out, altaz.altitude);
+    out.push_str(",\"magnitude\":");
+    match record.magnitude {
+        Some(m) => push_num(out, m),
+        None => out.push_str("null"),
+    }
+    out.push_str(",\"distance\":");
+    match &record.distance {
+        Some((value, unit)) => {
+            out.push_str("{\"value\":");
+            push_num(out, *value);
+            out.push_str(",\"unit\":");
+            push_json_string(out, unit);
+            out.push('}');
+        }
+        None => out.push_str("null"),
+    }
+    // Rise / transit / set, if the body is in the planning table.
+    out.push_str(",\"riseSetMs\":");
+    if let Some(body) = record.planning {
+        let (start, end) = (observer.time.jd_utc - 0.25, observer.time.jd_utc + 1.25);
+        let rts = rise_transit_set(observer, body, start, end);
+        out.push('{');
+        out.push_str("\"rise\":");
+        push_opt_jd_ms(out, rts.rise_jd_utc);
+        out.push_str(",\"transit\":");
+        push_opt_jd_ms(out, rts.transit_jd_utc);
+        out.push_str(",\"set\":");
+        push_opt_jd_ms(out, rts.set_jd_utc);
+        out.push('}');
+    } else {
+        out.push_str("null");
+    }
+    out.push('}');
 }
 
 struct RenderState {
@@ -450,6 +720,47 @@ impl StarView {
             }
         };
         self.state.borrow_mut().camera.light_pollution = pollution;
+    }
+
+    /// V-56 object search. Returns a JSON-encoded ranked list of matches for
+    /// the free-text `query`. `limit = 0` falls back to
+    /// [`catalog::search::SEARCH_LIMIT_DEFAULT`]. The host calls this on
+    /// debounced input from the search box.
+    ///
+    /// Each match carries enough data to render the dropdown row without a
+    /// follow-up call; selecting one then calls [`goto_object_json`] with the
+    /// `id` field to obtain the apparent (alt, az) the host should slew the
+    /// camera to.
+    pub fn lookup_object(&self, query: String, limit: u32) -> String {
+        let hits = catalog_search(&query, limit as usize);
+        let mut s = String::new();
+        s.push_str("{\"matches\":[");
+        for (i, hit) in hits.iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            push_search_match(&mut s, hit);
+        }
+        s.push_str("]}");
+        s
+    }
+
+    /// V-56 GoTo. Resolves the encoded `SearchId` to an apparent
+    /// topocentric (alt, az) for the current observer + clock, returning a
+    /// JSON record the host applies to the camera. Unknown ids yield a
+    /// `null` payload so the UI can drop the request quietly instead of
+    /// crashing.
+    pub fn goto_object(&self, id_json: String) -> String {
+        let Some(id) = SearchId::parse(&id_json) else {
+            return "null".to_string();
+        };
+        let observer = self.state.borrow().camera.observer;
+        let mut s = String::new();
+        match resolve(id.clone(), observer) {
+            None => s.push_str("null"),
+            Some(record) => push_goto_record(&mut s, &record, observer),
+        }
+        s
     }
 
     /// Update V-24 scintillation controls. `enabled=false` matches the

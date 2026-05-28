@@ -57,6 +57,13 @@ The current engine already includes:
   compact web session URLs;
 - bilingual web UI (English and Japanese) with browser-language detection,
   a `?lang=en|ja` URL override for sharing, and an in-app language switcher;
+- object search, GoTo, and info panel in the web app (V-56): a search box
+  finds any of ~1.2k named stars (`proper`, Bayer, Flamsteed, HR, HD, HIP),
+  the 110 Messier objects, the bright NGC / IC subset, and the nine
+  solar-system bodies (including Japanese aliases); selecting a result
+  slews the camera to the apparent topocentric position and opens a
+  non-modal panel with RA / Dec, Alt / Az, magnitude, distance, and the
+  current rise / transit / set;
 - deterministic validation/demo scene presets, notebook reproducibility examples,
   catalog-backend scaling scaffolding, and an opt-in generated gallery for
   screenshot review;
