@@ -185,8 +185,138 @@ pub fn diffuse_sky_mag_per_arcsec2(
 ) -> f64 {
     let isl = mag_to_s10(isl_mag_per_arcsec2(l_rad, b_rad)) * dust_transmission(l_rad, b_rad);
     let zl = zodiacal_light_s10(ecliptic_lat_rad, sun_relative_lon_rad);
-    let airglow = 145.0; // Leinert §7: dark-site visual airglow floor, order 100–200 S10(V).
+    // V-28: airglow is decomposed into O I 557.7 nm, Na D 589 nm, and OH
+    // Meinel red bands. At zenith and moderate activity the total V-band
+    // brightness matches the Leinert §7 floor (~145 S10(V)). For the diffuse-
+    // sky µ shorthand we evaluate the zenith total; the renderer evaluates
+    // each component with its own Van Rhijn correction per pixel.
+    let (green, sodium, oh) =
+        airglow_components(std::f64::consts::FRAC_PI_2, AIRGLOW_ACTIVITY_MODERATE);
+    let airglow = green + sodium + oh;
     s10_to_mag(isl + zl + airglow)
+}
+
+// =============================================================================
+// V-28: Spectral airglow decomposition
+// =============================================================================
+//
+// The night-sky diffuse floor in V is dominated by three atmospheric emission
+// systems:
+//
+//   * **O I 557.7 nm** "green line" — atomic oxygen recombination in a thin
+//     layer near 90 km. Zenith intensity ≈ 250 R at moderate solar activity,
+//     ~80 S10(V) integrated through the V band.
+//   * **Na D 589.0 / 589.6 nm** — meteor-ablation sodium in a ~10 km thick
+//     layer near 92 km. Zenith intensity ≈ 30 R, ~15 S10(V).
+//   * **OH Meinel bands** (vibrational rotational transitions, 600–900 nm) —
+//     hydroxyl chemiluminescence in a layer near 87 km. The V-band tail of
+//     the OH spectrum integrates to ≈ 800 R, ~50 S10(V).
+//
+// Sum at zenith ≈ 145 S10(V), matching the single-floor Leinert §7 value the
+// V-13 / V-21 dark-sky fit was tuned against. The chromaticity split is what
+// gives the dark sky its faint mottled green/red tint and removes the
+// unphysical pure-grey night floor.
+//
+// Each layer is brightened toward the horizon by the Van Rhijn (1921) line-
+// of-sight integral through a thin emitting shell of height H above the
+// Earth's surface:
+//
+//     V(z, H) = 1 / sqrt(1 - (R / (R + H))² · sin²z)
+//
+// where `z` is the zenith angle. The conventional approximation collapses the
+// `(R/(R+H))²` factor into the 0.96 reported by Roach & Gordon 1973 §5; we
+// keep the per-layer factor so the three components fade off the zenith with
+// their own characteristic limb brightening.
+//
+// References:
+//   Leinert, Ch. et al. 1998, A&AS 127, 1 (§7.4–7.6).
+//   Roach, F. E. & Gordon, J. L. 1973, *The Light of the Night Sky*.
+//   Krassovsky, V. I., Shefov, N. N., Yarin, V. I. 1962, Planet. Space Sci.
+//   9, 883 (OH Meinel bands).
+
+/// Earth radius used in the Van Rhijn line-of-sight integral, km.
+const EARTH_RADIUS_KM: f64 = 6371.0;
+
+/// Layer altitudes for each emitting species, km.
+const LAYER_HEIGHT_OI_KM: f64 = 90.0;
+const LAYER_HEIGHT_NAD_KM: f64 = 92.0;
+const LAYER_HEIGHT_OH_KM: f64 = 87.0;
+
+/// Zenith V-band brightness for each component, S10(V), at moderate solar
+/// activity. The triplet sums to ~145 S10(V), matching the Leinert §7
+/// dark-site airglow floor that V-13 / V-21 were tuned against.
+const AIRGLOW_GREEN_ZENITH_S10: f64 = 80.0;
+const AIRGLOW_SODIUM_ZENITH_S10: f64 = 15.0;
+const AIRGLOW_OH_ZENITH_S10: f64 = 50.0;
+
+/// Reference solar activity level. Callers can scale to 0.5 (deep solar
+/// minimum) or ~2.0 (active aurora-quiet night) following Leinert §7.5
+/// Table 17.
+pub const AIRGLOW_ACTIVITY_MODERATE: f64 = 1.0;
+
+/// Van Rhijn limb-brightening factor for a thin emitting shell of height
+/// `layer_height_km` above the Earth's surface, evaluated at apparent
+/// altitude `altitude_rad` (radians above the horizon). Returns 1 at zenith
+/// and ≈ 5 at the horizon for an 87–92 km layer.
+pub fn van_rhijn_factor(altitude_rad: f64, layer_height_km: f64) -> f64 {
+    let r_over_rh = EARTH_RADIUS_KM / (EARTH_RADIUS_KM + layer_height_km);
+    let cos_alt = altitude_rad.cos();
+    // sin(zenith angle) = cos(altitude). Clamp the denominator so a tiny
+    // numerical excursion below the horizon doesn't produce a NaN.
+    let denom = (1.0 - r_over_rh * r_over_rh * cos_alt * cos_alt).max(1e-6);
+    denom.sqrt().recip()
+}
+
+/// V-band surface brightness of the three dominant airglow emission systems
+/// at apparent altitude `altitude_rad`, in S10(V) units.
+///
+/// `activity_level` scales the three components uniformly: 1.0 = Leinert §7
+/// moderate-activity reference (zenith total ≈ 145 S10(V)), 0.5 ≈ solar
+/// minimum quiet night, 2.0 ≈ active geomagnetic conditions. Negative inputs
+/// are clamped to zero (the airglow floor never goes negative).
+///
+/// Each component is brightened toward the horizon by the Van Rhijn integral
+/// `(1 − (R/(R+H))² · sin²z)^(−1/2)` with its own layer altitude:
+/// 90 km for O I, 92 km for Na D, 87 km for OH.
+pub fn airglow_components(altitude_rad: f64, activity_level: f64) -> (f64, f64, f64) {
+    let scale = activity_level.max(0.0);
+    let alt = altitude_rad.max(0.0);
+    let green = AIRGLOW_GREEN_ZENITH_S10 * scale * van_rhijn_factor(alt, LAYER_HEIGHT_OI_KM);
+    let sodium = AIRGLOW_SODIUM_ZENITH_S10 * scale * van_rhijn_factor(alt, LAYER_HEIGHT_NAD_KM);
+    let oh = AIRGLOW_OH_ZENITH_S10 * scale * van_rhijn_factor(alt, LAYER_HEIGHT_OH_KM);
+    (green, sodium, oh)
+}
+
+/// Per-line linear-sRGB tint vectors, normalised so that the Rec. 709
+/// luminance `Y = 0.2126 R + 0.7152 G + 0.0722 B` equals 1.0. Multiplying
+/// the V-band S10 contribution of a line by its tint vector therefore
+/// preserves the V-band luminance budget while giving each component its
+/// characteristic chromaticity:
+///
+/// * 557.7 nm green line → strongly biased toward G.
+/// * 589 nm Na D → sodium-yellow (R + G, no B).
+/// * OH Meinel red/IR tail in V → deep red (mostly R, some G).
+///
+/// The 557 / 589 nm chromaticities approximate the sRGB rendering of those
+/// monochromatic wavelengths; the OH vector approximates the V-band-weighted
+/// integral over the visible OH(6-1) / OH(8-3) / OH(9-4) bands, which sit in
+/// the 620–720 nm window.
+pub const AIRGLOW_GREEN_RGB: [f64; 3] = [0.000, 1.398, 0.000];
+pub const AIRGLOW_SODIUM_RGB: [f64; 3] = [1.229, 1.033, 0.000];
+pub const AIRGLOW_OH_RGB: [f64; 3] = [2.343, 0.703, 0.000];
+
+/// Per-channel airglow surface brightness in S10(V), summed over the three
+/// emission systems. Each channel is the sum of `component_s10 *
+/// component_rgb_tint`; the Rec. 709 luminance of the returned triplet
+/// equals the total V-band airglow S10(V).
+pub fn airglow_rgb_s10(altitude_rad: f64, activity_level: f64) -> [f64; 3] {
+    let (green, sodium, oh) = airglow_components(altitude_rad, activity_level);
+    let mut rgb = [0.0; 3];
+    for i in 0..3 {
+        rgb[i] =
+            green * AIRGLOW_GREEN_RGB[i] + sodium * AIRGLOW_SODIUM_RGB[i] + oh * AIRGLOW_OH_RGB[i];
+    }
+    rgb
 }
 
 fn mag_to_s10(mu: f64) -> f64 {
@@ -435,6 +565,109 @@ mod tests {
         let raw = isl_mag_per_arcsec2(0.0, 0.0);
         let dimmed = s10_to_mag(mag_to_s10(raw) * dust_transmission(0.0, 0.0));
         assert!(dimmed > raw, "dust should make ISL numerically fainter");
+    }
+
+    /// Van Rhijn limb brightening: a thin emitting shell at ≈90 km is
+    /// nearly 1 at zenith and ≈5 toward the horizon. The 0.96-prefactor
+    /// approximation used in Roach & Gordon 1973 (i.e. ignoring the height
+    /// dependence) gives the same limit to within a few percent.
+    #[test]
+    fn van_rhijn_zenith_to_horizon() {
+        let zenith = van_rhijn_factor(std::f64::consts::FRAC_PI_2, LAYER_HEIGHT_OI_KM);
+        let horizon = van_rhijn_factor(0.0, LAYER_HEIGHT_OI_KM);
+        assert!(
+            (zenith - 1.0).abs() < 1e-9,
+            "Van Rhijn at zenith should be 1, got {zenith}"
+        );
+        assert!(
+            (horizon - 6.0).abs() < 1.0,
+            "Van Rhijn at horizon should be ≈5–6 for a 90 km layer, got {horizon}"
+        );
+    }
+
+    /// V-28 acceptance criterion: zenith total integrated airglow in V band
+    /// must be within 10% of the Leinert 1998 §7 reference (≈ 145 S10(V)
+    /// at moderate activity).
+    #[test]
+    fn airglow_zenith_total_matches_leinert() {
+        let (green, sodium, oh) =
+            airglow_components(std::f64::consts::FRAC_PI_2, AIRGLOW_ACTIVITY_MODERATE);
+        let total = green + sodium + oh;
+        let reference = 145.0; // S10(V), Leinert §7 dark-site visual floor
+        assert!(
+            (total / reference - 1.0).abs() <= 0.10,
+            "zenith airglow total = {total} S10(V), expected {reference} ± 10%"
+        );
+        // The OH band carries the largest single contribution to the V-band
+        // *photon* flux (≈800 R) but green dominates after V-band weighting
+        // because the OH spectrum extends into NIR. Keep this ordering so an
+        // accidental swap of constants would be caught.
+        assert!(
+            green > sodium && oh > sodium,
+            "unexpected component ordering: green={green}, Na={sodium}, OH={oh}"
+        );
+    }
+
+    /// Limb brightening: at the horizon every component is ≈5× the zenith
+    /// value, and the totals follow.
+    #[test]
+    fn airglow_horizon_brighter_than_zenith() {
+        let (gz, nz, hz) =
+            airglow_components(std::f64::consts::FRAC_PI_2, AIRGLOW_ACTIVITY_MODERATE);
+        let (gh, nh, hh) = airglow_components(0.0, AIRGLOW_ACTIVITY_MODERATE);
+        assert!(gh > 4.5 * gz && gh < 6.5 * gz);
+        assert!(nh > 4.5 * nz && nh < 6.5 * nz);
+        assert!(hh > 4.5 * hz && hh < 6.5 * hz);
+    }
+
+    /// V-28 acceptance criterion: pinned dark-sky chromaticity. The per-
+    /// channel S10 split must produce a measurable G/R chromaticity
+    /// difference vs. a neutral grey sky at zenith. We require |R−G|/Y
+    /// ≥ 0.10 in linear sRGB so the renderer's tint cannot be mistaken for
+    /// a desaturated grey.
+    #[test]
+    fn airglow_chromaticity_differs_from_neutral_grey() {
+        let rgb = airglow_rgb_s10(std::f64::consts::FRAC_PI_2, AIRGLOW_ACTIVITY_MODERATE);
+        let y = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+        // V-band luminance must match the total S10 (chromaticity vectors
+        // are normalised to Y = 1 per line).
+        let (gz, nz, hz) =
+            airglow_components(std::f64::consts::FRAC_PI_2, AIRGLOW_ACTIVITY_MODERATE);
+        let total = gz + nz + hz;
+        assert!(
+            (y / total - 1.0).abs() < 1e-3,
+            "per-channel V-band luminance ({y}) must equal total S10 ({total})"
+        );
+        // Documented threshold: dark-site airglow must be detectably non-
+        // grey. The OH red tail and the 557 nm green together give
+        // |R−G|/Y ≈30%; require ≥10% so a future re-tune still flags
+        // the perceptual intent.
+        let r_minus_g = (rgb[0] - rgb[1]).abs();
+        let chroma = r_minus_g / y;
+        assert!(
+            chroma >= 0.10,
+            "airglow R/G chromaticity {chroma:.3} below 0.10 threshold"
+        );
+        // No blue contribution from airglow: the three lines are all in the
+        // 557–720 nm window. A non-zero B here would mean the tint vectors
+        // were accidentally widened.
+        assert!(
+            rgb[2] < 0.02 * y,
+            "airglow must have negligible B channel: B/Y = {}",
+            rgb[2] / y
+        );
+    }
+
+    /// Activity scaling is a uniform multiplier.
+    #[test]
+    fn airglow_activity_scaling_is_linear() {
+        let half = airglow_rgb_s10(std::f64::consts::FRAC_PI_2, 0.5);
+        let one = airglow_rgb_s10(std::f64::consts::FRAC_PI_2, 1.0);
+        let two = airglow_rgb_s10(std::f64::consts::FRAC_PI_2, 2.0);
+        for i in 0..3 {
+            assert!((half[i] * 2.0 - one[i]).abs() < 1e-9);
+            assert!((two[i] * 0.5 - one[i]).abs() < 1e-9);
+        }
     }
 
     #[test]

@@ -246,7 +246,13 @@ The exact pass layout can change, but responsibilities should stay separated:
 - **Camera/uniform preparation**: CPU-side apparent-date, observer-dependent,
   eyepiece true-field, and projection data that the GPU needs for a frame.
 - **Skyglow / atmosphere**: diffuse night sky, zodiacal light, airglow, dust,
-  sunlit scattering, twilight, moonlit sky, and solar-system disks. Sun and
+  sunlit scattering, twilight, moonlit sky, and solar-system disks. Airglow
+  is decomposed into three emission systems (O I 557.7 nm green line,
+  Na D 589 nm, OH Meinel red/IR; V-28); each carries its own Van Rhijn
+  layer-altitude correction and a Rec.709-luminance-preserving sRGB tint
+  vector, summed per channel before extinction. The Rust reference lives
+  in `astronomy::skyglow::{airglow_components, airglow_rgb_s10}` and the
+  shader port in `shaders/skyglow.wgsl::airglow_radiance_rgb`. Sun and
   Moon (and, via V-51b, planet) disks share a single analytic-mask occluder
   array (`CameraUniform::occluders`, `MAX_OCCLUDERS = 16`) populated each
   frame from `astronomy::active_occluders(observer)` and mapped through the
