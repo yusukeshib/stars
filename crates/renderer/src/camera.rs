@@ -1,8 +1,8 @@
 use astronomy::{
-    active_occluders, apparent_planets_topocentric, earth_velocity_over_c_j2000,
-    equation_of_equinoxes, equatorial_to_horizontal_matrix, illuminants, lmst_radians,
-    precession_nutation_matrix, solar_eclipse_state, years_since_j2000, Observer, Planet,
-    SolarEclipseKind, SunMoonApparent, MAX_OCCLUDERS,
+    active_occluders, apparent_planets_topocentric, apparent_saturn_ring_topocentric,
+    earth_velocity_over_c_j2000, equation_of_equinoxes, equatorial_to_horizontal_matrix,
+    illuminants, lmst_radians, precession_nutation_matrix, solar_eclipse_state, years_since_j2000,
+    Observer, Planet, SolarEclipseKind, SunMoonApparent, MAX_OCCLUDERS,
 };
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
@@ -239,6 +239,19 @@ pub(crate) struct CameraUniform {
     pub planet_rgb_magnitude: PlanetRgbMagnitudeUniform,
     /// `[planet_count, planets_enabled, unused, unused]`.
     pub planet_params: [f32; 4],
+    /// V-52a Saturn ring orientation. `xyz` = unit vector along Saturn's north
+    /// ring pole, expressed in the same J2000-equatorial frame the shader
+    /// receives `planet_eq_radius` in. `w` = `sin B`, the signed sub-Earth
+    /// Saturnicentric latitude; the magnitude controls the ring ellipse's
+    /// vertical compression and the sign selects which face the body occults.
+    pub saturn_ring_pole_sinb: [f32; 4],
+    /// V-52a Saturn ring photometric controls. Layout:
+    /// `[sin_b_sun, enabled, reserved, reserved]`.
+    /// * `sin_b_sun` is `sin B'`, the signed sub-Sun Saturnicentric latitude;
+    ///   shares a sign with `sin B` whenever the lit face is the visible one.
+    /// * `enabled` is `1.0` when the ring pass should fire (Saturn above the
+    ///   horizon and planets globally on), `0.0` otherwise.
+    pub saturn_ring_state: [f32; 4],
     /// Hošek-Wilkie 2012 RGB sky-dome coefficients pre-cooked on the host
     /// each frame (V-38). Nine `vec4`s; row `i` holds the per-channel `i`-th
     /// analytic coefficient (A..I) as `(R, G, B, _)`. Unused when
@@ -320,6 +333,10 @@ pub(crate) struct PlanetUniforms {
     pub eq_radius: PlanetEqRadiusUniform,
     pub rgb_magnitude: PlanetRgbMagnitudeUniform,
     pub params: [f32; 4],
+    /// V-52a Saturn ring uniform block; mirrors
+    /// [`CameraUniform::saturn_ring_pole_sinb`] / [`CameraUniform::saturn_ring_state`].
+    pub saturn_ring_pole_sinb: [f32; 4],
+    pub saturn_ring_state: [f32; 4],
 }
 
 impl PlanetUniforms {
@@ -328,6 +345,8 @@ impl PlanetUniforms {
             eq_radius: [[0.0; 4]; PLANET_UNIFORM_COUNT],
             rgb_magnitude: [[0.0; 4]; PLANET_UNIFORM_COUNT],
             params: [PLANET_UNIFORM_COUNT as f32, 0.0, 0.0, 0.0],
+            saturn_ring_pole_sinb: [0.0; 4],
+            saturn_ring_state: [0.0; 4],
         }
     }
 }
@@ -1171,10 +1190,30 @@ impl Camera {
             rgb_magnitude[idx] = [rgb[0], rgb[1], rgb[2], planet.magnitude as f32];
         }
 
+        // V-52a Saturn ring orientation. Rotate the ring pole from the
+        // equatorial-of-date frame `apparent_saturn_ring` returns into the same
+        // J2000 frame the shader sees `planet_eq_radius` in. Refraction is not
+        // re-applied to the pole: it is a small (~30′) almost-radial shift at
+        // the horizon, leaving the ring pole's orientation relative to Saturn's
+        // centre invariant at the V-52a accuracy budget.
+        let ring = apparent_saturn_ring_topocentric(self.observer);
+        let pole_j2000 = (date_to_j2000 * ring.ring_pole_eq.extend(0.0))
+            .truncate()
+            .normalize_or_zero();
+        let saturn_ring_pole_sinb = [
+            pole_j2000.x,
+            pole_j2000.y,
+            pole_j2000.z,
+            ring.sub_earth_lat_rad.sin() as f32,
+        ];
+        let saturn_ring_state = [ring.sub_sun_lat_rad.sin() as f32, 1.0, 0.0, 0.0];
+
         PlanetUniforms {
             eq_radius,
             rgb_magnitude,
             params: [PLANET_UNIFORM_COUNT as f32, 1.0, 0.0, 0.0],
+            saturn_ring_pole_sinb,
+            saturn_ring_state,
         }
     }
 
@@ -1493,6 +1532,8 @@ impl Camera {
             planet_eq_radius: planet_uniforms.eq_radius,
             planet_rgb_magnitude: planet_uniforms.rgb_magnitude,
             planet_params: planet_uniforms.params,
+            saturn_ring_pole_sinb: planet_uniforms.saturn_ring_pole_sinb,
+            saturn_ring_state: planet_uniforms.saturn_ring_state,
             hw_coeffs,
             hw_radiance,
             scintillation_params,
@@ -1525,6 +1566,43 @@ impl Camera {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// V-52a: the Saturn ring band-radius constants live in two places (the
+    /// host-side `astronomy::SaturnRingApparent::BAND_RADII_R_S` array and the
+    /// WGSL `SATURN_RING_*_R_S` declarations in `shaders/skyglow.wgsl`). They
+    /// must agree at `f32` precision; this test re-parses the shader source so
+    /// the two cannot silently drift.
+    #[test]
+    fn saturn_ring_band_constants_agree_with_shader() {
+        let shader = include_str!("shaders/skyglow.wgsl");
+        let names = [
+            "SATURN_RING_C_INNER_R_S",
+            "SATURN_RING_B_INNER_R_S",
+            "SATURN_RING_B_OUTER_R_S",
+            "SATURN_RING_A_INNER_R_S",
+            "SATURN_RING_A_OUTER_R_S",
+        ];
+        for (idx, name) in names.iter().enumerate() {
+            let needle = format!("const {name}: f32 = ");
+            let start = shader
+                .find(&needle)
+                .unwrap_or_else(|| panic!("shader missing constant {name}"));
+            let after = &shader[start + needle.len()..];
+            let end = after.find(';').expect("const declaration terminator");
+            let lit = after[..end].trim();
+            let parsed: f32 = lit
+                .parse()
+                .unwrap_or_else(|error| panic!("could not parse {name} = {lit}: {error}"));
+            let host_f32 = astronomy::SaturnRingApparent::BAND_RADII_R_S[idx] as f32;
+            assert_eq!(
+                parsed.to_bits(),
+                host_f32.to_bits(),
+                "{name}: shader literal {parsed} (0x{:08x}) != host f32 {host_f32} (0x{:08x})",
+                parsed.to_bits(),
+                host_f32.to_bits(),
+            );
+        }
+    }
 
     fn observer_at(lat_deg: f64) -> Observer {
         // Use J2000 so the pole/zenith geometry tests are not asserting a

@@ -126,7 +126,9 @@ common occultation primitives (`V-51a`), the general N≤16 occluder
 uniform array (`V-51b`), the solar-eclipse renderer path (`V-51c`),
 lunar occultation of stars and planets (`V-51d`), Mercury / Venus
 transits of the Sun (`V-51e`), and mutual planetary occultation
-(`V-51f`).
+(`V-51f`). The first rung of `V-52` — the Saturn ring system (`V-52a`)
+— has also shipped; `V-52b`/`c`/`d` (Galilean moons, Titan, shadow
+transits) remain open.
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
@@ -197,7 +199,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-49` | **Comet rendering** | ⬜ |
 | `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ⬜ |
 | `V-51` | **Unified eclipse / occultation pass** (`a` + `b` + `c` + `d` + `e` + `f` done) | ✅ |
-| `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** | ⬜ |
+| `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** (`a` done) | ⏳ |
 | `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** | ⬜ |
 | `V-54` | **Double / binary star resolution** | ⬜ |
 | `V-55` | **Artificial satellites (TLE / SGP4)** | ⬜ |
@@ -1835,51 +1837,154 @@ sub-arcsecond contact timing; usable before that with the existing
 
 ## Solar system depth
 
-### `V-52` Planetary rings and moons — ⬜
+### `V-52` Planetary rings and moons — ⏳ in progress
 
 **Item.** Today `V-35` renders Mercury–Neptune as bare disks. Three
 visually unmistakable elements are missing: **Saturn's ring system**,
 the **Galilean moons** (Io, Europa, Ganymede, Callisto), and **Titan**.
 Without them, telescope-eyepiece scenes (`V-43`) look obviously wrong.
 
-**Scientific basis.**
-- Saturn ring geometry: inner / outer radii from Cassini fits (Porco et
-  al. 2005); ring opening angle (B) from sub-Earth latitude of Saturn's
-  pole; A / B / Cassini Division / C-ring brightness ratios from
-  Dones et al. 1993.
-- Galilean moons: VSOP-style Sampson 1921 / Lieske E5 (Lieske 1998)
-  theory for Jovicentric positions, projected to topocentric apparent
-  positions; magnitudes from JPL Horizons-style geometric formulae.
-- Titan: TASS1.7 (Vienne & Duriez 1995) for Saturnicentric position.
+Following the `V-51a`–`V-51f` precedent, this item is split into
+independently shippable sub-rungs so the astronomy and renderer work
+can land in isolation:
 
-**References.**
-- Lieske, J. H. 1998, A&AS 129, 205 (E5 theory of Galilean moons).
-- Vienne, A., Duriez, L. 1995, A&A 297, 588 (TASS1.7 Saturnian moons).
-- Porco, C. C. et al. 2005, Science 307, 1226 (Cassini ring geometry).
-- Dones, L. et al. 1993, Icarus 105, 184 (ring photometric profiles).
-
-**Implementation scope.**
-- `crates/astronomy/src/moons.rs` (new): `apparent_galilean_moons`,
-  `apparent_titan` returning topocentric `(RA, Dec, magnitude,
-  shadow_on_planet)`.
-- `crates/astronomy/src/ephemeris.rs`: extend Saturn state with ring
-  opening angle `B` and `B'` (illumination side).
-- `crates/renderer`: Saturn-ring shader (oriented ellipse with A / B / C
-  bands and Cassini gap, shadowed by the planet body); moon sprites as
-  point lights with their own glare from the existing pipeline; shadow
-  transits drawn via the analytic-mask path of `V-51b`.
-- Reuse `V-51a/b` occultation primitives for mutual Galilean events
-  (Io occulting Europa, shadow transits on Jupiter).
-
-**Tests / validation.** Galilean configurations at known epochs within
-5″ of JPL Horizons; Saturn ring opening at solstices / equinoxes within
-0.1°; one deterministic eyepiece-sim render of Jupiter + 4 moons and
-one of Saturn + rings added to the gallery.
+| Sub | Scope | Status |
+|---|---|---|
+| `V-52a` | Saturn ring system (geometry, ring-plane shader, body-on-ring shadow) | ✅ done |
+| `V-52b` | Galilean moons (Io / Europa / Ganymede / Callisto) | ⬜ |
+| `V-52c` | Titan | ⬜ |
+| `V-52d` | Galilean shadow / occultation transits on Jupiter (reuses `V-51b`) | ⬜ |
 
 **Deliberate non-goal scope.** No irregular moons of any planet, no
 Neptunian / Uranian rings (faint, requires deep-field telescope sim),
 no surface textures — the bodies stay as photometric point / disk
 sources with magnitudes.
+
+---
+
+### `V-52a` Saturn ring system — ✅ done
+
+**Item.** Saturn rendered with its A / B / C bands and the Cassini
+Division, opened by the sub-Earth latitude `B`, and shadowed where the
+planet body sits between Earth and the rear half of the ring plane.
+
+**Scientific basis.**
+- Ring-plane orientation: IAU WGCCRE 2015 Saturn pole `α₀ = 40.589°,
+  δ₀ = 83.537°` in J2000 ICRS (slow century drift discarded — the ring
+  opens through ±26.7° over a 29-year cycle, so a 0.01°/century pole
+  drift is well below the test gate).
+- Sub-Earth latitude `B` and sub-Sun latitude `B'` from Meeus 1998
+  ch. 45: `sin B = sin i · cos β · sin(λ − Ω) − cos i · sin β` with
+  `i = 28.075°, Ω = 169.508°` (J2000 ecliptic frame). `B'` uses the
+  heliocentric ecliptic longitude / latitude of Saturn.
+- Ring inner / outer radii from the Cassini orbital fits (Porco et al.
+  2005): C inner 74 510 km, B inner 91 980 km, B outer 117 580 km,
+  Cassini outer 122 050 km, A outer 136 775 km; Saturn equatorial
+  radius 60 268 km.
+- Band brightness ratios (Dones et al. 1993, geometric albedo at
+  B ≈ 26°): A = 0.50, B = 1.00 (anchor), Cassini = 0.15, C = 0.20.
+- Planet shadow on the rings: ring pixels behind Saturn (positive
+  line-of-sight depth) and inside the body silhouette darken to zero;
+  the ring opening sets which annulus is occluded.
+
+**References.**
+- Meeus, J. 1998, *Astronomical Algorithms*, 2nd ed., ch. 45 ("Ephemeris
+  for Physical Observations of Saturn's rings").
+- Porco, C. C. et al. 2005, Science 307, 1226 (Cassini ring geometry).
+- Dones, L. et al. 1993, Icarus 105, 184 (ring photometric profiles).
+- Archinal, B. A. et al. 2018, CMDA 130, 22 (IAU WGCCRE 2015 pole).
+
+**Implementation.**
+- `crates/astronomy/src/ephemeris.rs`: `SaturnRingApparent { B, Bp,
+  ring_pole_eq, position_angle_rad }` + `apparent_saturn_ring(jd)` and
+  `apparent_saturn_ring_topocentric(observer)`.
+- `crates/renderer/src/camera.rs`: extends the planet uniform with a
+  `saturn_ring` block (ring-pole eq vec3, `sin|B|`, illumination-side
+  sign, four ring radii in radians). Inactive when planets are off or
+  Saturn is below the horizon.
+- `crates/renderer/src/shaders/skyglow.wgsl`: `saturn_ring_radiance`
+  composes the elliptical annulus, evaluates band brightness, and
+  subtracts the body-on-ring shadow.
+- Validation gallery: `saturn-eyepiece` preset added.
+
+**Tests / validation.**
+- Unit: `B` matches Meeus tabulated openings within 0.3° at the
+  1995-08-10 (edge-on), 2002-12-17 (south-face maximum, B ≈ −26.7°),
+  2009-09-04 (edge-on) and 2017-05-28 (north-face maximum, B ≈ +26.7°)
+  reference epochs.
+- Unit: ring-pole equatorial direction at J2000 is within 0.1° of the
+  IAU pole.
+- Unit: topocentric and geocentric ring API return identical orientation
+  at the V-52a accuracy budget (Earth-radius parallax cannot move the
+  ring orientation).
+
+**Follow-up.** A `saturn-eyepiece` deterministic scene preset (Saturn
+framed near the 2017 northern-face solstice in eyepiece mode) is left as
+a separate small PR so the preset JSON export pipeline and its
+round-trip tests can be bumped together.
+
+**Hosts wired.** CLI / viewer / web.
+
+---
+
+### `V-52b` Galilean moons — ⬜
+
+**Item.** Io, Europa, Ganymede, Callisto as point sources next to
+Jupiter, with topocentric Jovicentric positions accurate to ~5″ over
+the ±100-year budget.
+
+**Scientific basis.** Lieske 1998 E5 theory.
+
+**References.**
+- Lieske, J. H. 1998, A&AS 129, 205 (E5 theory of Galilean moons).
+
+**Implementation scope.**
+- `crates/astronomy/src/moons.rs` (new): `apparent_galilean_moons`
+  returning topocentric `(RA, Dec, magnitude)` for each of the four.
+- `crates/renderer`: moon sprites as point lights with their own glare
+  through the existing star-pass PSF.
+
+**Tests / validation.** Configurations at known epochs within 5″ of JPL
+Horizons; one deterministic eyepiece render of Jupiter + 4 moons.
+
+**Hosts wired.** CLI / viewer / web.
+
+---
+
+### `V-52c` Titan — ⬜
+
+**Item.** Titan as a point source ≈3′ from Saturn (Saturn's brightest
+moon, V ≈ 8.4, easily reachable in a small telescope).
+
+**Scientific basis.** TASS1.7 (Vienne & Duriez 1995) restricted to
+Titan.
+
+**References.**
+- Vienne, A., Duriez, L. 1995, A&A 297, 588 (TASS1.7 Saturnian moons).
+
+**Implementation scope.** Extension of `crates/astronomy/src/moons.rs`
+with `apparent_titan`.
+
+**Tests / validation.** Titan position at known epochs within 5″ of JPL
+Horizons.
+
+**Hosts wired.** CLI / viewer / web.
+
+---
+
+### `V-52d` Galilean shadow / occultation transits on Jupiter — ⬜
+
+**Item.** Reuses the `V-51b` analytic-mask occluder array to draw the
+shadows of Io / Europa / Ganymede / Callisto crossing the Jovian disk,
+and to occult each moon when it passes behind another moon or Jupiter.
+
+**Dependencies.** Requires `V-52b` for the Jovicentric geometry. Reuses
+`V-51a` (occultation primitives) and `V-51b` (analytic-mask occluder
+uniform array).
+
+**Tests / validation.** Shadow transit ingress times at known epochs
+within 5 minutes of JPL Horizons; one deterministic eyepiece render of
+a Galilean shadow-transit configuration.
 
 **Hosts wired.** CLI / viewer / web.
 

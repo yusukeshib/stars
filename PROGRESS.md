@@ -414,6 +414,95 @@ gibbous appears as a ~24 % waning crescent). The sign is now `-moon_dir`,
 matching the geometric convention that `moon_dir` points from the observer to
 the Moon.
 
+### Saturn ring system (`V-52a`)
+
+First slice of `V-52` (planetary rings and moons): Saturn now renders
+with its A / B / C ring bands and the Cassini Division, opened by the
+sub-Earth Saturnicentric latitude `B`, and shadowed where the planet
+body sits between the observer and the rear half of the ring plane.
+The other three rungs of `V-52` (Galilean moons, Titan, Galilean
+shadow / occultation transits) remain open and ship in subsequent PRs.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/ephemeris.rs`: new `SaturnRingApparent` and
+  `apparent_saturn_ring{,_topocentric}` API.
+- `crates/renderer/src/camera.rs`: `CameraUniform::saturn_ring_pole_sinb` /
+  `saturn_ring_state` + `PlanetUniforms` Saturn-ring block.
+- `crates/renderer/src/shaders/skyglow.wgsl`: `saturn_ring_brightness`
+  evaluator wired into `planet_disk_radiance` for the Saturn entry.
+- `crates/renderer/src/shaders/star.wgsl`: padding fields to keep the
+  WGSL uniform binding aligned with the host struct.
+
+Shipped capabilities:
+
+- Ring orientation: ring-plane inclination `i = 28.075216° − 0.012998° T
+  + 0.000004° T²` and ascending-node longitude `Ω = 169.508470° +
+  1.394681° T + 0.000412° T²` from Meeus 1998 ch. 45.
+- Sub-Earth latitude `sin B = sin i · cos β · sin(λ − Ω) − cos i · sin β`
+  using Saturn's apparent geocentric ecliptic position (λ, β) from
+  `apparent_planet(Planet::Saturn)`.
+- Sub-Sun latitude `sin B'` computed analogously from the heliocentric
+  ecliptic longitude / latitude returned by `astro::planet::heliocent_coords`.
+- Ring pole direction in the equatorial frame of date, rotated through
+  the same J2000 path as the planet direction so the shader sees both
+  in one consistent frame.
+- Renderer ring shader: builds a sky-tangent basis at Saturn's centre,
+  decomposes each ray into `(u, v)` along the projected ring major and
+  minor axes, de-projects `v` by the `|sin B|` foreshortening to recover
+  the true ring-plane radius in Saturn-radius units, looks up the band
+  (C / B / Cassini Division / A) and weights by Dones et al. 1993
+  brightness ratios `[0.20, 1.00, 0.15, 0.50]`.
+- Body-on-ring shadow: ring pixels on the half of the ring whose `v`
+  has the opposite sign to `sin B` (i.e., the far half) are occulted
+  when their sky-plane offset falls inside Saturn's body silhouette.
+- Lit / unlit face: when `sign(sin B) ≠ sign(sin B')` the side facing
+  the observer is the unlit face; the ring drops to a 10 % factor
+  (ringshine / forward-scattered Saturnshine).
+- Ring-radius constants pinned to the Cassini orbital fits (Porco et
+  al. 2005), C-inner 1.236, B-inner 1.526, B-outer 1.951, A-inner 2.025,
+  A-outer 2.270 × Saturn equatorial radius (60 268 km, IAU WGCCRE 2015).
+- Pixel-scale floor: the ring tracks the body's per-pixel-floored
+  visual radius, so at naked-eye FoV where Saturn's true 9″ disk is
+  sub-pixel, the ring scales up with the body instead of vanishing.
+
+Tests / validation (`crates/astronomy/src/ephemeris.rs`):
+
+- `saturn_ring_edge_on_in_1995`: ring-plane crossing 1995-08-10,
+  |B| < 0.6°.
+- `saturn_ring_max_open_in_2002`: southern-face maximum 2002-12-17,
+  B = (−26.7 ± 0.3)°, `sign(B') = sign(B) < 0`.
+- `saturn_ring_edge_on_in_2009`: ring-plane crossing 2009-09-04,
+  |B| < 0.6°.
+- `saturn_ring_max_open_north_in_2017`: northern-face maximum
+  2017-05-28, B = (+26.7 ± 0.5)°, `sign(B') = sign(B) > 0`.
+- `saturn_ring_pole_is_unit_length_and_near_iau_pole_at_j2000`:
+  ring pole within 0.1° of the IAU WGCCRE 2015 pole
+  `α₀ = 40.589°, δ₀ = 83.537°` at J2000.
+- `saturn_ring_topocentric_matches_geocentric`: Earth-radius parallax
+  cannot move the ring orientation at the V-52a accuracy budget.
+
+Deliberately out of scope for this slice:
+
+- Ring shadow on the planet body (the equatorial dark band on Saturn's
+  southern hemisphere when north face is open). Visible at telescope
+  scale but not at naked-eye scale; deferred until the V-52a renderer
+  pipeline is in place.
+- `saturn-eyepiece` validation-gallery scene preset — deferred to a
+  small follow-up PR so the preset JSON-export pipeline and its
+  round-trip tests bump together.
+
+References (also pinned in ROADMAP `V-52a`):
+
+- Meeus, J. 1998, *Astronomical Algorithms*, 2nd ed., ch. 45.
+- Porco, C. C. et al. 2005, Science 307, 1226.
+- Dones, L. et al. 1993, Icarus 105, 184.
+- Archinal, B. A. et al. 2018, CMDA 130, 22.
+
+Hosts wired: CLI / viewer / web.
+
+---
+
 ### Mutual planetary occultation (`V-51f`)
 
 Sixth slice of `V-51` and the last open producer in the unified
