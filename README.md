@@ -15,6 +15,20 @@ The project currently ships three reference hosts over a shared Rust engine:
 - `apps/viewer` — interactive native desktop viewer;
 - `apps/web` — WASM + browser UI.
 
+## Demo gallery
+
+A curated tour of `stars` — every scene below is a reproducible scene preset.
+Full gallery: [`docs/demo-gallery.md`](docs/demo-gallery.md).
+
+| Total solar eclipse | Belt of Venus (anti-solar Tokyo) | Galilean shadow on Jupiter |
+|---|---|---|
+| ![Total solar eclipse](docs/assets/demo-gallery/solar-eclipse.png) | ![Civil twilight anti-solar Tokyo](docs/assets/demo-gallery/civil-twilight-antisolar-tokyo.png) | ![Jupiter Galilean shadow transit](docs/assets/demo-gallery/jupiter-shadow-transit.png) |
+| `--preset solar-eclipse` | `--preset civil-twilight-antisolar-tokyo` | `--preset jupiter-shadow-transit` |
+
+```bash
+make demo-gallery   # re-render the curated set into docs/assets/demo-gallery/
+```
+
 ## What works today
 
 The current engine already includes:

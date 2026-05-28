@@ -8,6 +8,20 @@
 
 英語版 README は [`README.md`](README.md) です。
 
+## デモギャラリー
+
+キュレーション済みシーン。各画像は再現可能なシーンプリセットです。
+フルギャラリー: [`docs/demo-gallery.ja.md`](docs/demo-gallery.ja.md).
+
+| 皆既日食 | Belt of Venus（反太陽方向、東京） | 木星のガリレオ衛星影 |
+|---|---|---|
+| ![Total solar eclipse](docs/assets/demo-gallery/solar-eclipse.png) | ![Civil twilight anti-solar Tokyo](docs/assets/demo-gallery/civil-twilight-antisolar-tokyo.png) | ![Jupiter Galilean shadow transit](docs/assets/demo-gallery/jupiter-shadow-transit.png) |
+| `--preset solar-eclipse` | `--preset civil-twilight-antisolar-tokyo` | `--preset jupiter-shadow-transit` |
+
+```bash
+make demo-gallery   # docs/assets/demo-gallery/ にキュレーション済みセットを再生成
+```
+
 ## 何ができるか
 
 現在のエンジンには、以下が実装されています。

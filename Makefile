@@ -1,4 +1,4 @@
-.PHONY: cli viewer dev web web-build web-install web-dev frontend-check setup scene-presets validation-gallery validation-gallery-check notebook-check manifest-check fmt clippy test ci clean
+.PHONY: cli viewer dev web web-build web-install web-dev frontend-check setup scene-presets validation-gallery validation-gallery-check demo-gallery demo-gallery-check notebook-check manifest-check fmt clippy test ci clean
 
 # PNG-output CLI (override ARGS, e.g. `make cli ARGS="--lat 35.68 --lng 139.69 -o /tmp/sky.png"`).
 ARGS ?= --lat 35.68 --lng 139.69 --azimuth 180 --altitude 30 -o stars.png
@@ -42,6 +42,14 @@ validation-gallery:
 # Opt-in exact screenshot regression for pinned GPU/driver environments.
 validation-gallery-check:
 	./scripts/render-validation-gallery.sh --check
+
+# Render/update the curated public demo gallery (L-14).
+demo-gallery:
+	./scripts/render-demo-gallery.sh --update
+
+# Opt-in exact screenshot regression for the demo gallery on pinned GPUs.
+demo-gallery-check:
+	./scripts/render-demo-gallery.sh --check
 
 # Check notebook-backed astronomy table fixtures without requiring Jupyter or a GPU.
 notebook-check:
