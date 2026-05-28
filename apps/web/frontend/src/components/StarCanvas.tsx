@@ -17,6 +17,13 @@ type Props = {
   onWheel: (zoomFactor: number) => void;
   onSunAltitude: (sunAltitudeDeg: number) => void;
   onPlanning: (planning: PlanningTable) => void;
+  /// Notified once the WASM `StarView` is ready, with stable closures that
+  /// proxy V-56 search and GoTo. Closures stay valid for the canvas
+  /// lifetime, so parent state can keep them in a ref.
+  onSearchReady?: (api: {
+    lookup: (query: string, limit: number) => string;
+    goto: (id: string) => string;
+  }) => void;
 };
 
 type PointerPoint = { x: number; y: number };
@@ -45,7 +52,10 @@ export function StarCanvas({
   onWheel,
   onSunAltitude,
   onPlanning,
+  onSearchReady,
 }: Props) {
+  const onSearchReadyRef = useRef(onSearchReady);
+  onSearchReadyRef.current = onSearchReady;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const handleRef = useRef<StarView | null>(null);
   const activePointers = useRef<Map<number, PointerPoint>>(new Map());
@@ -154,6 +164,10 @@ export function StarCanvas({
       if (cancelled) return;
       const handle = await wasm.StarView.create("star-canvas");
       handleRef.current = handle;
+      onSearchReadyRef.current?.({
+        lookup: (query: string, limit: number) => handle.lookup_object(query, limit),
+        goto: (id: string) => handle.goto_object(id),
+      });
       // Apply whatever overlay state is current right now -- could be the
       // initial defaults or something the user toggled during the wasm boot.
       const ov = overlaysRef.current;

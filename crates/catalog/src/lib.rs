@@ -4,6 +4,7 @@ mod clusters;
 mod color;
 mod coords;
 mod deepsky;
+pub mod search;
 
 pub use backend::{
     CatalogBackend, CatalogBackendKind, CatalogError, CatalogIdentifiers, CatalogObjectId,
@@ -19,6 +20,7 @@ pub use deepsky::{
     DeepSkyCatalog, DeepSkyId, DeepSkyKind, DeepSkyObject, MessierCatalog, NgcBrightCatalog,
     NO_PHOTOMETRY_SENTINEL_MAG,
 };
+pub use search::{search, SearchId, SearchKind, SearchMatch, SEARCH_LIMIT_DEFAULT};
 
 #[cfg(feature = "filesystem")]
 pub use backend::HygCsvBackend;

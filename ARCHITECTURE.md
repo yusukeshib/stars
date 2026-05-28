@@ -133,7 +133,13 @@ Hosts own platform lifecycle:
 - `apps/viewer`: optionally load a JSON session or built-in preset, manage a `winit` event loop,
   surface resize, input, and frame pacing;
 - `apps/web`: expose a WASM `StarView`, keep JS/UI state, load/copy/download
-  JSON sessions, resize the canvas, and call into the shared renderer.
+  JSON sessions, resize the canvas, and call into the shared renderer. The
+  V-56 object-search surface (`lookup_object`, `goto_object`) is part of the
+  same WASM facade: the search index lives in `crates/catalog::search`, so
+  every host gets the same ranking by calling `catalog::search(query, n)`;
+  `goto_object` resolves the returned `SearchId` back to a topocentric
+  apparent `(alt, az)` via the existing `apparent_*_topocentric` paths so
+  the info panel sees the same ephemeris the renderer does.
 
 ### `bindings/python` (L-21, read-only)
 
