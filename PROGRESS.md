@@ -732,6 +732,90 @@ Hosts wired: unchanged — already CLI / viewer / web through `V-52b`.
 
 ---
 
+### Titan — TASS1.7 precision upgrade scaffold (`V-52c-TASS17`)
+
+`V-52c-TASS17` is the precision-upgrade follow-on to `V-52c`: replace
+the Meeus 1998 ch. 45 truncation currently producing Titan's
+Kronocentric sky-plane offset with the full Vienne & Duriez 1995
+TASS1.7 Titan series so the apparent position of Titan stays within
+~5″ of JPL Horizons across the ROADMAP ±100-yr budget. The full
+coefficient transcription requires its own dedicated validation
+matrix; this slice mirrors the V-52b-E5 pattern — substitution-point
+module, pinned Horizons reference fixture, and a test gate the
+follow-up PR will tighten.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/moons/tass17.rs` (new): substitution-point
+  module with `TitanOffset`, `titan_offset`, and
+  `TitanSeriesShape`. The body of `titan_offset` currently delegates
+  to the Meeus truncation via the `astro` crate (same numerical result
+  `V-52c` shipped) and carries a `TODO(V-52c-TASS17)` block sketching
+  the future evaluator (TASS1.7 secular angles at `T_REF =
+  2_444_240.0` JD = 1980-Jan-04.5 TT, the four (λ − λ̄, p, z, ζ)
+  trigonometric sums, Laplace-plane element folding, and the
+  Laplace-plane → J2000 ICRS rotation). `TitanSeriesShape::TITAN`
+  pins the Vienne / Duriez TASS17.f per-moon term counts for Titan
+  (23 longitude + 9 radial + 44 z + 31 ζ = 107), so the follow-up's
+  coefficient parser has a free shape sanity-check.
+- `crates/astronomy/src/moons.rs`: routes the Kronocentric offset
+  computation through `tass17::titan_offset`. Public API
+  (`apparent_titan{,_topocentric}`, `TitanApparent`) is unchanged —
+  the renderer and hosts pick up the upgrade transparently when the
+  precision PR lands.
+- `data/horizons_titan.csv` (new, manifest id `horizons-titan-fixture`):
+  geocentric ICRF apparent RA / Dec / range / range-rate for Saturn +
+  Titan at three epochs spanning ±100 years (1900 / 2000 / 2100 UT).
+- `scripts/fetch-horizons-titan.sh` (new): bash regenerator hitting
+  the public JPL Horizons API.
+- `data/manifest.toml`: new generated-artifact row for the fixture
+  (with provenance, license, and the regeneration command).
+
+Shipped capabilities:
+
+- Substitution point exists and is reached by both the geocentric and
+  topocentric Titan code paths. Replacing the body of
+  `tass17::titan_offset` in a follow-on PR cascades through every host
+  without further changes.
+- The 2-row × 3-epoch Horizons fixture is now committed and pinned by
+  `make manifest-check`.
+- `moons::tests::titan_matches_horizons_within_tass17_budget` computes
+  the Kronocentric sky-plane offset error between the current
+  Meeus-grade model and the Horizons fixture for every epoch
+  (precession-invariant because Titan and Saturn share the rotation)
+  and asserts it stays under the
+  `TASS17_MAX_OFFSET_ERR_ARCSEC = 100.0`″ band. The `V-52c-TASS17`
+  precision upgrade tightens that constant to ~5″ once the TASS1.7
+  series is wired through.
+- `tass17::tests::series_shape_matches_tass17_titan_counts` pins the
+  Titan (λ, p, z, ζ) term counts so a transcribed coefficient table
+  that diverges from Vienne / Duriez's published shape fails the
+  build at parse time.
+
+Deliberately out of scope for this slice:
+
+- The full TASS1.7 Titan trigonometric series transcription
+  (≈107 coefficient × argument pairs across the four series, plus the
+  Laplace-plane rotation into J2000 ICRS). Tracked as the rest of
+  `V-52c-TASS17`.
+- Densifying the Horizons fixture (more epochs, topocentric sites
+  for diurnal-parallax pins) — explicitly part of the precision PR.
+
+References (also pinned in ROADMAP `V-52c-TASS17`):
+
+- Vienne, A. & Duriez, L. 1995, A&A 297, 588 (TASS1.7 — the target).
+- Vienne, A. & Duriez, L. 1991, A&A 246, 619 (TASS predecessor;
+  satellite-index conventions Titan inherits).
+- Meeus, J. 1998, *Astronomical Algorithms*, ch. 45 (the low-precision
+  truncation actually exercised today via the `astro` crate).
+- JPL Horizons On-Line Ephemeris System
+  (https://ssd.jpl.nasa.gov/horizons/) — the reference the precision
+  gate is anchored against.
+
+Hosts wired: unchanged — already CLI / viewer / web through `V-52c`.
+
+---
+
 ### Galilean shadow transits on Jupiter (`V-52d`)
 
 Fourth slice of `V-52` (planetary rings and moons): each Galilean

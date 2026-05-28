@@ -64,6 +64,7 @@ use crate::ephemeris::{
 use crate::Observer;
 
 pub mod lieske_e5;
+pub mod tass17;
 
 /// Jupiter equatorial radius in kilometres
 /// (IAU WGCCRE 2015 / Archinal et al. 2018, Table 4).
@@ -392,17 +393,16 @@ fn titan_from_saturn(
     let east_hat = normalise(cross(north_pole, saturn_dir));
     let north_hat = cross(saturn_dir, east_hat);
 
-    // Meeus's `apprnt_rect_coords` returns (X, Y, Z) where X is positive
-    // **west** of Saturn (opposite increasing RA) and Y is positive
-    // **north** in units of Saturn's equatorial radius. Convert to
-    // (east, north) by flipping X, matching the Galilean treatment.
-    let (x_west, y_north, _z) = astro::planet::saturn::moon::apprnt_rect_coords(
-        julian_date,
-        &astro::planet::saturn::moon::Moon::Titan,
-    );
+    // The (east, north) sky-plane offset comes from the
+    // [`tass17::titan_offset`] substitution point. Today that delegates
+    // to the Meeus 1998 ch. 45 truncation of the TASS theory routed
+    // through the `astro` crate; the V-52c-TASS17 follow-up swaps in the
+    // full Vienne & Duriez 1995 TASS1.7 series without changing this
+    // call site.
+    let offset = tass17::titan_offset(julian_date);
     let r_s_km = SATURN_EQUATORIAL_RADIUS_KM;
-    let east_offset_km = -x_west * r_s_km;
-    let north_offset_km = y_north * r_s_km;
+    let east_offset_km = offset.east_radii * r_s_km;
+    let north_offset_km = offset.north_radii * r_s_km;
 
     // Position vector from the observer to Titan, in equatorial km.
     let pos_km = [
@@ -916,5 +916,101 @@ mod tests {
             sep_arcmin > 0.1 && sep_arcmin < 3.5,
             "Titan-Saturn separation at J2000 = {sep_arcmin:.2}', expected (0.1', 3.5')"
         );
+    }
+
+    // -------------------------------------------------------------------
+    // V-52c-TASS17 — Titan precision-upgrade test gate
+    // -------------------------------------------------------------------
+
+    /// Pinned JPL Horizons reference fixture for Titan.
+    ///
+    /// Rows mirror `data/horizons_titan.csv`; the file is the source of
+    /// truth, and the literal block here is kept in sync by
+    /// `scripts/fetch-horizons-titan.sh` (recorded with SHA-256 in
+    /// `data/manifest.toml`).
+    ///
+    /// Tuple shape: `(naif, jd_utc, ra_hms, dec_dms)`.
+    /// - `naif`   = 699 (Saturn), 606 (Titan).
+    /// - `jd_utc` = JD at the requested UT epoch (00:00 UT).
+    /// - Geocentric astrometric ICRF apparent positions (light-time
+    ///   corrected), Horizons quantities 1 and 20.
+    const HORIZONS_TITAN_FIXTURE: &[(u32, f64, &str, &str)] = &[
+        // 1900-01-01 00:00 UT
+        (699, 2_415_020.5, "17 56 10.02", "-22 26 30.0"),
+        (606, 2_415_020.5, "17 56 12.79", "-22 25 29.2"),
+        // 2000-01-01 00:00 UT
+        (699, 2_451_544.5, "02 35 06.40", "+12 37 01.8"),
+        (606, 2_451_544.5, "02 35 20.04", "+12 37 00.5"),
+        // 2100-01-01 00:00 UT
+        (699, 2_488_069.5, "13 33 21.66", "-07 08 14.3"),
+        (606, 2_488_069.5, "13 33 28.23", "-07 08 43.3"),
+    ];
+
+    /// Maximum allowed Kronocentric sky-plane offset error between this
+    /// crate's Titan model and the pinned JPL Horizons fixture, in
+    /// arcseconds.
+    ///
+    /// The tolerance below is the **current Meeus-grade budget**: the
+    /// Meeus 1998 ch. 45 truncation drops the higher-order TASS terms,
+    /// so the Titan-vs-Saturn sky-plane offset error grows to ≈10-60″
+    /// across the ±100-yr fixture epochs. 100″ is the headroom the
+    /// roadmap pins; the V-52c-TASS17 follow-up tightens this bound to
+    /// ~5″ (the Vienne & Duriez 1995 TASS1.7 gate) by replacing the body
+    /// of [`tass17::titan_offset`] with the full trigonometric series.
+    /// Flipping that bar is a one-line edit to this constant once the
+    /// TASS1.7 series is wired through.
+    const TASS17_MAX_OFFSET_ERR_ARCSEC: f64 = 100.0;
+
+    #[test]
+    fn titan_matches_horizons_within_tass17_budget() {
+        let sorted_epochs: Vec<u64> = HORIZONS_TITAN_FIXTURE
+            .iter()
+            .map(|(_, jd, _, _)| jd.to_bits())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+
+        for jd_bits in sorted_epochs {
+            let jd = f64::from_bits(jd_bits);
+
+            let sat_row = HORIZONS_TITAN_FIXTURE
+                .iter()
+                .find(|(n, j, _, _)| *n == 699 && (*j - jd).abs() < 1e-9)
+                .expect("Saturn row present at every fixture epoch");
+            let titan_row = HORIZONS_TITAN_FIXTURE
+                .iter()
+                .find(|(n, j, _, _)| *n == 606 && (*j - jd).abs() < 1e-9)
+                .expect("Titan row present at every fixture epoch");
+
+            let sat_ra_h = parse_ra_hms(sat_row.2);
+            let sat_dec_h = parse_dec_dms(sat_row.3);
+            let h_titan_ra = parse_ra_hms(titan_row.2);
+            let h_titan_dec = parse_dec_dms(titan_row.3);
+
+            let (hx_arcsec, hy_arcsec) =
+                jovicentric_offset_arcsec(h_titan_ra, h_titan_dec, sat_ra_h, sat_dec_h);
+
+            let titan = apparent_titan(jd);
+            let saturn = apparent_planet(Planet::Saturn, jd);
+            let (mx_arcsec, my_arcsec) = jovicentric_offset_arcsec(
+                titan.right_ascension_rad,
+                titan.declination_rad,
+                saturn.right_ascension_rad,
+                saturn.declination_rad,
+            );
+
+            let dx = mx_arcsec - hx_arcsec;
+            let dy = my_arcsec - hy_arcsec;
+            let err = (dx * dx + dy * dy).sqrt();
+
+            assert!(
+                err < TASS17_MAX_OFFSET_ERR_ARCSEC,
+                "jd={jd} Titan: Kronocentric offset error vs Horizons = {err:.1}″ \
+                 (Horizons = ({hx_arcsec:.1}, {hy_arcsec:.1})″, \
+                 model = ({mx_arcsec:.1}, {my_arcsec:.1})″) \
+                 exceeds Meeus-grade budget {TASS17_MAX_OFFSET_ERR_ARCSEC}″. \
+                 V-52c-TASS17 tightens this bound to ≈5″."
+            );
+        }
     }
 }

@@ -1883,7 +1883,7 @@ can land in isolation:
 | `V-52b` | Galilean moons (Io / Europa / Ganymede / Callisto), Meeus-grade | ⏳ in progress |
 | `V-52b-E5` | Galilean moons precision upgrade — full Lieske 1998 E5 (~5″ / ±100 yr) | ⏳ in progress |
 | `V-52c` | Titan, Meeus-grade | ⏳ Meeus-grade shipped |
-| `V-52c-TASS17` | Titan precision upgrade — full TASS1.7 (~5″ / ±100 yr) | ⬜ |
+| `V-52c-TASS17` | Titan precision upgrade — full TASS1.7 (~5″ / ±100 yr) | ⏳ in progress |
 | `V-52d` | Galilean shadow / occultation transits on Jupiter (reuses `V-51b`) | ✅ done |
 
 **Deliberate non-goal scope.** No irregular moons of any planet, no
@@ -2157,12 +2157,27 @@ web `set_planets_enabled`).
 
 ---
 
-### `V-52c-TASS17` Titan — full TASS1.7 precision upgrade — ⬜
+### `V-52c-TASS17` Titan — full TASS1.7 precision upgrade — ⏳ in progress
 
 **Item.** Replace the Meeus-grade Titan backend from `V-52c` with the
 full TASS1.7 (Vienne & Duriez 1995) Titan series, transcribed from a
 verified machine-readable IMCCE distribution, and pin a multi-epoch
 Horizons-anchored ~5″ / ±100-yr validation matrix.
+
+**Status.** Scaffold + Horizons fixture shipped. The renderer now
+routes Titan through the `tass17::titan_offset` substitution point in
+`crates/astronomy/src/moons/tass17.rs` (mirroring the V-52b-E5
+`lieske_e5` scaffold for the Galilean moons). The body of
+`titan_offset` still delegates to the Meeus 1998 ch. 45 truncation via
+the `astro` crate, so numerical output is unchanged from V-52c. The
+pinned validation fixture `data/horizons_titan.csv` (Saturn + Titan at
+1900 / 2000 / 2100, regenerable by `scripts/fetch-horizons-titan.sh`,
+manifest id `horizons-titan-fixture`) lets the test
+`moons::tests::titan_matches_horizons_within_tass17_budget` enforce
+the current Meeus-grade Kronocentric tolerance (100″) so the follow-up
+PR can tighten the bar to ~5″ by editing one constant
+(`TASS17_MAX_OFFSET_ERR_ARCSEC`) after wiring the full series
+through `titan_offset`.
 
 **Scientific basis.** TASS1.7 (Vienne & Duriez 1995, A&A 297, 588)
 restricted to Titan, with the full coefficient tables rather than the
@@ -2175,9 +2190,10 @@ Meeus 1998 ch. 45 truncation.
 
 **Implementation scope.** Replace the `astro` crate's Saturnian-moon
 backend in `apparent_titan{,_topocentric}` with a TASS1.7 driver under
-a new module `crates/astronomy/src/tass17.rs`. Public API stays
-unchanged; the V-52c-shipped tests stay green and are joined by a
-multi-epoch Horizons-anchored ~5″ / ±100-yr validation matrix.
+the scaffolded `crates/astronomy/src/moons/tass17.rs` module. Public
+API stays unchanged; the V-52c-shipped tests stay green and the new
+`titan_matches_horizons_within_tass17_budget` test tightens by editing
+one constant.
 
 **Tests / validation.** Titan position at three or more epochs across
 ±100 yr from J2000, agreement with JPL Horizons within 5″.
