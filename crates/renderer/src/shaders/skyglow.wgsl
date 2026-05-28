@@ -427,6 +427,22 @@ fn baumbach_corona(r_solar: f32) -> f32 {
     return 1.0e-6 * (2.10 * r25 + 8.65 * r7 + 4.40 * r17);
 }
 
+// V-26 dark-side earthshine surface luminance (cd/m²). Mirrors
+// `astronomy::illuminants::earthshine_disk_luminance_cd_m2` with canonical
+// Bond albedos (Earth 0.30, Moon 0.12) baked in: anchor V = 13.7 mag/arcsec²
+// at phase = 60°, Lambertian Earth-from-Moon half-phase, vanishing at full
+// Moon and peaking at new Moon. A workspace test pins the two formulas to
+// agree on a sweep of phase angles so the GPU value cannot drift from the
+// CPU helper.
+fn earthshine_disk_luminance_cd_m2(phase_rad: f32) -> f32 {
+    let phase = clamp(phase_rad, 0.0, PI);
+    let earth_phase = 0.5 * (1.0 - cos(phase));
+    // L_anchor = 1.08e5 · 10^(-0.4 · 13.7) cd/m², evaluated as a constant.
+    let anchor_cd_m2 = 0.35762161;
+    let anchor_earth_phase = 0.25; // 0.5 · (1 − cos 60°).
+    return anchor_cd_m2 * (earth_phase / anchor_earth_phase);
+}
+
 fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_sr: f32) -> vec3<f32> {
     if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
         return vec3<f32>(0.0);
@@ -482,15 +498,48 @@ fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixe
         let moon_luminance = max(camera.moon_eq_illuminance.w, 0.0) / max(moon_solid_angle, 1e-8);
         let phase = lunar_phase_lambert(ray_dir, moon_dir, sun_dir, moon_radius);
         let earth_shadow = clamp(camera.moon_disk.w, 0.0, 1.0);
+        let mask = disk_mask(ray_dir, moon_dir, moon_radius, pixel_sr);
+        // Lit-side Lambertian shading (existing path), tinted slightly
+        // warmer than D65 to track the lunar regolith spectrum.
+        let lit_rgb = vec3<f32>(1.01, 1.0, 0.82) * moon_luminance * phase;
+        // V-26 dark-side earthshine. The dark hemisphere of the Moon is
+        // lit by reflected sunlight off Earth ("Da Vinci glow"). Lambert
+        // shading uses Earth in the anti-Moon direction; this reuses the
+        // same near-hemisphere normal reconstruction as the lit term so
+        // the dark side glows brightest near disk centre and fades to
+        // zero at the limb. The lit and dark contributions add
+        // physically: a pixel near the terminator carries the weak
+        // Sun-shaded value plus the constant earthshine, exactly as a
+        // doubly-illuminated Lambertian surface does.
+        let earth_lambert = lunar_phase_lambert(ray_dir, moon_dir, -moon_dir, moon_radius);
+        let earthshine = earthshine_disk_luminance_cd_m2(camera.moon_disk.z);
+        // Slightly cool tint (D65 → Rayleigh-scattered through Earth's
+        // atmosphere → reflected by the lunar regolith): warmer than the
+        // moonlit-sky tint but cooler than the lit-side regolith colour.
+        let dark_rgb = vec3<f32>(0.78, 0.84, 1.00) * earthshine * earth_lambert;
+        // V-26 extinction: apply the same per-channel Schaefer 1993 /
+        // Kasten-Young 1989 path attenuation the diffuse sky pass uses
+        // to the dark-side term, so a low-altitude crescent attenuates
+        // its earthshine in lockstep with the surrounding sky. The lit
+        // side keeps its existing un-attenuated path; physical
+        // attenuation of the bright crescent is a separate change
+        // outside this slice.
+        var dark_attenuation = vec3<f32>(1.0);
+        if camera.extinction_k_rgb.x + camera.extinction_k_rgb.y + camera.extinction_k_rgb.z > 0.0 {
+            let alt_rad = asin(clamp(sin_alt, -1.0, 1.0));
+            let air_x = airmass_kasten_young(max(alt_rad, 0.5 * DEG_TO_RAD));
+            dark_attenuation = exp(NEG_OH_FOUR_LN10 * camera.extinction_k_rgb.xyz * air_x);
+        }
         // V-51b: subtract any front disks targeting the Moon. No
         // producer emits an `OccluderTarget::Moon` entry today (V-51d
         // makes the Moon a front disk, V-51f only pairs planets), so
         // the multiplicand stays 1.0 and the V-51c golden frame is
         // unaffected; the wiring remains in place for future slices
         // that may emit planet-behind-Moon edge cases.
-        rgb += hdr_flux_from_cd_m2(vec3<f32>(1.01, 1.0, 0.82) * moon_luminance * phase * (1.0 - 0.88 * earth_shadow), zeropoint)
-            * disk_mask(ray_dir, moon_dir, moon_radius, pixel_sr)
-            * (1.0 - moon_subtract);
+        rgb += hdr_flux_from_cd_m2(
+            (lit_rgb + dark_rgb * dark_attenuation) * (1.0 - 0.88 * earth_shadow),
+            zeropoint,
+        ) * mask * (1.0 - moon_subtract);
     }
 
     return rgb;

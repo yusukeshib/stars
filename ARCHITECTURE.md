@@ -259,7 +259,13 @@ The exact pass layout can change, but responsibilities should stay separated:
   same `apparent_disk_direction_j2000` pipeline as the bare Sun and Moon
   directions — so any front-disk on back-disk pair (solar eclipse, planetary
   transit, mutual planetary occultation) is one shader uniform write away
-  with no depth or stencil attachments. Stellar
+  with no depth or stencil attachments. The lunar disk fragment composes a
+  Lambertian lit-side term and a Lambertian dark-side earthshine term
+  additively (V-26, "Da Vinci glow"); the dark-side luminance is the
+  closed-form Goode/Danjon anchor in
+  `astronomy::illuminants::earthshine_disk_luminance_cd_m2`, and the
+  dark side is attenuated by the same per-channel Schaefer 1993 /
+  Kasten-Young 1989 extinction the diffuse sky pass uses (V-37). Stellar
   extinction and daylight scattering both read the same canonical
   (β, α, DU, observer altitude) optical-depth state through
   `astronomy::atmosphere::extinction_coefficients` (V-37); the renderer

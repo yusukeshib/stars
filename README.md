@@ -153,9 +153,9 @@ the standards-compliance page, and the data provenance manifest. The next
 best work is:
 
 1. dark-sky realism gaps the eye still sees through: atmospheric
-   dispersion (`V-25`), lunar earthshine (`V-26`), Belt of Venus /
-   Earth-shadow band (`V-27`), spectral airglow (`V-28`)
-   — naked-eye scintillation (`V-24`) has shipped;
+   dispersion (`V-25`), Belt of Venus / Earth-shadow band (`V-27`),
+   spectral airglow (`V-28`) — naked-eye scintillation (`V-24`) and
+   lunar earthshine (`V-26`) have shipped;
 2. atmospheric self-consistency: unified spectral extinction (`V-37`)
    and Hošek-Wilkie daylight (`V-38`) have shipped; light-pollution /
    Bortle (`V-39`) is next;
