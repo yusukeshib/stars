@@ -924,6 +924,71 @@ fn moonlit_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> vec
     return hdr_flux_from_cd_m2(rgb, zeropoint);
 }
 
+// V-27 anti-solar twilight structure (Belt of Venus + Earth-shadow band).
+//
+// The base `twilight_sky_radiance` term is zenith-symmetric: it scales the
+// Hulburt/V-33 single-scattering radiance by view altitude only. The two
+// functions below add the (relative_az, view_alt) 2-axis fit from
+// `astronomy::atmosphere::antitwilight_arch_radiance` and
+// `astronomy::atmosphere::earth_shadow_band_radiance`, so the anti-solar half
+// of the sky picks up the pink belt and the blue-grey shadow band documented
+// in Lee & Hernández-Andrés 2003.
+const BELT_OF_VENUS_DEPRESSION_LO_DEG: f32 = 0.0;
+const BELT_OF_VENUS_DEPRESSION_HI_DEG: f32 = 6.5;
+
+fn antitwilight_depression_envelope(depression_deg: f32) -> f32 {
+    if depression_deg <= BELT_OF_VENUS_DEPRESSION_LO_DEG
+        || depression_deg >= BELT_OF_VENUS_DEPRESSION_HI_DEG {
+        return 0.0;
+    }
+    let t = (depression_deg - BELT_OF_VENUS_DEPRESSION_LO_DEG)
+        / (BELT_OF_VENUS_DEPRESSION_HI_DEG - BELT_OF_VENUS_DEPRESSION_LO_DEG);
+    return clamp(4.0 * t * (1.0 - t), 0.0, 1.0);
+}
+
+fn antitwilight_arch_multiplier(
+    sun_alt_rad: f32,
+    relative_az_rad: f32,
+    view_alt_rad: f32,
+) -> vec3<f32> {
+    let depression_deg = -sun_alt_rad * RAD_TO_DEG;
+    let env = antitwilight_depression_envelope(depression_deg);
+    if env <= 0.0 || view_alt_rad <= 0.0 {
+        return vec3<f32>(1.0);
+    }
+    let antisolar = 0.5 * (1.0 - cos(relative_az_rad));
+    let az_weight = antisolar * antisolar;
+    let alt_deg = view_alt_rad * RAD_TO_DEG;
+    let alt_peak = 8.0;
+    let alt_sigma = 5.0;
+    let alt_delta = alt_deg - alt_peak;
+    let alt_weight = exp(-(alt_delta * alt_delta) / (2.0 * alt_sigma * alt_sigma));
+    let amp = az_weight * alt_weight * env;
+    return vec3<f32>(1.0 + 0.28 * amp, 1.0 + 0.04 * amp, 1.0 - 0.18 * amp);
+}
+
+fn earth_shadow_band_multiplier(
+    sun_alt_rad: f32,
+    relative_az_rad: f32,
+    view_alt_rad: f32,
+) -> vec3<f32> {
+    let depression_deg = -sun_alt_rad * RAD_TO_DEG;
+    let env = antitwilight_depression_envelope(depression_deg);
+    if env <= 0.0 {
+        return vec3<f32>(1.0);
+    }
+    let antisolar = 0.5 * (1.0 - cos(relative_az_rad));
+    let az_weight = antisolar * antisolar;
+    let alt_deg = view_alt_rad * RAD_TO_DEG;
+    let alt_sigma = 2.0;
+    let alt_weight = exp(-(alt_deg * alt_deg) / (2.0 * alt_sigma * alt_sigma));
+    let amp = az_weight * alt_weight * env;
+    return max(
+        vec3<f32>(1.0 - 0.40 * amp, 1.0 - 0.32 * amp, 1.0 - 0.22 * amp),
+        vec3<f32>(0.0),
+    );
+}
+
 fn twilight_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> vec3<f32> {
     if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
         return vec3<f32>(0.0);
@@ -969,7 +1034,26 @@ fn twilight_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> ve
     let blue_loss = exp(-vec3<f32>(0.45, 0.22, 0.04) * view_airmass * (0.5 + aerosol));
     let ozone = clamp(camera.atmosphere_optics.x, 0.0, 600.0) / 300.0;
     let ozone_transmission = exp(-0.025 * ozone * view_airmass * vec3<f32>(0.25, 0.58, 0.16));
-    let rgb_luminance = camera.solar_rgb.xyz * luminance * blue_loss * ozone_transmission;
+    var rgb_luminance = camera.solar_rgb.xyz * luminance * blue_loss * ozone_transmission;
+
+    // V-27: apply the (relative_az, view_alt) anti-solar tint on top of the
+    // zenith-symmetric base. The sun direction projected onto the local
+    // horizon plane gives a stable relative-azimuth reference even when the
+    // Sun is below the horizon.
+    let zenith = camera.zenith_eq.xyz;
+    let sun_horiz = normalize(sun_dir - zenith * dot(sun_dir, zenith));
+    let view_horiz = ray_dir - zenith * dot(ray_dir, zenith);
+    let view_horiz_len = length(view_horiz);
+    if view_horiz_len > 1e-4 {
+        let view_horiz_n = view_horiz / view_horiz_len;
+        let cos_rel_az = clamp(dot(view_horiz_n, sun_horiz), -1.0, 1.0);
+        let rel_az = acos(cos_rel_az);
+        let view_alt = asin(clamp(sin_alt, -1.0, 1.0));
+        let arch = antitwilight_arch_multiplier(sun_alt, rel_az, view_alt);
+        let band = earth_shadow_band_multiplier(sun_alt, rel_az, view_alt);
+        rgb_luminance = rgb_luminance * arch * band;
+    }
+
     return hdr_flux_from_cd_m2(rgb_luminance, zeropoint) * solar_eclipse_daylight_factor();
 }
 

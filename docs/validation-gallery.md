@@ -34,6 +34,7 @@ When generated, PNGs live under `docs/assets/validation/`.
 | `noon` | ![Clear-sky noon](assets/validation/noon.png) | Daylight scattering, solar disk, star suppression by sky radiance. |
 | `sunset` | ![Sunset horizon](assets/validation/sunset.png) | Golden-hour colour, horizon haze, low-solar-altitude continuity. |
 | `civil-twilight` | ![Civil twilight](assets/validation/civil-twilight.png) | Civil twilight band and day/night blend. |
+| `civil-twilight-antisolar-tokyo` | ![Civil twilight anti-solar Tokyo](assets/validation/civil-twilight-antisolar-tokyo.png) | V-27 anti-solar twilight structure: Belt of Venus arch, Earth-shadow band, R/G ROI ratios. |
 | `nautical-twilight` | ![Nautical twilight](assets/validation/nautical-twilight.png) | Nautical twilight band and additive dark-sky transition. |
 | `astronomical-twilight` | ![Astronomical twilight](assets/validation/astronomical-twilight.png) | Astronomical twilight boundary and dark-sky continuity. |
 | `moonlit-night` | ![Moonlit night](assets/validation/moonlit-night.png) | Moon disk, lunar illuminance, and moonlit sky term. |
