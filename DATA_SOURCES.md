@@ -249,6 +249,66 @@ Maintenance rules:
   allowed). Other OpenNGC designations (Caldwell, ESO, Melotte) are
   skipped by the extraction script and belong to the runtime backend.
 
+### Open-cluster membership (showpiece bootstrap)
+
+Repository location:
+
+- `crates/catalog/data/cluster_membership.csv`
+
+Used for:
+
+- `crates/catalog::clusters` (open-cluster membership lookup);
+- `DeepSkyCatalog::resolve_as_member_field` (V-53 marker suppression).
+
+Manifest id:
+
+- `open-cluster-membership-bootstrap` in `data/manifest.toml`.
+
+Source:
+
+- Cantat-Gaudin, T. et al. 2020, A&A 633, A99 — VizieR catalogue
+  `J/A+A/633/A99`, "Painting a portrait of the Galactic disc with its
+  stellar clusters" (DOI 10.1051/0004-6361/201936691). Listed as the
+  upstream the follow-up extraction will pull from.
+- Mermilliod, J.-C. & Paunzen, E. 2003, A&A 410, 511 — WEBDA database
+  context for showpiece-cluster membership lists.
+
+License:
+
+- CC-BY-4.0 (CDS / VizieR redistribution terms apply); see
+  `https://cds.u-strasbg.fr/vizier/Documents/license.htx`.
+
+Implementation areas:
+
+- `crates/catalog/src/clusters.rs` (parser + lookup APIs);
+- `crates/catalog/src/deepsky.rs`
+  (`DeepSkyCatalog::resolve_as_member_field` trait method);
+- `crates/renderer/src/overlay.rs` (suppresses tagged cluster markers);
+- `scripts/extract-cluster-membership.py` (deterministic regenerator).
+
+V-53 first slice (hand-curated showpiece bootstrap):
+
+- Pleiades (M45): 9 named-star members.
+- Praesepe / Beehive (M44): 11 brightest core members at V ≤ 6.9.
+- Double Cluster (NGC 869 + NGC 884): the HYG-resolvable bright members
+  split by RA (RA < 2.345 → NGC 869, RA ≥ 2.345 → NGC 884).
+- Hyades (Mel 25) is intentionally deferred to the Cantat-Gaudin
+  follow-up; it has no current V-42 DSO marker to suppress.
+
+Maintenance rules:
+
+- Re-running `python scripts/extract-cluster-membership.py` must produce
+  the committed CSV byte-identically; the bootstrap row list lives in
+  the script and is the single source of truth.
+- The `cluster_id` column must always resolve to a current V-42 DSO id
+  (`M<N>`, `NGC<N>`, `IC<N>`); rows that use other designations
+  (`Mel<N>`, `Cr<N>`) are kept in the CSV for the follow-up but the
+  parser drops them.
+- The follow-up Cantat-Gaudin extraction lives behind
+  `scripts/extract-cluster-membership.py --from-cantat-gaudin` and must
+  keep the same column shape so the manifest re-hash works without
+  schema churn.
+
 ### IAU / Delporte constellation boundaries
 
 Repository location:

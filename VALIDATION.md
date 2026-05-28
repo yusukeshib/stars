@@ -322,6 +322,49 @@ Current limitation:
 
 - Terrain horizon and weather constraints are not modeled.
 
+### Open-cluster resolution (`V-53`)
+
+Current implementation includes:
+
+- a hand-curated open-cluster membership table
+  (`crates/catalog/data/cluster_membership.csv`) joining HYG /
+  Hipparcos IDs to a parent DSO id (`M44`, `M45`, `NGC869`, `NGC884`);
+- a `resolve_as_member_field` predicate on `DeepSkyCatalog` that the
+  renderer's marker pass consults to suppress disk-shaped markers over
+  clusters whose stars are already in HYG.
+
+Validation expectation:
+
+- Pleiades 30' FOV: the 7 named bright Pleiades stars (Alcyone, Atlas,
+  Electra, Maia, Merope, Taygeta, Pleione) must render at their
+  catalog positions within 1' of the SIMBAD / Hipparcos reference.
+- Marker suppression: every cluster tagged
+  `resolve_as_member_field` must drop its overlay marker; every other
+  DSO (galaxies, nebulae, planetary nebulae, globular clusters) must
+  keep its marker.
+
+Current numeric / structural pins:
+
+- `pleiades_named_seven_positions_match_within_one_arcminute`
+  (catalog crate, reads `data/hyg_v42.csv`) asserts the seven named
+  Pleiades stars all sit within 1' of reference J2000 RA/Dec. The
+  largest observed residual under HYG v4.2 is well below 0.1'.
+- `deep_sky_markers_suppress_v53_resolved_clusters` (renderer crate)
+  asserts the suppression policy fires for M44 / M45 / NGC 869 /
+  NGC 884 and not for M31 / NGC 7000.
+- `resolved_cluster_ids_match_v53_scope` (catalog crate) pins the
+  shipped slice at exactly those four clusters.
+
+Current limitation:
+
+- The Double Cluster (NGC 869 + NGC 884) members reflect HYG v4.2's
+  V ≤ 9 truncation, so the deep photometric core (V ~ 9–13) is not
+  yet visible as resolved stars. The Cantat-Gaudin follow-up
+  (`scripts/extract-cluster-membership.py --from-cantat-gaudin`) will
+  expand the table once a deeper background-star catalog is wired.
+- Hyades (Mel 25) is deferred: no V-42 marker today, so there is
+  nothing to suppress.
+
 ### Catalog backend scaffold
 
 Current implementation includes:

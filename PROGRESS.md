@@ -25,8 +25,10 @@ Shipped:
   Young 1967 / Dravins 1997-98 with a deterministic UT1-keyed noise
   path outright), full-sky projections (`V-40`), out-of-Earth galactic
   and custom external viewpoints (`V-41`, `V-44`),
-  telescope eyepiece simulation (`V-43`), and the deep-sky overlay with
-  Messier objects plus the bright NGC / IC subset (`V-42`).
+  telescope eyepiece simulation (`V-43`), the deep-sky overlay with
+  Messier objects plus the bright NGC / IC subset (`V-42`), and the
+  resolved-open-cluster slice for Pleiades / Beehive / Double Cluster
+  (`V-53`).
 - **Library track** — IAU-grade time / precession / nutation / aberration /
   proper motion (`L-01`–`L-05`), planning helpers (`L-07`, `L-08`),
   schema-versioned JSON sessions (`L-10`, `L-11`), deterministic scene
@@ -641,6 +643,100 @@ References (also pinned in ROADMAP `V-52b`):
 
 Hosts wired: CLI / viewer / web (all driven by the shared
 `planets_enabled` flag).
+
+---
+
+### Resolved open clusters (`V-53`)
+
+Bright open clusters that V-42 drew as a single DSO marker (Pleiades M45,
+Praesepe / Beehive M44, Double Cluster NGC 869 / NGC 884) now render as a
+*resolved field of HYG stars* with the cluster label sitting over the
+field. This matches what a naked-eye observer actually sees and removes
+the misleading disk-shaped marker that previously sat on top of the
+Pleiades' seven sisters.
+
+Primary implementation areas:
+
+- `crates/catalog/data/cluster_membership.csv` (new): committed
+  membership table joining HYG / Hipparcos IDs to a parent open
+  cluster's `M<N>` / `NGC<N>` identifier. Provenance pinned in
+  `data/manifest.toml` as `open-cluster-membership-bootstrap`.
+- `crates/catalog/src/clusters.rs` (new): parses the CSV exactly once
+  via `OnceLock`, exposes
+  `cluster_members(DeepSkyId) -> &'static [ClusterMember]` and
+  `is_resolved_as_member_field(DeepSkyId) -> bool`.
+- `crates/catalog/src/deepsky.rs`: extends `DeepSkyCatalog` with
+  `resolve_as_member_field(DeepSkyId) -> bool` (default `false`);
+  `MessierCatalog` and `NgcBrightCatalog` delegate to the cluster
+  module.
+- `crates/renderer/src/overlay.rs`: `deep_sky_markers` skips marker
+  geometry for any DSO that the catalog tags as resolve-into-member-field.
+  The label pass is intentionally untouched — the cluster label still
+  draws over the resolved star field.
+- `scripts/extract-cluster-membership.py` (new): regenerates the CSV
+  byte-identically from the hand-curated bootstrap list; documents the
+  Cantat-Gaudin 2020 follow-up path via `--from-cantat-gaudin` (stubbed).
+
+Shipped capabilities:
+
+- Pleiades (M45): 9 named-star members (Alcyone, Atlas, Electra, Maia,
+  Merope, Taygeta, Pleione, Asterope, Celaeno). The disk-shaped marker
+  no longer hides the seven sisters.
+- Praesepe / Beehive (M44): 11 brightest core members at V ≤ 6.9.
+- Double Cluster (NGC 869 + NGC 884): the HYG-resolvable bright
+  members split by RA (RA < 2.345 → NGC 869, ≥ 2.345 → NGC 884).
+- Density slider compatibility: the existing
+  `OverlayConfig::deep_sky_magnitude_limit` slider continues to gate
+  every other DSO; the four resolved clusters are unconditionally
+  suppressed because their members are part of HYG and respond to the
+  star-magnitude controls instead.
+
+Validation:
+
+- `pleiades_named_seven_positions_match_within_one_arcminute` resolves
+  HYG positions for the seven named bright Pleiades stars (Alcyone,
+  Atlas, Electra, Maia, Merope, Taygeta, Pleione) and asserts each is
+  within 1' of its SIMBAD / Hipparcos reference position — the V-53
+  validation gate from ROADMAP.
+- `pleiades_named_seven_are_members`,
+  `praesepe_is_resolved_as_member_field`,
+  `double_cluster_is_resolved_as_member_field`,
+  `unrelated_dso_is_not_resolved_as_member_field`,
+  `resolved_cluster_ids_match_v53_scope` pin the membership table's
+  scope.
+- `deep_sky_markers_suppress_v53_resolved_clusters` asserts the renderer
+  drops marker geometry for the four resolved clusters and keeps it for
+  unrelated DSOs (M31, NGC 7000).
+- `deep_sky_markers_at_show_all_limit_have_expected_segment_count`
+  updated to reflect the two-Messier-diamond suppression.
+- `stars-manifest` re-hashes `cluster_membership.csv` against the
+  pinned `data/manifest.toml` row on every `make ci`.
+
+Deliberate scope for this first slice:
+
+- Hand-curated showpiece bootstrap (4 clusters / 34 member rows) rather
+  than the full Cantat-Gaudin 2020 catalog. The extractor script is in
+  place; the `--from-cantat-gaudin` switch will swap in the full
+  Gaia DR2/DR3 membership table in a follow-up PR without changing the
+  CSV's column shape.
+- Hyades (Mel 25) is intentionally deferred: it has no current V-42 DSO
+  marker to suppress (no Messier number, not in `openngc_bright`), and
+  its label asset will be added together with the Cantat-Gaudin upgrade.
+- No globular-cluster star-by-star resolution and no cluster colour-
+  magnitude diagrams (ROADMAP non-goals).
+- The Double Cluster members reflect HYG v4.2's V ≤ 9 truncation — the
+  cluster's photometric core (V ~ 9–13) is below HYG depth and will only
+  appear once a deeper background-star catalog is wired.
+
+References:
+
+- Cantat-Gaudin, T. et al. 2020, A&A 633, A99 (DOI
+  10.1051/0004-6361/201936691, "Painting a portrait of the Galactic disc
+  with its stellar clusters").
+- Mermilliod, J.-C. & Paunzen, E. 2003, A&A 410, 511 (WEBDA database).
+
+Hosts wired: CLI / viewer / web (the catalog crate is the single seam
+all three consume; no host-side knob was added).
 
 ---
 

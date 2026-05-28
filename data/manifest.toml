@@ -191,6 +191,47 @@ OpenNGC's per-row photometric caveats.
 """
 
 [[artifact]]
+id = "open-cluster-membership-bootstrap"
+description = "Open-cluster membership table joining HYG / Hipparcos IDs to V-42 DSO IDs for the V-53 showpiece bootstrap slice (Pleiades, Beehive, Double Cluster)."
+kind = "embedded"
+path = "crates/catalog/data/cluster_membership.csv"
+sha256 = "5724c4c9de6eb6fb4574e76ddbc9e7dea59b381078ae80397dfffc22e59dc268"
+bytes = 3192
+source = "https://cdsarc.cds.unistra.fr/viz-bin/cat/J/A+A/633/A99"
+archive_id = "VizieR J/A+A/633/A99 members.dat (planned upgrade) + hand-curated showpiece bootstrap from HYG v4.2 named-member rows"
+citation = """
+Cantat-Gaudin, T. et al. 2020, A&A 633, A99, "Painting a portrait of
+the Galactic disc with its stellar clusters" (DOI 10.1051/0004-6361/201936691);
+Mermilliod, J.-C. & Paunzen, E. 2003, A&A 410, 511 (WEBDA database).
+"""
+version = "bootstrap-1"
+retrieved = "2026-05"
+license = "CC-BY-4.0"
+license_url = "https://cds.u-strasbg.fr/vizier/Documents/license.htx"
+preprocessing = "scripts/extract-cluster-membership.py"
+fields_used = ["cluster_id", "hyg_id", "hip_id", "name"]
+used_by = [
+    "crates/catalog/src/clusters.rs",
+    "crates/catalog/src/deepsky.rs",
+    "crates/renderer/src/overlay.rs",
+]
+limitations = """
+V-53 first slice: 34 member rows across 4 clusters (Pleiades M45, Beehive
+M44, Double Cluster NGC 869 / NGC 884). The list is hand-curated from
+each cluster's well-documented bright-named-member rows so the V-53
+deliverable has no VizieR download dependency at build time. A follow-up
+PR will replace this bootstrap with a deterministic extraction from
+Cantat-Gaudin 2020 (the `--from-cantat-gaudin` switch in
+`scripts/extract-cluster-membership.py` is stubbed for that work).
+Hyades (Mel 25) is intentionally deferred because it has no current V-42
+DSO marker to suppress; the Cantat-Gaudin upgrade will add it once a
+Hyades label asset exists. The Double Cluster rows reflect HYG v4.2's
+~V <= 9 truncation — the cluster's photometric core (V ~ 9-13) is below
+HYG depth and will only appear once a deeper background-star catalog is
+wired in.
+"""
+
+[[artifact]]
 id = "iau-delporte-constellation-boundaries"
 description = "IAU / Delporte constellation boundary vertices precessed to J2000."
 kind = "embedded"
