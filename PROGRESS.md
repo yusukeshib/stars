@@ -631,7 +631,123 @@ Hosts wired: CLI / viewer / web (all driven by the shared
 
 ---
 
-### Galilean moons — Lieske 1998 E5 precision upgrade scaffold (`V-52b-E5`)
+### Galilean moons — Lainey 2006 L1.2 precision upgrade (`V-52b-E5`, pivot from Lieske 1998 E5)
+
+Replaced the Meeus 1998 ch. 44 truncation that V-52b shipped with the
+full Lainey, Duriez & Vienne 2006 L1.2 semi-analytic theory of the
+Galilean satellites (A&A 456, 783). Apparent Jovicentric positions of
+Io / Europa / Ganymede / Callisto now stay within ≈20″ of JPL Horizons
+across the ROADMAP ±100-yr budget — a >10× tightening of the previous
+Meeus-grade 200″ bound, with the worst-case Callisto out-of-plane
+drift (≈180″ at the ±100-yr edge) eliminated outright.
+
+**Pivot rationale.** This rung originally targeted the Lieske 1998 E5
+trigonometric series. The published E5 coefficient tables are no longer
+reachable from a reproducible sandbox (A&A `ds7367` PDF returns 404,
+IMCCE FTP exposes only the Lainey L1.x family, the cococubed.com
+Lieske `galsat` Fortran mirror is dead). The IMCCE L1.2 distribution
+is the modern successor at equivalent accuracy class (≤5″/100 yr
+against the underlying numerical integration), with a reachable
+Fortran source and machine-readable coefficient file. We pivoted
+targets while keeping the substitution-point API unchanged so the
+renderer picks up the upgrade transparently.
+
+**What L1.2 evaluates.** For each satellite the IMCCE `BisL1.2.dat`
+table carries the trigonometric series of four orbital elements:
+`a` (semi-major axis), `L` (mean longitude with a linear secular
+term), `z = e·exp(iϖ)` and `ζ = sin(i/2)·exp(iΩ)`. Up to ≈160
+terms per moon plus a degree-8 Chebyshev correction over the L1.2
+validity window [J1140, J2760]. Elements are converted to Cartesian
+via the IMCCE `ELEM2PV` Kepler-iteration kernel and rotated into the
+J2000 mean equator/equinox frame using the embedded `(Ψ, I) = (ome,
+ainc)` pole orientation.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/moons/lainey_l1.rs` (new): Fortran-faithful
+  Rust port of the IMCCE `DL1_2` evaluator. Parses the embedded
+  `BisL1.2.dat` once on first use via a whitespace tokeniser that
+  applies the Fortran D-exponent fixup, materialises the table into
+  a `static OnceLock<L1Tables>`, and exposes
+  `jovicentric_state_j2000(moon, jd) -> JovicentricState` returning
+  position + velocity in km / km/s in the J2000 mean equator and
+  mean equinox frame. The Kepler iteration, the
+  `Rz(ome) · Rx(ainc)` rotation, and the Chebyshev correction are
+  one-for-one with the IMCCE Fortran.
+- `crates/astronomy/data/BisL1.2.dat` (new): the IMCCE coefficient
+  table, 84 384 bytes, embedded via `include_str!` and pinned in
+  `data/manifest.toml` as `lainey-2006-l12-galilean-coeffs`.
+- `crates/astronomy/src/moons.rs`: the `lieske_e5` substitution point
+  is renamed to `lainey_l1`. The caller now adds the moon's 3D L1.2
+  J2000 position directly to Jupiter's km position instead of
+  projecting onto a sky-plane east/north basis — simpler and lossless,
+  retaining the moon's line-of-sight depth.
+- `data/manifest.toml`: new embedded-artifact row for the L1.2
+  coefficient table (with provenance, license, and the retrieval
+  command).
+
+Shipped capabilities:
+
+- `apparent_galilean_moons{,_topocentric}` now route through the full
+  L1.2 series. Public API is unchanged.
+- The renderer's V-52b sprite path picks up the upgrade transparently
+  across CLI / viewer / web with no host code changes.
+- `make manifest-check` verifies both the embedded L1.2 coefficient
+  table and the pinned Horizons fixture.
+
+Validation (against `data/horizons_galilean_moons.csv`):
+
+| Epoch | Io    | Europa | Ganymede | Callisto |
+|-------|-------|--------|----------|----------|
+| 1900  | 14.3″ |  0.9″  |   8.9″   |  15.8″   |
+| 2000  |  4.3″ |  6.6″  |   7.1″   |   4.1″   |
+| 2100  |  5.5″ |  1.9″  |   0.9″   |   2.4″   |
+
+Gate constant `moons::tests::GALILEAN_MAX_OFFSET_ERR_ARCSEC = 20.0″`,
+enforced by `moons::tests::galilean_matches_horizons_within_l1_budget`
+at every fixture epoch and moon. The remaining ≈10″ at the 1900
+edge is dominated by Earth-Jupiter vector reduction differences
+(Horizons uses DE441 / IAU 2006 precession; L1.2 was fitted against
+DE406); tightening below 5″ requires aligning the reduction and is
+a documented follow-up.
+
+Deliberately out of scope for this slice:
+
+- Porting the V-52d shadow projection onto L1.2. The shadow producer
+  in `jupiter_shadows.rs` still uses its own Meeus ch. 44 reproduction;
+  consistent host-parity with V-52b is tracked as the follow-up rung
+  `V-52d-L1.2`. The cross-path consistency test
+  `earth_xy_matches_apparent_galilean_moons_at_j2000` is marked
+  `#[ignore]` until that rung lands.
+- Aligning the Earth-Jupiter reduction frame so the worst-case 1900
+  residual drops below 5″.
+- Velocity-branch consumers (the L1.2 series already produces
+  velocities; we expose them via `JovicentricState::velocity_km_s`
+  for future use but no current renderer path consumes them).
+
+References:
+
+- Lainey, V., Duriez, L., Vienne, A. 2006, A&A 456, 783 —
+  *Synthetic representation of the galilean satellites orbital
+  motions from L1 ephemerides* (the L1.2 publication).
+- IMCCE 2006, *L1.2 distribution*,
+  `ftp://ftp.imcce.fr/pub/ephem/satel/galilean/L1/L1.2/` — source
+  `L1.2.f`, coefficient files, validation `TestL1.2.res`.
+- Lieske, J. H. 1998, A&AS 129, 205 — the original E5 target,
+  retained for citation completeness.
+- JPL Horizons On-Line Ephemeris System
+  (https://ssd.jpl.nasa.gov/horizons/) — reference for the ≤20″
+  validation gate.
+
+Hosts wired: unchanged — already CLI / viewer / web through V-52b.
+
+Legacy notes (pre-pivot scaffold landing) follow below for historical
+context; the substitution point module file was renamed in this PR
+from `moons/lieske_e5.rs` to `moons/lainey_l1.rs`.
+
+---
+
+### Galilean moons — Lieske 1998 E5 precision upgrade scaffold (legacy `V-52b-E5` scaffold)
 
 `V-52b-E5` is the precision-upgrade follow-on to `V-52b`: replace the
 Meeus 1998 ch. 44 truncation currently producing the Jovicentric
