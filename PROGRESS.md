@@ -2669,6 +2669,63 @@ Files touched:
 - `Makefile` (`pyo3-check` target, `ci` append).
 - `ROADMAP.md`, `ARCHITECTURE.md`, `PROGRESS.md`.
 
+### `L-21` rung 2 — planning queries + session round-trip
+
+Second rung of the PyO3 plan, expanding the surface from read-only
+apparent-body lookups to the observation-planning and session layers a
+reproducibility notebook actually drives.
+
+What shipped (all in `bindings/python/`):
+
+- Observation-planning bindings wrapping `astronomy::planning` 1:1:
+  `evening_plan(observer)` → an `EveningPlan` pyclass carrying
+  `.rows` (a `RiseTransitSet` per default planning body) and
+  `.twilight` (an ordered `TwilightIndicator` band timeline);
+  `rise_transit_set(observer, body, start_jd, end_jd)`,
+  `twilight_indicators`, `twilight_band(sun_alt_rad)`, and
+  `body_altitude_rad(observer, body)`. Bodies are named
+  case-insensitively (`"sun"`, `"moon"`, `"mercury"` … `"neptune"`);
+  unknown names raise a Python `ValueError`. Rise/transit/set times are
+  `Optional[float]` UTC Julian Dates.
+- Time helpers `julian_date_from_unix_seconds` and `jd_utc_to_unix_ms`
+  so notebooks can move between POSIX time and the JD planning windows.
+- A mutable `Session` pyclass that loads/saves the `crates/common`
+  `StarSession` JSON schema (camelCase, `SESSION_SCHEMA_VERSION = 5`).
+  Constructors: `Session(lat, lon, jd_utc, azimuth_deg=…,
+  altitude_deg=…, fov_deg=…)`, `Session.from_observer(observer, …)`,
+  `Session.from_json(text)`, `Session.load(path)`. Serialisers:
+  `to_json(pretty=True)`, `save(path)`. Typed observer/time/view
+  accessors (`latitude_deg`, `longitude_deg`, `jd_utc`, `jd_ut1`,
+  `jd_tt`, `jd_tdb`, `azimuth_deg`, `altitude_deg`, `fov_deg`,
+  `schema_version`); setting `jd_utc` recomputes the dependent scales
+  via `TimeScales::from_utc_julian_date`. `.observer()` bridges a loaded
+  session into the query API so apparent-body calls reproduce the
+  renderer's numerics. Every field the binding does not edit is
+  preserved verbatim on round-trip.
+- Dependency discipline: the session round-trip rides on `serde_json`
+  only — **not** the host `stars-host-common` crate (clap / chrono /
+  wgpu) — keeping the binding off the GPU / CLI path. `Session`
+  constructors seed from the committed `dark-sky` preset
+  (`include_str!`) so the produced JSON always tracks the current
+  schema without the binding re-declaring fields.
+
+Validation: five new in-crate Rust unit tests (nine total) — evening
+plan window contiguity + body-count, named-body validation, embedded
+template schema guard (`schemaVersion == 5`), session edit/round-trip
+with time-scale recomputation + preservation of an untouched field, and
+`from_observer` time-scale preservation. `bindings/python/tests/smoke.py`
+extended to print the evening plan, twilight timeline, and a session
+round-trip → `Observer` → apparent-Sun altitude. `make ci` passes
+(`cargo check -p stars-py`, `cargo clippy --all-targets -D warnings`,
+`cargo test --workspace`).
+
+Docs updated: `ROADMAP.md` (`L-21` status line + detailed item),
+`bindings/python/README.md` (planning + session API tables), this entry.
+
+Files touched: `bindings/python/Cargo.toml`,
+`bindings/python/src/lib.rs`, `bindings/python/tests/smoke.py`,
+`bindings/python/README.md`, `ROADMAP.md`, `PROGRESS.md`.
+
 ## Headless HTTP server host (`L-22`)
 
 A new native host, `stars-server` (`apps/server/`), wraps the existing

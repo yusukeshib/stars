@@ -20,3 +20,7 @@ extension-module = ["pyo3/extension-module"]
 pyo3 = { version = "0.22", features = ["abi3-py39"] }
 astronomy = { path = "../../crates/astronomy" }
 catalog = { path = "../../crates/catalog", default-features = false, features = ["embedded"] }
+# `serde_json` carries the session JSON round-trip without dragging in the
+# host `stars-host-common` crate (clap / chrono / wgpu), keeping the binding
+# off the GPU / CLI dependency path.
+serde_json = "1"
