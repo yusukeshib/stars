@@ -1,8 +1,9 @@
 //! Planetary satellites used by visual rendering (V-52b/c).
 //!
 //! This module exposes Jupiter's four Galilean moons (V-52b) and Saturn's
-//! Titan (V-52c). The per-moon planetocentric (X, Y) sky-plane offsets, in
-//! units of the parent planet's equatorial radius, come from:
+//! Titan (V-52c). Each moon's 3D parent-centred position vector (J2000 mean
+//! equator and equinox, km) is added directly to the parent planet's
+//! apparent position; the vectors come from:
 //!
 //! * the [`lainey_l1`] submodule for the Galilean moons — the full
 //!   Lainey, Duriez & Vienne 2006 L1.2 semi-analytic theory
@@ -13,9 +14,11 @@
 //!   reproducible sandbox (IMCCE FTP) while the E5 coefficient tables are
 //!   not. Both targets share the same ~5″ / ±100-yr accuracy posture, so
 //!   the pivot is invisible to the renderer;
-//! * [`astro::planet::saturn::moon::apprnt_rect_coords`] — Meeus 1998
-//!   *Astronomical Algorithms* ch. 45 simplification of the TASS theory of
-//!   Vienne & Duriez 1995 (A&A 297, 588), restricted here to Titan.
+//! * the [`tass17`] submodule for Titan — the full Vienne & Duriez 1995
+//!   TASS1.7 theory (A&A 297, 588; IMCCE series embedded from
+//!   `crates/astronomy/data/redtass7.dat`), the `V-52c-TASS17` precision
+//!   upgrade that replaces the Meeus 1998 ch. 45 truncation `V-52c`
+//!   shipped.
 //!
 //! ## Accuracy budget
 //!
@@ -27,16 +30,19 @@
 //! Meeus-truncation Dec-component drift on Callisto (≈180″ at 2100,
 //! caused by dropping the orbital inclination tilt) is gone here because
 //! the L1.2 path carries the full inclination geometry through to its
-//! Cartesian conversion. For Titan, the ch. 45 truncation drifts to
-//! ≈10–60″ across the same window — acceptable for naked-eye / small-
-//! telescope identification; the TASS1.7 precision upgrade is tracked as
-//! the follow-on `V-52c-TASS17`.
+//! Cartesian conversion. For Titan, the TASS1.7 series reproduces the IMCCE
+//! `EXAMP7.res` reference to <1e-10 AU, and the apparent Titan-vs-Saturn
+//! offset (with parent-planet light-time retardation) matches
+//! `data/horizons_titan.csv` to ≈0.1″ at J2000 and ≈3–4″ at the ±100-yr
+//! extremes, where the residual is dominated by Saturn's own VSOP87
+//! ephemeris rather than the TASS1.7 model.
 //!
-//! The test
-//! [`tests::galilean_matches_horizons_within_l1_budget`] enforces the
-//! current Lainey-grade tolerance band against
-//! `data/horizons_galilean_moons.csv` via the single constant
-//! [`tests::GALILEAN_MAX_OFFSET_ERR_ARCSEC`].
+//! The tests
+//! [`tests::galilean_matches_horizons_within_l1_budget`] and
+//! [`tests::titan_matches_horizons_within_tass17_budget`] enforce these
+//! tolerance bands against the Horizons fixtures via the single constants
+//! [`tests::GALILEAN_MAX_OFFSET_ERR_ARCSEC`] and
+//! [`tests::TASS17_MAX_OFFSET_ERR_ARCSEC`].
 //!
 //! ## Frame conventions
 //!
@@ -46,7 +52,7 @@
 //! subtracts the observer's WGS84 position from the parent-planet centred
 //! line of sight; Earth-radius parallax at Jupiter (Δ ≈ 5 AU) and Saturn
 //! (Δ ≈ 9.5 AU) is at most ≈4″ and ≈2″ respectively, well below the
-//! Meeus-grade accuracy budget but still applied so the API matches the
+//! accuracy budget but still applied so the API matches the
 //! planet / Saturn-ring shape one-for-one.
 //!
 //! [`V-52b`]: https://github.com/yusukebe/stars/blob/main/ROADMAP.md
@@ -63,12 +69,10 @@ use crate::Observer;
 pub mod lainey_l1;
 pub mod tass17;
 
-/// Saturn equatorial radius in kilometres
-/// (IAU WGCCRE 2015 / Archinal et al. 2018, Table 4). Kept in sync with the
-/// private constant of the same name in `crate::ephemeris`; both feed the
-/// same Meeus simplification (the Galilean / Saturnian satellite chapters
-/// of Meeus 1998 both work in equatorial-radius units of their parent).
-const SATURN_EQUATORIAL_RADIUS_KM: f64 = 60_268.0;
+/// Speed of light in km/s (IAU 2012 / CODATA exact value), used to retard
+/// the moons' Kronocentric positions by the parent-planet light-time so the
+/// apparent geometry matches JPL Horizons.
+const SPEED_OF_LIGHT_KM_S: f64 = 299_792.458;
 
 /// Titan's mean physical radius in kilometres. Archinal et al. 2018 *Report
 /// of the IAU Working Group on Cartographic Coordinates and Rotational
@@ -273,10 +277,9 @@ pub struct TitanApparent {
     pub right_ascension_rad: f64,
     /// Apparent declination in radians, equatorial frame of date.
     pub declination_rad: f64,
-    /// Observer–Titan distance in astronomical units. The Meeus
-    /// simplification only returns a sign-significant `Z`, so this matches
-    /// Saturn's distance to within ≈0.008 AU (Titan's line-of-sight
-    /// extent), well inside the V-52c accuracy budget.
+    /// Observer–Titan distance in astronomical units, recovered from the
+    /// full TASS1.7 3D Kronocentric vector added to Saturn's position, so it
+    /// carries Titan's true line-of-sight extent (±0.008 AU about Saturn).
     pub distance_au: f64,
     /// Apparent angular radius of Titan's solid disk in radians. Titan's
     /// physical radius is 2575 km (Archinal et al. 2018); at Saturn's
@@ -336,10 +339,10 @@ pub fn apparent_titan_topocentric(observer: Observer) -> TitanApparent {
 /// the unit direction toward Saturn, its observer distance in kilometres /
 /// AU, and its heliocentric distance in AU.
 ///
-/// This is the Saturn-side analogue of [`galilean_moons_from_jupiter`].
-/// The sky-plane basis and (east, north) → equatorial offset arithmetic
-/// is identical; only the parent-planet radius and the per-moon Meeus
-/// driver function differ.
+/// This is the Saturn-side analogue of [`galilean_moons_from_jupiter`]: the
+/// 3D Kronocentric state from [`tass17::kronocentric_state_j2000`] is added
+/// directly to Saturn's apparent position, with one extra light-time
+/// retardation step for the moon's fast orbital motion.
 fn titan_from_saturn(
     julian_date: f64,
     saturn_dir: [f64; 3],
@@ -347,34 +350,27 @@ fn titan_from_saturn(
     saturn_distance_au: f64,
     saturn_heliocentric_distance_au: f64,
 ) -> TitanApparent {
-    // Sky-plane orthonormal basis at Saturn — same right-handed
-    // (east, north) convention as the Galilean path.
-    let north_pole = [0.0_f64, 0.0, 1.0];
-    let east_hat = normalise(cross(north_pole, saturn_dir));
-    let north_hat = cross(saturn_dir, east_hat);
-
-    // The (east, north) sky-plane offset comes from the
-    // [`tass17::titan_offset`] substitution point. Today that delegates
-    // to the Meeus 1998 ch. 45 truncation of the TASS theory routed
-    // through the `astro` crate; the V-52c-TASS17 follow-up swaps in the
-    // full Vienne & Duriez 1995 TASS1.7 series without changing this
-    // call site.
-    let offset = tass17::titan_offset(julian_date);
-    let r_s_km = SATURN_EQUATORIAL_RADIUS_KM;
-    let east_offset_km = offset.east_radii * r_s_km;
-    let north_offset_km = offset.north_radii * r_s_km;
+    // V-52c-TASS17: full Vienne & Duriez 1995 TASS1.7 series (replaces the
+    // Meeus ch. 45 truncation V-52c shipped). `kronocentric_state_j2000`
+    // returns Titan's 3D Saturn-centred position in the J2000 mean equator
+    // and mean equinox frame — the same frame `saturn_dir` is expressed in
+    // — so we add it directly to Saturn's km position, exactly like the
+    // Galilean [`galilean_moons_from_jupiter`] path.
+    //
+    // The Kronocentric offset is evaluated at the light-time-retarded epoch
+    // `julian_date − Δ/c`: Saturn's apparent direction already accounts for
+    // the ~70–90 min Saturn-centre light-time, and Titan (n ≈ 144 rad/yr)
+    // sweeps ~1° of its orbit during that interval — ≈several arcsec of
+    // sky-plane displacement at the ±100-yr fixture range, which JPL
+    // Horizons corrects and we must match to clear the TASS1.7 budget.
+    let light_time_days = saturn_distance_km / (SPEED_OF_LIGHT_KM_S * 86_400.0);
+    let state = tass17::kronocentric_state_j2000(julian_date - light_time_days);
 
     // Position vector from the observer to Titan, in equatorial km.
     let pos_km = [
-        saturn_dir[0] * saturn_distance_km
-            + east_hat[0] * east_offset_km
-            + north_hat[0] * north_offset_km,
-        saturn_dir[1] * saturn_distance_km
-            + east_hat[1] * east_offset_km
-            + north_hat[1] * north_offset_km,
-        saturn_dir[2] * saturn_distance_km
-            + east_hat[2] * east_offset_km
-            + north_hat[2] * north_offset_km,
+        saturn_dir[0] * saturn_distance_km + state.position_km[0],
+        saturn_dir[1] * saturn_distance_km + state.position_km[1],
+        saturn_dir[2] * saturn_distance_km + state.position_km[2],
     ];
     let (right_ascension_rad, declination_rad, distance_km) = ra_dec_from_equatorial_vector(pos_km);
     let distance_au = distance_km / ASTRONOMICAL_UNIT_KM;
@@ -389,19 +385,6 @@ fn titan_from_saturn(
         angular_radius_rad,
         magnitude,
     }
-}
-
-fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-
-fn normalise(v: [f64; 3]) -> [f64; 3] {
-    let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-12);
-    [v[0] / n, v[1] / n, v[2] / n]
 }
 
 #[cfg(test)]
@@ -917,16 +900,17 @@ mod tests {
     /// crate's Titan model and the pinned JPL Horizons fixture, in
     /// arcseconds.
     ///
-    /// The tolerance below is the **current Meeus-grade budget**: the
-    /// Meeus 1998 ch. 45 truncation drops the higher-order TASS terms,
-    /// so the Titan-vs-Saturn sky-plane offset error grows to ≈10-60″
-    /// across the ±100-yr fixture epochs. 100″ is the headroom the
-    /// roadmap pins; the V-52c-TASS17 follow-up tightens this bound to
-    /// ~5″ (the Vienne & Duriez 1995 TASS1.7 gate) by replacing the body
-    /// of [`tass17::titan_offset`] with the full trigonometric series.
-    /// Flipping that bar is a one-line edit to this constant once the
-    /// TASS1.7 series is wired through.
-    const TASS17_MAX_OFFSET_ERR_ARCSEC: f64 = 100.0;
+    /// This is the **V-52c-TASS17 acceptance bar**: with the full Vienne &
+    /// Duriez 1995 TASS1.7 series (via [`tass17::kronocentric_state_j2000`])
+    /// plus light-time retardation, the measured Titan-vs-Saturn offset
+    /// error against the fixture is ≈0.1″ at J2000 and ≈3–4″ at the ±100-yr
+    /// extremes. The residual at the extremes is dominated by Saturn's own
+    /// VSOP87 ephemeris (the `astro` crate) and the fixture's 0.01ˢ/0.1″
+    /// quantization — *not* the Titan model, which reproduces the IMCCE
+    /// `EXAMP7.res` reference to <1e-10 AU (see
+    /// [`tass17::tests::matches_imcce_examp7_reference`]). 5″ is the
+    /// roadmap's TASS1.7 gate, which all three fixture epochs clear.
+    const TASS17_MAX_OFFSET_ERR_ARCSEC: f64 = 5.0;
 
     #[test]
     fn titan_matches_horizons_within_tass17_budget() {
@@ -975,8 +959,7 @@ mod tests {
                 "jd={jd} Titan: Kronocentric offset error vs Horizons = {err:.1}″ \
                  (Horizons = ({hx_arcsec:.1}, {hy_arcsec:.1})″, \
                  model = ({mx_arcsec:.1}, {my_arcsec:.1})″) \
-                 exceeds Meeus-grade budget {TASS17_MAX_OFFSET_ERR_ARCSEC}″. \
-                 V-52c-TASS17 tightens this bound to ≈5″."
+                 exceeds the V-52c-TASS17 budget {TASS17_MAX_OFFSET_ERR_ARCSEC}″."
             );
         }
     }

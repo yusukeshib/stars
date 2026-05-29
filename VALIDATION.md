@@ -149,18 +149,22 @@ Current limitation:
   rung **V-52d-L1.2**; until it lands, the consistency test
   `earth_xy_matches_apparent_galilean_moons_at_j2000` is marked
   `#[ignore]`.
-- The Titan backend ships at Meeus 1998 ch. 45 accuracy (V-52c) — the
-  same simplification of the TASS theory of Vienne & Duriez 1995 that
-  the `astro` crate implements. The pinned Horizons fixture
-  (`data/horizons_titan.csv`, manifest id `horizons-titan-fixture`)
-  at 1900 / 2000 / 2100 epochs shows the Kronocentric sky-plane offset
-  error stays under ≈60″ across ±100 yr (vs. the ≈10–60″ the ch. 45
-  truncation is documented to produce). The full TASS1.7 precision
-  upgrade tightens this budget to ~5″ at every fixture epoch and is
-  tracked as the dedicated rung `V-52c-TASS17` — that PR replaces the
-  body of `tass17::titan_offset` and edits the single constant
-  `TASS17_MAX_OFFSET_ERR_ARCSEC` in `moons::tests` from 100″ down to
-  ≈5″.
+- The Titan backend ships at full TASS1.7 (Vienne & Duriez 1995)
+  accuracy (`V-52c-TASS17`, superseding the Meeus 1998 ch. 45
+  truncation `V-52c` shipped). `crates/astronomy/src/moons/tass17.rs`
+  ports the IMCCE `tass17.f` series evaluator against the embedded
+  `crates/astronomy/data/redtass7.dat` coefficient table and is
+  validated bit-for-bit against the IMCCE `EXAMP7.res` reference
+  positions to <1e-10 AU
+  (`tass17::tests::matches_imcce_examp7_reference`). Against the pinned
+  Horizons fixture (`data/horizons_titan.csv`, manifest id
+  `horizons-titan-fixture`) at 1900 / 2000 / 2100, the apparent
+  Titan-vs-Saturn offset (with parent-planet light-time retardation)
+  is ≈0.1″ at J2000 and ≈3–4″ at the ±100-yr extremes — inside the ~5″
+  gate `TASS17_MAX_OFFSET_ERR_ARCSEC` in `moons::tests`. The residual
+  at the extremes is dominated by Saturn's own VSOP87 ephemeris (the
+  `astro` crate) and the fixture's 0.01ˢ/0.1″ quantization, not the
+  TASS1.7 Titan model.
 
 ### Eclipse / occultation geometry (`V-51`)
 
