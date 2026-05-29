@@ -310,6 +310,21 @@ preprocessing = "curl -sSL -o crates/astronomy/data/BisL1.2.dat https://ftp.imcc
 used_by = ["crates/astronomy/src/moons/lainey_l1.rs"]
 
 [[artifact]]
+id = "vienne-duriez-1995-tass17-titan-coeffs"
+description = "IMCCE TASS1.7 semi-analytic Saturnian-satellite series (Vienne & Duriez 1995, A&A 297, 588), extracted from the distribution's tass17.f and restricted to the satellites the Titan evaluator needs (Mimas..Titan + Iapetus; Hyperion omitted because CALCLON fixes its proper longitude at 0). Embedded at compile time via include_str! into crates/astronomy/src/moons/tass17.rs to back the V-52c-TASS17 precision upgrade."
+kind = "embedded"
+path = "crates/astronomy/data/redtass7.dat"
+sha256 = "1b190131536e3b1d3a081a35bc1d0241435e9d3df7b373f685842480b9e93e65"
+bytes = 116493
+source = "ftp://ftp.imcce.fr/pub/ephem/satel/tass17/tass17.f"
+archive_id = "IMCCE TASS1.7 distribution, 1996-11-14 (tass17.f dated 2005-04-05)"
+citation = "Vienne, A. & Duriez, L. 1995, A&A 297, 588 — 'TASS1.6: General theory of the motion of the major eight satellites of Saturn' (TASS1.7 adds Hyperion)."
+license = "see-upstream"
+license_url = "ftp://ftp.imcce.fr/pub/ephem/satel/tass17/README"
+preprocessing = "scripts/build-tass17.sh"
+used_by = ["crates/astronomy/src/moons/tass17.rs"]
+
+[[artifact]]
 id = "horizons-galilean-moons-fixture"
 description = "JPL Horizons reference fixture for the Galilean moons (Jupiter + Io/Europa/Ganymede/Callisto) at three geocentric epochs spanning the ROADMAP ±100-yr budget: 1900-01-01, 2000-01-01, 2100-01-01 (all 00:00 UT). Pinned target for the V-52b-E5 precision upgrade (Lainey 2006 L1.2)."
 kind = "generated"
@@ -326,7 +341,7 @@ preprocessing = "scripts/fetch-horizons-galilean-moons.sh"
 fields_used = ["moon_naif", "moon_name", "epoch_utc", "jd_utc", "ra_hms", "dec_dms", "range_au", "deldot_km_s"]
 used_by = [
     "crates/astronomy/src/moons.rs",
-    "crates/astronomy/src/moons/lieske_e5.rs",
+    "crates/astronomy/src/moons/lainey_l1.rs",
 ]
 limitations = """
 Three epochs (1900 / 2000 / 2100) are the minimum the ROADMAP `V-52b-E5`

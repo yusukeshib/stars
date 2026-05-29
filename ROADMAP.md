@@ -127,12 +127,14 @@ common occultation primitives (`V-51a`), the general N≤16 occluder
 uniform array (`V-51b`), the solar-eclipse renderer path (`V-51c`),
 lunar occultation of stars and planets (`V-51d`), Mercury / Venus
 transits of the Sun (`V-51e`), and mutual planetary occultation
-(`V-51f`). Four rungs of `V-52` are now done at Meeus-grade accuracy:
-the Saturn ring system (`V-52a`), the Galilean moons (`V-52b`), Titan
-(`V-52c`), and Galilean shadow transits + moon-behind-Jupiter culling
-(`V-52d`). The remaining rungs are `V-52b-E5` (the Lainey 2006 L1.2
-series precision upgrade to ~5″ / ±100 yr for the Galilean moons) and
-`V-52c-TASS17` (the analogous TASS1.7 precision upgrade for Titan).
+(`V-51f`). `V-52` has now shipped end-to-end: the Saturn ring system
+(`V-52a`), the Galilean moons (`V-52b`) upgraded to the full Lainey
+2006 L1.2 series (`V-52b-E5`), Titan (`V-52c`) upgraded to the full
+Vienne & Duriez 1995 TASS1.7 series (`V-52c-TASS17`), and Galilean
+shadow transits + moon-behind-Jupiter culling (`V-52d`). The remaining
+open `V-51`–`V-56` items are `V-54` (double / binary star resolution),
+`V-55` (artificial satellites), and the CLI / viewer parity tail of
+`V-56` (object search / GoTo / info panel; web shipped).
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
@@ -203,7 +205,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-49` | **Comet rendering** | ⬜ |
 | `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ⬜ |
 | `V-51` | **Unified eclipse / occultation pass** (`a` + `b` + `c` + `d` + `e` + `f` done) | ✅ |
-| `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** (`a` + `b` + `c` done at Meeus grade) | ⏳ |
+| `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** (all rungs `a`–`d` done; Galilean at Lainey 2006 L1.2, Titan at TASS1.7) | ✅ |
 | `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** (showpiece bootstrap done) | ✅ |
 | `V-54` | **Double / binary star resolution** | ⬜ |
 | `V-55` | **Artificial satellites (TLE / SGP4)** | ⬜ |
@@ -1866,7 +1868,7 @@ sub-arcsecond contact timing; usable before that with the existing
 
 ## Solar system depth
 
-### `V-52` Planetary rings and moons — ⏳ in progress
+### `V-52` Planetary rings and moons — ✅ done
 
 **Item.** Today `V-35` renders Mercury–Neptune as bare disks. Three
 visually unmistakable elements are missing: **Saturn's ring system**,
@@ -1880,10 +1882,10 @@ can land in isolation:
 | Sub | Scope | Status |
 |---|---|---|
 | `V-52a` | Saturn ring system (geometry, ring-plane shader, body-on-ring shadow) | ✅ done |
-| `V-52b` | Galilean moons (Io / Europa / Ganymede / Callisto), Meeus-grade | ⏳ in progress |
+| `V-52b` | Galilean moons (Io / Europa / Ganymede / Callisto), Meeus-grade | ✅ done (upgraded to Lainey L1.2 by `V-52b-E5`) |
 | `V-52b-E5` | Galilean moons precision upgrade — Lainey 2006 L1.2 (≤20″ / ±100 yr) | ✅ done (Lainey L1.2; pivot from Lieske 1998 E5) |
-| `V-52c` | Titan, Meeus-grade | ⏳ Meeus-grade shipped |
-| `V-52c-TASS17` | Titan precision upgrade — full TASS1.7 (~5″ / ±100 yr) | ⏳ in progress |
+| `V-52c` | Titan, Meeus-grade | ✅ done |
+| `V-52c-TASS17` | Titan precision upgrade — full TASS1.7 (~5″ / ±100 yr) | ✅ done |
 | `V-52d` | Galilean shadow / occultation transits on Jupiter (reuses `V-51b`) | ✅ done |
 
 **Deliberate non-goal scope.** No irregular moons of any planet, no
@@ -1958,7 +1960,7 @@ round-trip tests can be bumped together.
 
 ---
 
-### `V-52b` Galilean moons — ⏳ in progress
+### `V-52b` Galilean moons — ✅ done (Meeus-grade shipped; upgraded to Lainey L1.2 by `V-52b-E5`)
 
 **Item.** Io, Europa, Ganymede, Callisto as point sources next to
 Jupiter. Shipped via the Meeus 1998 ch. 44 simplification of
@@ -2114,7 +2116,7 @@ moons{,_topocentric}` so the L1.2 upgrade is transparent).
 
 ---
 
-### `V-52c` Titan — ⏳ Meeus-grade shipped; full TASS1.7 precision upgrade open
+### `V-52c` Titan — ✅ done (Meeus-grade shipped; upgraded to full TASS1.7 by `V-52c-TASS17`)
 
 **Item.** Titan as a point source ≈3′ from Saturn (Saturn's brightest
 moon, V ≈ 8.4, easily reachable in a small telescope).
@@ -2180,27 +2182,37 @@ web `set_planets_enabled`).
 
 ---
 
-### `V-52c-TASS17` Titan — full TASS1.7 precision upgrade — ⏳ in progress
+### `V-52c-TASS17` Titan — full TASS1.7 precision upgrade — ✅ done
 
 **Item.** Replace the Meeus-grade Titan backend from `V-52c` with the
 full TASS1.7 (Vienne & Duriez 1995) Titan series, transcribed from a
 verified machine-readable IMCCE distribution, and pin a multi-epoch
 Horizons-anchored ~5″ / ±100-yr validation matrix.
 
-**Status.** Scaffold + Horizons fixture shipped. The renderer now
-routes Titan through the `tass17::titan_offset` substitution point in
-`crates/astronomy/src/moons/tass17.rs` (mirroring the V-52b-E5
-`lieske_e5` scaffold for the Galilean moons). The body of
-`titan_offset` still delegates to the Meeus 1998 ch. 45 truncation via
-the `astro` crate, so numerical output is unchanged from V-52c. The
-pinned validation fixture `data/horizons_titan.csv` (Saturn + Titan at
-1900 / 2000 / 2100, regenerable by `scripts/fetch-horizons-titan.sh`,
-manifest id `horizons-titan-fixture`) lets the test
-`moons::tests::titan_matches_horizons_within_tass17_budget` enforce
-the current Meeus-grade Kronocentric tolerance (100″) so the follow-up
-PR can tighten the bar to ~5″ by editing one constant
-(`TASS17_MAX_OFFSET_ERR_ARCSEC`) after wiring the full series
-through `titan_offset`.
+**Status.** Done. `crates/astronomy/src/moons/tass17.rs` now evaluates
+the full TASS1.7 series — a faithful Rust port of the IMCCE `tass17.f`
+subroutines `CALCLON` / `CALCELEM` / `EDERED` / `LECSER` — against the
+vendored series table `crates/astronomy/data/redtass7.dat` (extracted
+from `tass17.f` by `scripts/build-tass17.sh`, manifest id
+`vienne-duriez-1995-tass17-titan-coeffs`). The public entry point is
+`tass17::kronocentric_state_j2000(jd)`, returning Titan's 3D
+Saturn-centred position + velocity in the J2000 mean equator / equinox
+frame; `moons.rs::titan_from_saturn` adds that vector directly to
+Saturn's apparent position (with one parent-planet light-time
+retardation step), exactly like the Galilean L1.2 path. Hyperion
+(TASS index 7) is excluded from the vendored series because `CALCLON`
+fixes its proper longitude `DLO(7) = 0`, leaving the Titan result
+unchanged.
+
+The port is validated bit-for-bit against the IMCCE `EXAMP7.res`
+reference positions (<1e-10 AU,
+`tass17::tests::matches_imcce_examp7_reference`), and the apparent
+Titan-vs-Saturn offset matches `data/horizons_titan.csv` to ≈0.1″ at
+J2000 and ≈3–4″ at the ±100-yr extremes — inside the ~5″ bar
+(`moons::tests::titan_matches_horizons_within_tass17_budget`,
+`TASS17_MAX_OFFSET_ERR_ARCSEC = 5.0`). The residual at the extremes is
+dominated by Saturn's own VSOP87 ephemeris (the `astro` crate) and the
+fixture's 0.01ˢ/0.1″ quantization, not the TASS1.7 model.
 
 **Scientific basis.** TASS1.7 (Vienne & Duriez 1995, A&A 297, 588)
 restricted to Titan, with the full coefficient tables rather than the
@@ -2208,18 +2220,22 @@ Meeus 1998 ch. 45 truncation.
 
 **References.**
 - Vienne, A., Duriez, L. 1995, A&A 297, 588 (TASS1.7).
-- IMCCE Saturnian-satellite ephemeris distribution (machine-readable
-  coefficient mirror — must be a verifiable source before transcription).
+- IMCCE 1996, TASS1.7 distribution, `ftp://ftp.imcce.fr/pub/ephem/
+  satel/tass17/` — Fortran source `tass17.f` (subroutines + embedded
+  series) and reference positions `EXAMP7.res`.
 
-**Implementation scope.** Replace the `astro` crate's Saturnian-moon
-backend in `apparent_titan{,_topocentric}` with a TASS1.7 driver under
-the scaffolded `crates/astronomy/src/moons/tass17.rs` module. Public
-API stays unchanged; the V-52c-shipped tests stay green and the new
-`titan_matches_horizons_within_tass17_budget` test tightens by editing
-one constant.
+**Implementation scope.** Replaced the `astro` crate's Saturnian-moon
+backend in `apparent_titan{,_topocentric}` with the TASS1.7 driver in
+`crates/astronomy/src/moons/tass17.rs`. The only API change is internal
+to the module (`titan_offset` → `kronocentric_state_j2000`, a 3D state
+mirroring the Galilean `lainey_l1::jovicentric_state_j2000`); the
+public `TitanApparent` surface and all V-52c-shipped tests are
+unchanged.
 
-**Tests / validation.** Titan position at three or more epochs across
-±100 yr from J2000, agreement with JPL Horizons within 5″.
+**Tests / validation.** IMCCE `EXAMP7.res` bit-level golden values at
+three epochs; JPL Horizons agreement within 5″ at 1900 / 2000 / 2100;
+parsed series term counts pinned against `redtass7.dat`; plausible
+distance and orbital-speed sanity bounds.
 
 **Hosts wired.** Already CLI / viewer / web through `V-52c` — this
 rung is a pure backend precision upgrade, leaving the renderer /

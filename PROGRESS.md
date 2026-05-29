@@ -848,74 +848,67 @@ Hosts wired: unchanged — already CLI / viewer / web through `V-52b`.
 
 ---
 
-### Titan — TASS1.7 precision upgrade scaffold (`V-52c-TASS17`)
+### Titan — TASS1.7 precision upgrade (`V-52c-TASS17`) — done
 
-`V-52c-TASS17` is the precision-upgrade follow-on to `V-52c`: replace
-the Meeus 1998 ch. 45 truncation currently producing Titan's
-Kronocentric sky-plane offset with the full Vienne & Duriez 1995
-TASS1.7 Titan series so the apparent position of Titan stays within
-~5″ of JPL Horizons across the ROADMAP ±100-yr budget. The full
-coefficient transcription requires its own dedicated validation
-matrix; this slice mirrors the V-52b-E5 pattern — substitution-point
-module, pinned Horizons reference fixture, and a test gate the
-follow-up PR will tighten.
+`V-52c-TASS17` replaced the Meeus 1998 ch. 45 truncation that `V-52c`
+shipped with a faithful Rust port of the Vienne & Duriez 1995 TASS1.7
+Titan theory, bringing Titan's apparent position to within ~5″ of JPL
+Horizons across the ROADMAP ±100-yr budget (the TASS1.7 model itself
+matches the IMCCE Fortran reference to <1e-10 AU; the residual is
+dominated by Saturn's own VSOP87 ephemeris).
 
 Primary implementation areas:
 
-- `crates/astronomy/src/moons/tass17.rs` (new): substitution-point
-  module with `TitanOffset`, `titan_offset`, and
-  `TitanSeriesShape`. The body of `titan_offset` currently delegates
-  to the Meeus truncation via the `astro` crate (same numerical result
-  `V-52c` shipped) and carries a `TODO(V-52c-TASS17)` block sketching
-  the future evaluator (TASS1.7 secular angles at `T_REF =
-  2_444_240.0` JD = 1980-Jan-04.5 TT, the four (λ − λ̄, p, z, ζ)
-  trigonometric sums, Laplace-plane element folding, and the
-  Laplace-plane → J2000 ICRS rotation). `TitanSeriesShape::TITAN`
-  pins the Vienne / Duriez TASS17.f per-moon term counts for Titan
-  (23 longitude + 9 radial + 44 z + 31 ζ = 107), so the follow-up's
-  coefficient parser has a free shape sanity-check.
-- `crates/astronomy/src/moons.rs`: routes the Kronocentric offset
-  computation through `tass17::titan_offset`. Public API
-  (`apparent_titan{,_topocentric}`, `TitanApparent`) is unchanged —
-  the renderer and hosts pick up the upgrade transparently when the
-  precision PR lands.
-- `data/horizons_titan.csv` (new, manifest id `horizons-titan-fixture`):
-  geocentric ICRF apparent RA / Dec / range / range-rate for Saturn +
-  Titan at three epochs spanning ±100 years (1900 / 2000 / 2100 UT).
-- `scripts/fetch-horizons-titan.sh` (new): bash regenerator hitting
-  the public JPL Horizons API.
-- `data/manifest.toml`: new generated-artifact row for the fixture
-  (with provenance, license, and the regeneration command).
+- `crates/astronomy/data/redtass7.dat` (new, vendored): the TASS1.7
+  series block extracted from the IMCCE `tass17.f` distribution
+  (satellites Mimas..Titan + Iapetus; Hyperion excluded because
+  `CALCLON` fixes its proper longitude, leaving Titan unaffected).
+  Regenerable byte-for-byte via `scripts/build-tass17.sh` (downloads
+  `tass17.f` from IMCCE and `awk`-slices the series block); pinned in
+  `data/manifest.toml` as `vienne-duriez-1995-tass17-titan-coeffs`.
+- `crates/astronomy/src/moons/tass17.rs` (rewritten): a Rust port of
+  the IMCCE subroutines `LECSER` (parser), `CALCLON` (proper
+  longitudes), `CALCELEM` (Titan's six TASS elements), and `EDERED`
+  (elements → Saturn-centred cartesian, mean ecliptic & equinox
+  J2000). New public API `kronocentric_state_j2000(jd) ->
+  KronocentricState` returns Titan's 3D J2000-equatorial
+  position + velocity, mirroring the Galilean
+  `lainey_l1::jovicentric_state_j2000`.
+- `crates/astronomy/src/moons.rs`: `titan_from_saturn` now adds the
+  3D state vector directly to Saturn's apparent position (replacing
+  the old sky-plane east/north projection), with one parent-planet
+  light-time retardation step (`jd − Δ/c`). Public `TitanApparent`
+  surface unchanged, so the renderer and all hosts pick up the
+  upgrade transparently. Dead `cross`/`normalise` helpers and a
+  duplicate Saturn-radius constant removed; `SPEED_OF_LIGHT_KM_S`
+  added.
+- `data/manifest.toml`: new provenance row for `redtass7.dat`; also
+  fixed a stale `lieske_e5.rs → lainey_l1.rs` reference in the
+  Galilean fixture row.
 
-Shipped capabilities:
+Validation:
 
-- Substitution point exists and is reached by both the geocentric and
-  topocentric Titan code paths. Replacing the body of
-  `tass17::titan_offset` in a follow-on PR cascades through every host
-  without further changes.
-- The 2-row × 3-epoch Horizons fixture is now committed and pinned by
-  `make manifest-check`.
-- `moons::tests::titan_matches_horizons_within_tass17_budget` computes
-  the Kronocentric sky-plane offset error between the current
-  Meeus-grade model and the Horizons fixture for every epoch
-  (precession-invariant because Titan and Saturn share the rotation)
-  and asserts it stays under the
-  `TASS17_MAX_OFFSET_ERR_ARCSEC = 100.0`″ band. The `V-52c-TASS17`
-  precision upgrade tightens that constant to ~5″ once the TASS1.7
-  series is wired through.
-- `tass17::tests::series_shape_matches_tass17_titan_counts` pins the
-  Titan (λ, p, z, ζ) term counts so a transcribed coefficient table
-  that diverges from Vienne / Duriez's published shape fails the
-  build at parse time.
+- `tass17::tests::matches_imcce_examp7_reference` pins Titan's
+  position at three epochs against the IMCCE `EXAMP7.res` golden
+  output to <1e-10 AU (bit-for-bit with the Fortran).
+- `moons::tests::titan_matches_horizons_within_tass17_budget`
+  tightened from the old 100″ band to
+  `TASS17_MAX_OFFSET_ERR_ARCSEC = 5.0`″; achieved 0.1″ (J2000),
+  3.8″ (1900), 3.1″ (2100).
+- `tass17::tests::series_term_counts_match_redtass7` pins Titan's
+  `[7, 36, 35, 22]` (p, λ, z, ζ) term counts so a corrupted series
+  table fails at parse time; speed / distance sanity bands
+  (≈5.57 km/s, ≈1.22 Gm) round out the suite.
 
-Deliberately out of scope for this slice:
+Deliberately out of scope:
 
-- The full TASS1.7 Titan trigonometric series transcription
-  (≈107 coefficient × argument pairs across the four series, plus the
-  Laplace-plane rotation into J2000 ICRS). Tracked as the rest of
-  `V-52c-TASS17`.
-- Densifying the Horizons fixture (more epochs, topocentric sites
-  for diurnal-parallax pins) — explicitly part of the precision PR.
+- Porting the `V-52d` Galilean-shadow projection onto the upgraded
+  moon ephemerides remains the follow-up rung `V-52d-L1.2`; its
+  cross-path consistency test stays `#[ignore]`d.
+- Light-time retardation was added to the Titan path only (it pulls
+  the 1900 epoch from 7.6″ → 3.8″); applying the same step to the
+  Galilean L1.2 path is a possible future tightening, not required
+  for this rung.
 
 References (also pinned in ROADMAP `V-52c-TASS17`):
 
@@ -923,7 +916,9 @@ References (also pinned in ROADMAP `V-52c-TASS17`):
 - Vienne, A. & Duriez, L. 1991, A&A 246, 619 (TASS predecessor;
   satellite-index conventions Titan inherits).
 - Meeus, J. 1998, *Astronomical Algorithms*, ch. 45 (the low-precision
-  truncation actually exercised today via the `astro` crate).
+  truncation `V-52c` shipped, now superseded by the TASS1.7 port).
+- IMCCE `tass17.f` / `EXAMP7.res` distribution — the Fortran reference
+  the Rust port reproduces and the golden test is pinned against.
 - JPL Horizons On-Line Ephemeris System
   (https://ssd.jpl.nasa.gov/horizons/) — the reference the precision
   gate is anchored against.
