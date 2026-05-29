@@ -57,13 +57,17 @@ The current engine already includes:
   compact web session URLs;
 - bilingual web UI (English and Japanese) with browser-language detection,
   a `?lang=en|ja` URL override for sharing, and an in-app language switcher;
-- object search, GoTo, and info panel in the web app (V-56): a search box
-  finds any of ~1.2k named stars (`proper`, Bayer, Flamsteed, HR, HD, HIP),
-  the 110 Messier objects, the bright NGC / IC subset, and the nine
-  solar-system bodies (including Japanese aliases); selecting a result
-  slews the camera to the apparent topocentric position and opens a
-  non-modal panel with RA / Dec, Alt / Az, magnitude, distance, and the
-  current rise / transit / set;
+- object search, GoTo, and info panel across all three hosts (V-56): the
+  search index finds any of ~1.2k named stars (`proper`, Bayer, Flamsteed,
+  HR, HD, HIP), the 110 Messier objects, the bright NGC / IC subset, and
+  the nine solar-system bodies (including Japanese aliases). The web app
+  has a search box + ranked dropdown that slews the camera and opens a
+  non-modal info panel (RA / Dec, Alt / Az, magnitude, distance, rise /
+  transit / set); the CLI takes `--goto <name>` to centre the view and
+  print an info summary; the desktop viewer takes `--goto <name>` at
+  startup and opens an interactive search prompt on `/` (type a query,
+  Enter to slew, Esc to cancel) with the target summary shown in the
+  window title bar;
 - deterministic validation/demo scene presets, notebook reproducibility examples,
   catalog-backend scaling scaffolding, and an opt-in generated gallery for
   screenshot review;
@@ -101,6 +105,14 @@ Save or replay a portable JSON session, or render a built-in deterministic prese
 make cli ARGS="--lat 35.68 --lng 139.69 --write-session tokyo.json -o stars.png"
 make cli ARGS="--session tokyo.json -o replay.png"
 make cli ARGS="--preset dark-sky -o dark-sky.png"
+```
+
+Centre the view on a named object (V-56 GoTo). Works in the CLI and as a
+viewer startup flag; in the viewer press `/` to search interactively:
+
+```bash
+make cli ARGS="--lat 35.68 --lng 139.69 --goto m31 -o andromeda.png"
+cargo run -p stars-viewer --release -- --goto saturn
 ```
 
 Run the web app:

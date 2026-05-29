@@ -131,10 +131,13 @@ transits of the Sun (`V-51e`), and mutual planetary occultation
 (`V-52a`), the Galilean moons (`V-52b`) upgraded to the full Lainey
 2006 L1.2 series (`V-52b-E5`), Titan (`V-52c`) upgraded to the full
 Vienne & Duriez 1995 TASS1.7 series (`V-52c-TASS17`), and Galilean
-shadow transits + moon-behind-Jupiter culling (`V-52d`). The remaining
-open `V-51`–`V-56` items are `V-54` (double / binary star resolution),
-`V-55` (artificial satellites), and the CLI / viewer parity tail of
-`V-56` (object search / GoTo / info panel; web shipped).
+shadow transits + moon-behind-Jupiter culling (`V-52d`). Object search /
+GoTo / info panel (`V-56`) is now wired across all three hosts: the web
+search box / dropdown / click-pick info panel, a CLI `--goto <name>`
+flag, and an interactive `/`-triggered viewer search prompt with a
+title-bar info panel — so `V-56` has shipped. The remaining open
+`V-51`–`V-56` items are `V-54` (double / binary star resolution) and
+`V-55` (artificial satellites).
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
@@ -209,7 +212,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** (showpiece bootstrap done) | ✅ |
 | `V-54` | **Double / binary star resolution** | ⬜ |
 | `V-55` | **Artificial satellites (TLE / SGP4)** | ⬜ |
-| `V-56` | **Object search, GoTo, and info panel** | ⏳ web shipped |
+| `V-56` | **Object search, GoTo, and info panel** | ✅ |
 
 ### Library track
 
@@ -235,7 +238,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-18` | Identifier preservation through the renderer | ⬜ |
 | `L-19` | SIMBAD / VizieR deep links | ⬜ |
 | `L-20` | Variable star light curves | ⬜ |
-| `L-21` | Python bindings (PyO3) | ⏳ read-only surface shipped |
+| `L-21` | Python bindings (PyO3) | ⏳ astronomy queries + session round-trip shipped |
 | `L-22` | Headless server mode | ✅ |
 | `L-23` | Guided education mode | ⬜ |
 | `L-24` | Accessibility pass | ⬜ |
@@ -2492,16 +2495,28 @@ utility with `V-36`.
 
 ## Interactive UX
 
-### `V-56` Object search, GoTo, and info panel — ⏳ web host shipped
+### `V-56` Object search, GoTo, and info panel — ✅ done
 
-**Status.** Web-host MVP: search box, ranked dropdown, click-to-`goto`
-slew, and apparent-state info panel are live in `apps/web`. Desktop
-viewer + CLI follow-up are still tracked open (the inverted index +
-resolver are engine-side so wiring them is the small remaining job).
+**Status.** Shipped across all three hosts. The `apps/web` host has the
+search box, ranked dropdown, click-to-`goto` slew, and apparent-state
+info panel. The CLI exposes `--goto <name>`, which resolves a query
+through the shared resolver, centres the local alt-az view on the
+target, and prints an info summary before rendering. The desktop
+viewer adds an interactive `/`-triggered search prompt (typed into the
+window title bar, Enter slews + shows the target's info summary, Esc
+cancels) plus a startup `--goto` flag mirroring the CLI. The engine-side
+resolver (`crates/common/src/goto.rs`, `resolve_goto_query` /
+`resolve_goto_id`) is shared by the CLI and viewer and keeps the
+solar-system magnitude / distance conventions identical to `apps/web`.
 The CPU-side `crates/catalog/src/search.rs` index covers ~1.2k bright
 named stars, the 110 Messier objects, the bright NGC / IC subset, and
 the nine solar-system bodies (Sun + Moon + planets minus Earth) with
-Japanese aliases.
+Japanese aliases. Click / hover *picking* of an arbitrary rendered body
+remains a web-only affordance (the CLI is non-interactive and the
+viewer reaches the same objects through the search prompt); the
+`crates/renderer/src/picking.rs` R32Uint pick buffer and the
+`SelectedTarget` session field described below stay open as a web
+refinement and are not required for native-host parity.
 
 **Item.** Today the loaded catalog data (HYG star magnitudes, spectral
 classes, distances; Messier / NGC / IC IDs; planet ephemerides) has no
@@ -2544,8 +2559,16 @@ layer + a picking buffer.
   `"NGC 224"`, `"saturn"`, `"土星"` to the expected catalog row.
 - Unit: GoTo on Vega from a fixed observer + epoch lands the centre
   ray within 0.5′ of the apparent position.
-- Visual: one deterministic CLI render with `--goto m31` from Tokyo
-  added to the gallery.
+- Unit (`crates/common/src/goto.rs`): `resolve_goto_query` ranks
+  `"Vega"`, `"M31"`, `"Saturn"`, and `"土星"` to the expected ids,
+  produces a finite centred local view, errors on empty / unknown
+  queries, and the RA/Dec summary formatting is pinned at its bounds.
+- Unit (`apps/cli`): `--goto` flag parsing (none / single / multi-word
+  designation) plus the end-to-end parse → resolve → centred-view path.
+- Viewer parity is covered by the shared resolver unit tests plus the
+  CLI ↔ viewer parity matrix in `docs/scene-presets.md`.
+- Visual: a deterministic CLI render with `--goto m31` from Tokyo can be
+  added to the gallery as a follow-up.
 
 **Deliberate non-goal scope.** No natural-language query ("show me
 bright red giants near Orion") — keyword + identifier match only.
@@ -2983,36 +3006,62 @@ predicted Δm in metadata JSON; viewer follows.
 
 ## Bindings and hosts
 
-### `L-21` Python bindings (PyO3) — ⏳ read-only surface shipped
+### `L-21` Python bindings (PyO3) — ⏳ astronomy queries + session round-trip shipped
 
 **Shipped this rung.** A self-contained `bindings/python/` crate
-(`stars-py`, `cdylib + rlib`) wrapping the read-only `astronomy` +
-`catalog` public surface through PyO3 0.22 with an `abi3-py39`
-ABI-stable build. The wrapper exposes:
+(`stars-py`, `cdylib + rlib`) wrapping the `astronomy` + `catalog`
+public surface through PyO3 0.22 with an `abi3-py39` ABI-stable build.
+The wrapper exposes:
 
 - `Observer` (lat / lon / UTC JD, plus a `from_unix_seconds` ctor for
   `datetime.timestamp()` notebook patterns),
 - `apparent_sun_moon`, `apparent_planets`, `apparent_galilean_moons`,
   `apparent_titan` topocentric helpers,
+- **observation-planning queries** — `evening_plan` (returning
+  `EveningPlan` with `RiseTransitSet` rows + a `TwilightIndicator`
+  timeline), `rise_transit_set(observer, body, start, end)`,
+  `twilight_indicators`, `twilight_band`, and `body_altitude_rad`,
+  wrapping `astronomy::planning` 1:1,
+- **time helpers** `julian_date_from_unix_seconds` and
+  `jd_utc_to_unix_ms` so notebooks can move between POSIX time and the
+  JD planning windows,
+- a mutable **`Session`** class that loads / saves the `crates/common`
+  `StarSession` JSON schema (camelCase, current
+  `SESSION_SCHEMA_VERSION`). It exposes typed observer / time / view
+  accessors, recomputes the dependent time scales
+  (`TimeScales::from_utc_julian_date`) when `jd_utc` is set, bridges to
+  `Observer` via `.observer()` so queries reproduce the renderer's
+  numerics from a loaded session, and preserves every other field
+  (overlays, atmosphere, projection, eyepiece, corrections) byte-for-
+  byte on round-trip. `Session` wraps the parsed JSON value rather than
+  re-declaring the schema, and its constructors seed from the committed
+  `dark-sky` preset (regenerated on every schema bump) so the binding
+  never drifts from the real layout,
 - `StarCatalog.load_embedded` over the V-23 compact binary baked at
   build time,
 - `.altaz(observer)` on every apparent-body class so a notebook can
   read horizontal coordinates without re-implementing
   `equatorial_to_horizontal`.
 
-The binding is read-only and side-effect-free — no rendering, no scene
-JSON parsing, no GPU — so reviewers get reproducibility-by-binding
-without dragging in the renderer / WGPU graph. Wheel build is
-documented in `bindings/python/README.md` (`maturin develop
---features extension-module`); a CI wheel matrix and the notebook-
-side consumer port are tracked as the L-21 follow-up scope.
+The binding stays off the renderer / WGPU / CLI dependency path: the
+session round-trip rides on `serde_json` alone, not the host
+`stars-host-common` crate (which pulls in `clap` / `chrono` / `wgpu`).
+The only side-effects are reading the embedded catalog and the optional
+`Session.load` / `.save` file helpers. Wheel build is documented in
+`bindings/python/README.md` (`maturin develop --features
+extension-module`); a CI wheel matrix is tracked as the L-21 follow-up
+scope.
 
-**Gate.** `make pyo3-check` (`cargo check -p stars-py`) plus four
+**Gate.** `make pyo3-check` (`cargo check -p stars-py`) plus nine
 in-crate Rust unit tests — Observer round-trip, planet-order match
 with `apparent_planets_topocentric`, embedded-catalog load + index
-error, and a pure-Rust Moon-altitude smoke probe at the V-27 Tokyo
-epoch — are wired into `make ci`. The Python-toolchain wheel build is
-opt-in via the `extension-module` feature and **not** required by CI.
+error, a pure-Rust Moon-altitude smoke probe at the V-27 Tokyo epoch,
+the evening-plan window contiguity + body-count contract, named-body
+validation, the embedded-template schema guard, session
+edit/round-trip with time-scale recomputation, and `from_observer`
+time-scale preservation — are wired into `make ci`. The
+Python-toolchain wheel build is opt-in via the `extension-module`
+feature and **not** required by CI.
 
 **Follow-up scope (still ⬜).**
 
@@ -3022,18 +3071,18 @@ opt-in via the `extension-module` feature and **not** required by CI.
   path only.
 - Port `examples/notebooks/session_reproducibility.py` from CLI-render
   + JSON parsing onto the binding so the notebook directly cross-
-  checks the renderer's numbers without a CLI shell-out.
-- Expand the surface to occultation / planning helpers (`active_occluders`,
-  `find_lunar_occultation`, `evening_plan`) once the read-only base
-  has stabilised. The shipped surface is intentionally limited to the
-  apparent-body and catalog calls a notebook reviewer needs first.
+  checks the renderer's numbers without a CLI shell-out. (The session
+  round-trip + `evening_plan` surface this rung adds is the
+  prerequisite; the notebook port itself is still open.)
+- Expand to occultation / eclipse helpers (`active_occluders`,
+  `find_lunar_occultation`, `find_solar_eclipse`) now that the
+  planning + session base has stabilised.
 
 **Tests / validation.**
-- Bind-time tests on representative functions
-  (`magnitude_to_illuminance_lux`, `airmass_kasten_young`,
-  `precession_iau2006`).
-- Notebook smoke test as part of `make ci` (or a documented
-  python-extras gate).
+- In-crate Rust unit tests exercising the wrapper types end-to-end
+  through pure-Rust entry points (no interpreter needed in `make ci`).
+- `bindings/python/tests/smoke.py` exercises the apparent-body,
+  planning, and session round-trip surface after `maturin develop`.
 
 **Hosts wired.** Bindings live alongside the existing hosts; not a host
 itself.

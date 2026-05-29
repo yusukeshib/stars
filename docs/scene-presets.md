@@ -52,6 +52,38 @@ panel, or attached to a report.
 | `galactic-north` | Built-in external top-down Milky Way view. | External viewpoint, HYG distances, analytic Milky Way disk. |
 | `custom-external` | Oblique custom external galactic-frame camera. | Custom origin/target/up serialization and orientation. |
 
+## Object search and GoTo (V-56)
+
+All three hosts can resolve a named object through the shared catalog
+search index (bright named stars, Bayer / Flamsteed / HR / HD / HIP
+designations, Messier / NGC / IC ids, the planets, the Sun / Moon, and
+Japanese aliases) and centre the view on it.
+
+| Capability | Web | CLI | Viewer |
+|---|---|---|---|
+| Free-text search box / prompt | search panel | `--goto <name>` | press `/` for a title-bar prompt |
+| GoTo (slew/centre on target) | click a result | `--goto <name>` | type query + Enter |
+| Info panel (mag, RA/Dec, Alt/Az, distance) | non-modal panel | printed `GoTo …` summary | window title bar |
+| Startup target from a flag | — | `--goto <name>` | `--goto <name>` |
+| Click / hover pick of any rendered body | yes | — | — (search-driven instead) |
+
+Examples:
+
+```bash
+# Render centred on M31 from Tokyo.
+cargo run -p stars-cli --release -- --lat 35.68 --lng 139.69 --goto m31 -o andromeda.png
+
+# Launch the viewer already pointed at Saturn, then press '/' to search again.
+cargo run -p stars-viewer --release -- --goto saturn
+```
+
+The CLI prints a one-line `GoTo …` summary (name, kind, magnitude,
+RA/Dec, Alt/Az, distance) before rendering. In the viewer the same
+summary is shown in the window title bar, which doubles as a
+renderer-free info panel; `--goto` accepts the same query grammar in
+both hosts. Click / hover picking of an arbitrary rendered body is a
+web-only affordance.
+
 ## Precedence and portability
 
 - `--session` takes precedence over `--preset` so an explicit JSON file always
