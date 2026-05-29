@@ -71,6 +71,40 @@ def main() -> None:
             f"color=({s.color[0]:.2f},{s.color[1]:.2f},{s.color[2]:.2f})"
         )
 
+    # --- Observation planning (rise/transit/set + twilight) ---
+    plan = stars_py.evening_plan(obs)
+    print(
+        f"Evening plan window: jd_utc {plan.start_jd_utc:.4f} → {plan.end_jd_utc:.4f}"
+    )
+    for row in plan.rows[:3]:
+        print(
+            f"  {row.name:<8s} rise={row.rise_jd_utc} "
+            f"transit={row.transit_jd_utc} set={row.set_jd_utc}"
+        )
+    for band in plan.twilight:
+        print(f"  twilight: {band.band:<22s} {band.start_jd_utc:.4f}–{band.end_jd_utc:.4f}")
+    # The same query is reachable directly by body name.
+    mars = stars_py.rise_transit_set(obs, "mars", plan.start_jd_utc, plan.end_jd_utc)
+    print(f"  Mars transit altitude: {mars.transit_altitude_rad}")
+
+    # --- Session round-trip (matches the crates/common JSON schema) ---
+    session = stars_py.Session(
+        TOKYO_LAT, TOKYO_LON, obs.jd_utc, azimuth_deg=155.0, altitude_deg=55.0
+    )
+    print(f"Session: {session!r} (schema v{session.schema_version})")
+    session.fov_deg = 60.0
+    session.jd_utc = obs.jd_utc  # re-derives UT1/TAI/TT/TDB consistently
+    # Round-trip through JSON, then build an Observer from the loaded session
+    # so queries reproduce exactly what the renderer would compute.
+    reloaded = stars_py.Session.from_json(session.to_json())
+    sess_obs = reloaded.observer()
+    sun_moon2 = stars_py.apparent_sun_moon(sess_obs)
+    alt2, _ = sun_moon2.sun.altaz(sess_obs)
+    print(
+        f"  reloaded session sun altitude = {math.degrees(alt2):7.3f}° "
+        f"(fov={reloaded.fov_deg:.1f}°)"
+    )
+
 
 if __name__ == "__main__":
     main()
