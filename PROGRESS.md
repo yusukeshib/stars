@@ -2731,7 +2731,7 @@ Validation:
 Hosts wired: server (new), CLI (refactored to reuse shared render),
 viewer / web unchanged.
 
-### `V-56` Object search, GoTo, and info panel — web host shipped
+### `V-56` Object search, GoTo, and info panel — shipped (web + CLI + viewer)
 
 The loaded catalog data and apparent-position pipeline now has a search
 surface in the web app. Typing into the top-of-canvas search box debounces
@@ -2804,10 +2804,53 @@ Validation (16 new tests in `catalog::search::tests`):
 - empty / whitespace queries return zero hits;
 - `SearchId::encode` ⇄ `SearchId::parse` round-trips for every variant.
 
-Hosts wired: web (search panel + GoTo + info panel). Desktop viewer and
-CLI are still open: the engine surface is already in `crates/catalog`,
-so both wires up by sharing the same `search()` call with their own UI
-/ flag plumbing.
+#### CLI + desktop viewer parity
+
+The CLI and desktop viewer now reach feature parity with the web host by
+sharing a host-neutral resolver rather than reimplementing search:
+
+- `crates/common/src/goto.rs`: `resolve_goto_query(query, observer)` and
+  `resolve_goto_id(id, observer)` map a `catalog::search` hit to a
+  `GotoTarget` carrying the apparent RA/Dec, topocentric (alt, az),
+  magnitude, distance, and a human-readable `info_summary()`.
+  `GotoTarget::local_view(fov)` produces a renderer `LocalView` centred
+  on the target. The solar-system magnitude / distance conventions are
+  kept identical to `apps/web` (Sun = −26.74, Moon magnitude `None`,
+  planets from the ephemeris) so all three hosts report the same numbers.
+- `apps/cli/src/main.rs`: `--goto <name>` resolves a query, overrides the
+  local alt-az view to centre the target (keeping the current FOV), and
+  prints `GoTo <summary>` before rendering. It applies after the scene is
+  built so it also works with `--session` / `--preset`; a non-Earth
+  viewpoint logs a note because the local view is ignored there.
+- `apps/viewer/src/main.rs`: a startup `--goto` flag mirrors the CLI, and
+  an interactive prompt opens on `/` — typed characters build a query
+  shown live in the window title bar (used as a renderer-free info
+  panel), Enter resolves + slews the camera + shows the target's info
+  summary, Esc cancels. This avoids any renderer changes (no host-facing
+  arbitrary-text HUD exists) and keeps to the existing keybinding
+  conventions.
+
+Click / hover *picking* of an arbitrary rendered body stays a web-only
+affordance; the CLI is non-interactive and the viewer reaches the same
+objects through the search prompt, so the `renderer::picking` R32Uint
+buffer and a `SelectedTarget` session field remain open as a web
+refinement and are not required for native-host parity.
+
+Validation for the parity work:
+
+- `crates/common/src/goto.rs` (9 tests): `resolve_goto_query` ranks
+  `"Vega"` / `"M31"` / `"Saturn"` / `"土星"` to the expected ids and
+  kinds, the planet path carries an AU distance + ephemeris magnitude,
+  empty / unknown queries error, `local_view` centres on the target,
+  `info_summary` is structured, and RA/Dec formatting is pinned at its
+  bounds.
+- `apps/cli/src/main.rs` (4 tests): `--goto` flag parsing (none /
+  single / multi-word designation) plus the end-to-end parse → resolve →
+  centred-view path.
+
+Hosts wired: web (search panel + GoTo + info panel) / CLI (`--goto`) /
+viewer (interactive `/` search prompt + startup `--goto` + title-bar
+info panel).
 
 ---
 

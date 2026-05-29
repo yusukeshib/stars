@@ -12,14 +12,14 @@ use renderer::{
 use stars_host_common::{
     atmosphere_from_args, eyepiece_from_args, light_pollution_from_args, load_session,
     load_star_instances_from_file, overlay_config_from_args, parse_time_to_time_scales,
-    scene_from_preset, scene_preset_infos, scintillation_from_args, viewpoint_from_args,
-    AtmosphereOverrides, AtmospherePresetArg, CatalogSnapshot, CorrectionSnapshot,
-    ExternalViewpointOverrides, EyepieceOverrides, LightPollutionOverrides, OverlayArg,
-    ProjectionArg, ScenePresetArg, ScintillationOverrides, SessionScene, ViewpointArg,
+    resolve_goto_query, scene_from_preset, scene_preset_infos, scintillation_from_args,
+    viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg, CatalogSnapshot,
+    CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides, LightPollutionOverrides,
+    OverlayArg, ProjectionArg, ScenePresetArg, ScintillationOverrides, SessionScene, ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
@@ -229,6 +229,13 @@ struct Args {
     /// Override the scintillation noise seed for deterministic replays.
     #[arg(long)]
     scintillation_seed: Option<u32>,
+
+    /// V-56 GoTo: centre the initial view on a named object resolved through
+    /// the catalog search index (e.g. "Vega", "M31", "Saturn", "土星"). At
+    /// runtime press `/` to open an interactive search prompt in the title
+    /// bar, type a query, and press Enter to slew + show the info panel.
+    #[arg(long, value_name = "NAME")]
+    goto: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -361,6 +368,7 @@ fn main() -> Result<()> {
         scene.viewpoint,
         scene.external_viewpoint,
         scene.eyepiece,
+        args.goto.clone(),
     );
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -425,6 +433,14 @@ struct App {
     sky_clock: SkyClock,
     mouse_pressed: bool,
     last_mouse: Option<(f64, f64)>,
+    /// V-56 GoTo query supplied via `--goto`, applied once the camera exists.
+    pending_goto: Option<String>,
+    /// V-56 interactive search: `true` while the title-bar prompt is open.
+    search_mode: bool,
+    /// In-progress search query typed into the prompt.
+    search_query: String,
+    /// Info summary of the most recent GoTo target, shown in the title bar.
+    goto_info: Option<String>,
 }
 
 /// Tracks the rendered moment in JD, advancing real time at a configurable speed.
@@ -493,6 +509,7 @@ impl App {
         viewpoint: renderer::SkyViewpoint,
         external_viewpoint: renderer::ExternalViewpoint,
         eyepiece: renderer::EyepieceSimulation,
+        pending_goto: Option<String>,
     ) -> Self {
         Self {
             gpu: None,
@@ -514,7 +531,24 @@ impl App {
             sky_clock: SkyClock::new(start_jd),
             mouse_pressed: false,
             last_mouse: None,
+            pending_goto,
+            search_mode: false,
+            search_query: String::new(),
+            goto_info: None,
         }
+    }
+}
+
+/// Window-title text used as the viewer's lightweight, renderer-free info
+/// panel. Shows the live search prompt while typing, otherwise the most
+/// recent GoTo target summary, falling back to the bare app name.
+fn compose_title(search_mode: bool, query: &str, info: Option<&str>) -> String {
+    if search_mode {
+        format!("Stars — search: {query}█  (Enter = GoTo, Esc = cancel)")
+    } else if let Some(info) = info {
+        format!("Stars — {info}")
+    } else {
+        "Stars".to_string()
     }
 }
 
@@ -614,6 +648,26 @@ impl ApplicationHandler for App {
         camera.external_viewpoint = self.external_viewpoint;
         camera.eyepiece = self.eyepiece;
 
+        // V-56 GoTo supplied via `--goto`: centre the initial view on the
+        // resolved target before the first frame.
+        if let Some(query) = self.pending_goto.take() {
+            match resolve_goto_query(&query, observer) {
+                Ok(target) => {
+                    camera.view = target.local_view(camera.view.fov_y_rad);
+                    let info = target.info_summary();
+                    log::info!("GoTo {info}");
+                    self.goto_info = Some(info);
+                }
+                Err(error) => log::warn!("GoTo: {error}"),
+            }
+        }
+        window.set_title(&compose_title(
+            self.search_mode,
+            &self.search_query,
+            self.goto_info.as_deref(),
+        ));
+        log::info!("Press '/' to search and GoTo an object (Enter to confirm, Esc to cancel)");
+
         self.gpu = Some(GpuState {
             surface,
             device,
@@ -686,22 +740,82 @@ impl ApplicationHandler for App {
             }
 
             WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        state: ElementState::Pressed,
-                        physical_key: PhysicalKey::Code(code),
-                        ..
-                    },
-                ..
-            } => match code {
-                KeyCode::Space => self.sky_clock.toggle_pause(),
-                KeyCode::Digit1 => self.sky_clock.set_speed(CLOCK_SPEED_REALTIME),
-                KeyCode::Digit2 => self.sky_clock.set_speed(CLOCK_SPEED_MINUTE_PER_SECOND),
-                KeyCode::Digit3 => self.sky_clock.set_speed(CLOCK_SPEED_HOUR_PER_SECOND),
-                KeyCode::Digit4 => self.sky_clock.set_speed(CLOCK_SPEED_DAY_PER_SECOND),
-                KeyCode::Escape => event_loop.exit(),
-                _ => {}
-            },
+                event: key_event, ..
+            } if key_event.state == ElementState::Pressed => {
+                let code = match key_event.physical_key {
+                    PhysicalKey::Code(c) => Some(c),
+                    _ => None,
+                };
+
+                if self.search_mode {
+                    // V-56 interactive search prompt: capture text into the
+                    // query, resolve on Enter, slew the camera, and surface the
+                    // info summary in the title bar.
+                    match code {
+                        Some(KeyCode::Escape) => {
+                            self.search_mode = false;
+                            self.search_query.clear();
+                        }
+                        Some(KeyCode::Enter) | Some(KeyCode::NumpadEnter) => {
+                            let query = std::mem::take(&mut self.search_query);
+                            self.search_mode = false;
+                            let observer = Observer::from_degrees(lat, lng, jd);
+                            match resolve_goto_query(&query, observer) {
+                                Ok(target) => {
+                                    gpu.camera.view = target.local_view(gpu.camera.view.fov_y_rad);
+                                    let info = target.info_summary();
+                                    log::info!("GoTo {info}");
+                                    self.goto_info = Some(info);
+                                }
+                                Err(error) => {
+                                    log::warn!("GoTo: {error}");
+                                    self.goto_info = Some(format!("not found: {query}"));
+                                }
+                            }
+                        }
+                        Some(KeyCode::Backspace) => {
+                            self.search_query.pop();
+                        }
+                        _ => {
+                            if let Some(text) = &key_event.text {
+                                for ch in text.chars() {
+                                    if !ch.is_control() {
+                                        self.search_query.push(ch);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    match code {
+                        Some(KeyCode::Slash) => {
+                            self.search_mode = true;
+                            self.search_query.clear();
+                        }
+                        Some(KeyCode::Space) => self.sky_clock.toggle_pause(),
+                        Some(KeyCode::Digit1) => self.sky_clock.set_speed(CLOCK_SPEED_REALTIME),
+                        Some(KeyCode::Digit2) => {
+                            self.sky_clock.set_speed(CLOCK_SPEED_MINUTE_PER_SECOND)
+                        }
+                        Some(KeyCode::Digit3) => {
+                            self.sky_clock.set_speed(CLOCK_SPEED_HOUR_PER_SECOND)
+                        }
+                        Some(KeyCode::Digit4) => {
+                            self.sky_clock.set_speed(CLOCK_SPEED_DAY_PER_SECOND)
+                        }
+                        Some(KeyCode::Escape) => event_loop.exit(),
+                        _ => {}
+                    }
+                }
+
+                if let Some(window) = &self.window {
+                    window.set_title(&compose_title(
+                        self.search_mode,
+                        &self.search_query,
+                        self.goto_info.as_deref(),
+                    ));
+                }
+            }
 
             WindowEvent::RedrawRequested => {
                 gpu.camera.observer = Observer::from_degrees(lat, lng, jd);

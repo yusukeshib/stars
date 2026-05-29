@@ -1,16 +1,17 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
+use astronomy::Observer;
 use clap::Parser;
-use renderer::{LocalView, DEFAULT_SCREEN_LIMITING_MAGNITUDE};
+use renderer::{LocalView, SkyViewpoint, DEFAULT_SCREEN_LIMITING_MAGNITUDE};
 use stars_host_common::{
     atmosphere_from_args, eyepiece_from_args, hyg_catalog_snapshot, light_pollution_from_args,
     load_session, overlay_config_from_args, parse_time_to_time_scales,
-    render_scene_from_catalog_path, save_session, scene_from_preset, scene_preset_infos,
-    scintillation_from_args, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
-    CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides, LightPollutionOverrides,
-    OverlayArg, ProjectionArg, RenderOptions, ScenePresetArg, ScintillationOverrides, SessionScene,
-    StarSession, ViewpointArg,
+    render_scene_from_catalog_path, resolve_goto_query, save_session, scene_from_preset,
+    scene_preset_infos, scintillation_from_args, viewpoint_from_args, AtmosphereOverrides,
+    AtmospherePresetArg, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides,
+    LightPollutionOverrides, OverlayArg, ProjectionArg, RenderOptions, ScenePresetArg,
+    ScintillationOverrides, SessionScene, StarSession, ViewpointArg,
 };
 
 /// Render the night sky as seen from a given observer to a PNG.
@@ -273,6 +274,14 @@ struct Args {
     /// Override the scintillation noise seed for deterministic replays.
     #[arg(long)]
     scintillation_seed: Option<u32>,
+
+    /// V-56 GoTo: centre the view on a named object resolved through the
+    /// catalog search index. Accepts proper names, Bayer/Flamsteed, HD/HIP/HR,
+    /// Messier/NGC/IC ids, planets, the Sun/Moon, and Japanese aliases
+    /// (e.g. "Vega", "Alp CMa", "M31", "NGC 869", "Saturn", "土星"). Overrides
+    /// --azimuth / --altitude and prints an info summary before rendering.
+    #[arg(long, value_name = "NAME")]
+    goto: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -284,7 +293,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let scene = if let Some(session_path) = &args.session {
+    let mut scene = if let Some(session_path) = &args.session {
         load_session(session_path)?.to_scene()?
     } else if let Some(preset) = args.preset {
         scene_from_preset(preset, &args.catalog, args.limiting_magnitude)?
@@ -375,6 +384,23 @@ fn main() -> Result<()> {
         }
     };
 
+    // V-56 GoTo: resolve a named target and centre the view on it. Applied
+    // after the scene is built so it works with --session / --preset too.
+    if let Some(query) = &args.goto {
+        let observer =
+            Observer::from_degrees_with_time(scene.latitude_deg, scene.longitude_deg, scene.time);
+        let target = resolve_goto_query(query, observer)?;
+        if scene.viewpoint != SkyViewpoint::Earth {
+            log::warn!(
+                "--goto centres the local alt-az view, which is ignored by the \
+                 current non-Earth viewpoint; rendering the target's info only"
+            );
+        }
+        scene.view = target.local_view(scene.view.fov_y_rad);
+        println!("GoTo {}", target.info_summary());
+        log::info!("GoTo target: {}", target.info_summary());
+    }
+
     log::info!(
         "Observer lat={} lng={} jd_utc={} jd_ut1={} jd_tdb={}",
         scene.latitude_deg,
@@ -440,4 +466,56 @@ fn vec3_arg(values: &Option<Vec<f32>>) -> Option<[f32; 3]> {
         return None;
     };
     Some([*x, *y, *z])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use astronomy::TimeScales;
+
+    fn parse(args: &[&str]) -> Args {
+        Args::try_parse_from(args).expect("args parse")
+    }
+
+    #[test]
+    fn goto_flag_defaults_to_none() {
+        let args = parse(&["stars", "--lat", "35.68", "--lng", "139.69"]);
+        assert!(args.goto.is_none());
+    }
+
+    #[test]
+    fn goto_flag_parses_value() {
+        let args = parse(&[
+            "stars", "--lat", "35.68", "--lng", "139.69", "--goto", "Vega",
+        ]);
+        assert_eq!(args.goto.as_deref(), Some("Vega"));
+    }
+
+    #[test]
+    fn goto_flag_accepts_multiword_designation() {
+        let args = parse(&[
+            "stars", "--lat", "35.68", "--lng", "139.69", "--goto", "Alp CMa",
+        ]);
+        assert_eq!(args.goto.as_deref(), Some("Alp CMa"));
+    }
+
+    /// End-to-end wiring: the parsed `--goto` value resolves through the shared
+    /// resolver and yields a finite, centred local view — the same path
+    /// `main` takes before rendering.
+    #[test]
+    fn goto_value_resolves_and_centres_view() {
+        let args = parse(&[
+            "stars", "--lat", "35.68", "--lng", "139.69", "--goto", "Vega",
+        ]);
+        let query = args.goto.expect("goto present");
+        let observer = Observer::from_degrees_with_time(
+            35.68,
+            139.69,
+            TimeScales::from_utc_julian_date(2_461_157.0),
+        );
+        let target = resolve_goto_query(&query, observer).expect("Vega resolves");
+        let view = target.local_view(60.0_f32.to_radians());
+        assert!(view.altitude_rad.is_finite() && view.azimuth_rad.is_finite());
+        assert!(target.info_summary().contains("Vega"));
+    }
 }

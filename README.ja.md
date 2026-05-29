@@ -40,11 +40,14 @@ make demo-gallery   # docs/assets/demo-gallery/ にキュレーション済み�
 - OTA と接眼レンズの組み合わせから倍率、プレートスケール、射出瞳、実視野を求める望遠鏡接眼レンズシミュレーション。
 - CLI / desktop / web で共有できる schema-versioned JSON session と、短い共有向けの Web session URL。
 - Web UI の英語 / 日本語バイリンガル対応。ブラウザ言語の自動判定、共有用 `?lang=en|ja` URL パラメータ、設定パネル内の言語スイッチャーを備えます。
-- Web アプリのオブジェクト検索 / GoTo / 情報パネル (V-56)。検索ボックスから、
+- 全 3 ホスト対応のオブジェクト検索 / GoTo / 情報パネル (V-56)。検索ボックスから、
   固有名 / Bayer / Flamsteed / HR / HD / HIP で示される 1,200 より多い明るい恒星、
   Messier 110 天体、明るい NGC / IC 天体、太陽 ・ 月 ・ 惑星 7 個（「土星」など日本語名
   も受け付け）を表示順位付きで検索できます。選んだ天体にカメラをスラーし、赤経・
-  赤緯、高度 ・ 方位、等級、距離、出・南中・入りを表示するインフォパネルを開きます。
+  赤緯、高度 ・ 方位、等級、距離、出・南中・入りを表示するインフォパネルを開きます。CLI は
+  `--goto <name>` で視点を中央に合わせて情報サマリーを出力し、デスクトップビューアは
+  起動時の `--goto <name>` に加え `/` キーで検索プロンプト（Enter でスラー、Esc で
+  キャンセル）を開き、対象のサマリーをウィンドウタイトルに表示します。
 - 決定的な validation / demo 用 scene preset、notebook 再現性 example、catalog backend scaling scaffold、任意実行の screenshot review 用 gallery。
 - 引用用 metadata、Zenodo release archive 用 metadata、モデル選択を確認する standards-compliance page。
 

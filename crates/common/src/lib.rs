@@ -15,9 +15,11 @@ use catalog::{load_from_file, CatalogSource};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
+mod goto;
 mod presets;
 mod render;
 mod session;
+pub use goto::{resolve_goto_id, resolve_goto_query, GotoTarget};
 pub use presets::*;
 pub use render::*;
 pub use renderer::DEFAULT_SCREEN_LIMITING_MAGNITUDE;
