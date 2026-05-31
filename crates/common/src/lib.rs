@@ -22,6 +22,7 @@ mod presets;
 mod render;
 mod satellites;
 mod session;
+mod tour;
 pub use goto::{resolve_goto_id, resolve_goto_query, GotoTarget};
 // L-19 CDS deep-link helpers. The pure URL builders live in `catalog` so the
 // WASM web binding can share the single source of truth; we re-export them on
@@ -42,6 +43,7 @@ pub use satellites::{
     DEFAULT_SATELLITE_EXPOSURE_SECONDS,
 };
 pub use session::*;
+pub use tour::{first_night_tour, Tour, TourScene, TourStep};
 
 /// CLI-facing mirror of [`OverlayKind`] that derives [`ValueEnum`] so `clap`
 /// can render kebab-case help text and parse user input. Kept in this crate

@@ -12,13 +12,13 @@ use renderer::{
 };
 use stars_host_common::{
     atmosphere_from_args, aurora_from_args, curated_comet_layer, curated_satellite_layer,
-    eyepiece_from_args, light_pollution_from_args, load_session, load_star_instances_from_file,
-    overlay_config_from_args, parse_time_to_time_scales, resolve_goto_query,
-    resolve_light_pollution, scene_from_preset, scene_preset_infos, scintillation_from_args,
-    viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg, AuroraSeasonArg,
-    CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides,
-    LightPollutionOverrides, OpticalDesign, OutputColourspaceArg, OverlayArg, ProjectionArg,
-    ScenePresetArg, ScintillationOverrides, SessionScene, ViewpointArg,
+    eyepiece_from_args, first_night_tour, light_pollution_from_args, load_session,
+    load_star_instances_from_file, overlay_config_from_args, parse_time_to_time_scales,
+    resolve_goto_query, resolve_light_pollution, scene_from_preset, scene_preset_infos,
+    scintillation_from_args, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
+    AuroraSeasonArg, CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides,
+    EyepieceOverrides, LightPollutionOverrides, OpticalDesign, OutputColourspaceArg, OverlayArg,
+    ProjectionArg, ScenePresetArg, ScintillationOverrides, SessionScene, Tour, ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -587,6 +587,16 @@ struct App {
     search_query: String,
     /// Info summary of the most recent GoTo target, shown in the title bar.
     goto_info: Option<String>,
+    /// L-23 guided education mode: the built-in "first night" tour content.
+    tour: Tour,
+    /// `true` while the guided tour is active (a step is applied and its
+    /// caption shown in the title bar).
+    tour_active: bool,
+    /// Index of the current tour step while `tour_active`.
+    tour_step: usize,
+    /// Caption of the active tour step, shown in the title bar (the viewer's
+    /// native info panel).
+    tour_caption: Option<String>,
 }
 
 /// Tracks the rendered moment in JD, advancing real time at a configurable speed.
@@ -634,6 +644,14 @@ impl SkyClock {
             }
             None => self.paused_at = Some(self.current_jd()),
         }
+    }
+
+    /// L-23: jump the clock to a fixed instant (used when a tour step pins a
+    /// specific observer time). Leaves the clock running from that anchor.
+    fn set_jd(&mut self, jd: f64) {
+        self.anchor_jd = jd;
+        self.epoch = Instant::now();
+        self.paused_at = None;
     }
 }
 
@@ -703,6 +721,10 @@ impl App {
             search_mode: false,
             search_query: String::new(),
             goto_info: None,
+            tour: first_night_tour(),
+            tour_active: false,
+            tour_step: 0,
+            tour_caption: None,
         }
     }
 }
@@ -1064,6 +1086,70 @@ impl ApplicationHandler for App {
                         Some(KeyCode::Digit4) => {
                             self.sky_clock.set_speed(CLOCK_SPEED_DAY_PER_SECOND)
                         }
+                        Some(KeyCode::KeyT) => {
+                            // L-23: start the guided tour, or advance to the
+                            // next step; stepping past the last step ends it.
+                            if self.tour_active {
+                                self.tour_step += 1;
+                            } else {
+                                self.tour_active = true;
+                                self.tour_step = 0;
+                            }
+                            if self.tour_step >= self.tour.steps.len() {
+                                self.tour_active = false;
+                                self.tour_caption = None;
+                                log::info!("Tour complete");
+                            } else {
+                                let step = self.tour.steps[self.tour_step].clone();
+                                let n = self.tour.steps.len();
+                                let s = &step.scene;
+                                // Relocate the observer (applied next frame via
+                                // the snapshotted lat/lng) and pin the time.
+                                self.lat = s.latitude_deg;
+                                self.lng = s.longitude_deg;
+                                if let Ok(ts) = parse_time_to_time_scales(Some(&s.time)) {
+                                    self.sky_clock.set_jd(ts.jd_utc);
+                                }
+                                gpu.camera.view = LocalView {
+                                    azimuth_rad: (s.azimuth_deg as f32).to_radians(),
+                                    altitude_rad: (s.altitude_deg as f32).to_radians(),
+                                    fov_y_rad: (s.fov_deg as f32).to_radians(),
+                                };
+                                gpu.camera.projection = s.projection.into();
+                                gpu.camera.atmosphere = Atmosphere::from_preset(
+                                    renderer::AtmospherePreset::from(s.atmosphere_preset),
+                                );
+                                gpu.camera.planets_enabled = s.planets_enabled;
+                                let layers: Vec<renderer::OverlayKind> = s
+                                    .overlays
+                                    .iter()
+                                    .copied()
+                                    .map(renderer::OverlayKind::from)
+                                    .collect();
+                                gpu.renderer.set_overlays(
+                                    &gpu.device,
+                                    &OverlayConfig {
+                                        layers,
+                                        grid_step_deg: 15.0,
+                                        opacity: 0.6,
+                                        deep_sky_magnitude_limit: OverlayConfig::default()
+                                            .deep_sky_magnitude_limit,
+                                    },
+                                );
+                                let caption = format!(
+                                    "Tour {}/{}: {} — {}",
+                                    self.tour_step + 1,
+                                    n,
+                                    step.title,
+                                    step.caption
+                                );
+                                log::info!("{caption}");
+                                if let Some(url) = &step.reference_url {
+                                    log::info!("↳ {url}");
+                                }
+                                self.tour_caption = Some(caption);
+                            }
+                        }
                         Some(KeyCode::Escape) => event_loop.exit(),
                         _ => {}
                     }
@@ -1073,7 +1159,7 @@ impl ApplicationHandler for App {
                     window.set_title(&compose_title(
                         self.search_mode,
                         &self.search_query,
-                        self.goto_info.as_deref(),
+                        self.tour_caption.as_deref().or(self.goto_info.as_deref()),
                     ));
                 }
             }

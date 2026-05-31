@@ -171,6 +171,13 @@ Owns native-host convenience only:
 - RFC3339 / now time parsing;
 - schema-versioned JSON session load/save and conversion into native render state;
 - deterministic named scene presets that compile to normal sessions;
+- the `L-23` guided-tour content (`tour.rs`): `Tour` / `TourStep` plus a
+  declarative, host-agnostic `TourScene` whose `to_session_scene` reuses the
+  preset `earth_scene` builder, and the built-in `first_night_tour()`. The
+  renderer knows nothing about tours; hosts present captions natively (CLI
+  flags, the viewer `T` key, and the web `TourPanel`, the latter mirroring
+  the content in `apps/web/frontend/src/tour.ts` because the web renderer
+  does not depend on this crate);
 - filesystem catalog loading plus conversion to renderer `StarInstance`s;
 - the V-39-Atlas light-pollution resolver: `load_falchi_atlas` reads the
   optional Falchi 2016 grid named by `STARS_FALCHI_ATLAS`, and

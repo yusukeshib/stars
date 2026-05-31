@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { StarCanvas } from "./components/StarCanvas";
 import { SearchPanel } from "./components/SearchPanel";
 import { StatusBar } from "./components/StatusBar";
+import { TourPanel } from "./components/TourPanel";
+import { FIRST_NIGHT_TOUR, type TourScene } from "./tour";
 import {
   clampAltitude,
   clampFov,
@@ -508,6 +510,20 @@ export function App() {
     });
   };
 
+  // L-23 guided education mode: apply a tour step's declarative scene through
+  // the existing renderer state setters. The renderer never learns about
+  // tours; this just drives the same state the manual controls do.
+  const applyTourScene = (scene: TourScene) => {
+    setObserver({ latitudeDeg: scene.latitudeDeg, longitudeDeg: scene.longitudeDeg });
+    const parsed = Date.parse(scene.timeIso);
+    if (Number.isFinite(parsed)) setTimeMs(parsed);
+    setView({ azimuthDeg: scene.azimuthDeg, altitudeDeg: scene.altitudeDeg, fovDeg: scene.fovDeg });
+    setOverlays((o) => ({ ...o, layers: [...scene.overlays] }));
+    setProjection((p) => ({ ...p, projection: scene.projection, viewpoint: "earth" }));
+    setAtmosphere((a) => ({ ...a, enabled: true, preset: scene.atmospherePreset }));
+    setPlanets({ enabled: scene.planetsEnabled });
+  };
+
   return (
     <>
       <StarCanvas
@@ -542,6 +558,7 @@ export function App() {
           searchApiRef.current = api;
         }}
       />
+      <TourPanel tour={FIRST_NIGHT_TOUR} onApplyScene={applyTourScene} />
       <SearchPanel
         onLookup={(query, limit) => searchApiRef.current?.lookup(query, limit) ?? "{\"matches\":[]}"}
         onGoto={(id) => searchApiRef.current?.goto(id) ?? "null"}

@@ -641,7 +641,7 @@ pub fn session_from_preset(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn earth_scene(
+pub(crate) fn earth_scene(
     latitude_deg: f64,
     longitude_deg: f64,
     time: &str,
@@ -752,7 +752,7 @@ fn local_view(azimuth_deg: f64, altitude_deg: f64, fov_deg: f64) -> LocalView {
     }
 }
 
-fn overlay_config(layers: &[OverlayKind]) -> OverlayConfig {
+pub(crate) fn overlay_config(layers: &[OverlayKind]) -> OverlayConfig {
     OverlayConfig {
         layers: layers.to_vec(),
         grid_step_deg: 15.0,

@@ -3579,6 +3579,47 @@ References: Perryman 1997, A&A 323, L49 (Hipparcos); ESA 1997, SP-1200
 (VT/BT transform); Høg 2000, A&A 355, L27 (Tycho-2); Gaia Collaboration 2022,
 A&A 674, A1 (Gaia DR3).
 
+## `L-23` Guided education mode — shipped (CLI + viewer + web)
+
+A guided "first night" tour now walks newcomers through the reference
+structures of the sky (horizon → celestial equator → ecliptic → Milky Way →
+twilight → projections), driving the renderer through documented,
+reproducible scenes rather than ad-hoc panning.
+
+1. **What changed.** New `crates/common/src/tour.rs` defines `Tour`,
+   `TourStep`, and a fully declarative, host-agnostic `TourScene` (observer
+   lat/lng, a **fixed** ISO-8601 instant, view az/alt/fov, overlays,
+   projection, atmosphere preset, planets). `TourScene::to_session_scene`
+   reuses the same `earth_scene` builder the deterministic presets use, so a
+   step renders identically to an equivalent preset. `first_night_tour()` is
+   the built-in six-step tour, each step carrying a caption and a
+   further-reading reference URL.
+2. **Why it counts as complete.** The schema round-trips through JSON, every
+   step pins a fixed instant (no wall-clock dependence → deterministic
+   renders), and all three hosts present the captions natively: CLI
+   `--list-tour` / `--tour-json` / `--tour-step N`, the viewer's `T` key
+   (apply-step + title-bar caption), and the web `TourPanel`.
+3. **Where it lives.** `crates/common/src/tour.rs` (+ `lib.rs` re-export;
+   `presets::earth_scene`/`overlay_config` made `pub(crate)` for reuse);
+   `apps/cli/src/main.rs` (tour flags); `apps/viewer/src/main.rs` (`T`-key
+   tour state + `SkyClock::set_jd`); `apps/web/frontend/src/tour.ts` (web
+   mirror of the canonical content) + `components/TourPanel.tsx` + minimal
+   `App.tsx` wiring (`applyTourScene`).
+4. **Tests / validation.** `tour` unit tests: JSON round-trip, the six
+   expected reference structures present with unique ids and non-empty
+   captions, and every step's fixed time parses (deterministic).
+5. **Conflict-avoidance.** No session-schema bump (the tour is a separate
+   structure). The renderer/shaders, `catalog`/`astronomy` core, and
+   `bindings/python` are untouched; web edits are scoped to new files plus a
+   small `App.tsx` hook so the parallel `L-24` accessibility work stays
+   separable.
+6. **Web content duplication.** The web renderer deliberately does not depend
+   on `stars-host-common`, so the tour content is mirrored in `tour.ts`
+   instead of exported from WASM (keeps `clap`/`chrono` out of the bundle).
+   The Rust and TS copies are kept in sync by review; cross-references are in
+   both files.
+7. **Hosts wired.** CLI, viewer, web.
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

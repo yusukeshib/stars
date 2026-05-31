@@ -152,13 +152,14 @@ web host controls. With both shipped, every `V-51`–`V-56` item is now done.
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`: the SPK Chebyshev kernel reader has shipped;
 kernel ingest + Horizons cross-check remain), variable-star library (`L-20`),
-and education / accessibility (`L-23`, `L-24`). The Python bindings (`L-21`)
-and headless server (`L-22`) have both shipped. Large-catalog ingest (`L-17`)
-has landed at the catalog-backend layer (Hipparcos / Tycho-2 / Gaia DR3 CSV
-backends + fetch scripts + identifier cross-match); LOD streaming and host
-wiring remain the `L-17` follow-up. Observation-planning polish
-(`L-09`) has now shipped: Moon-impact and visibility scoring, recommended-
-object ranking, favourites, and iCalendar export.
+and the accessibility pass (`L-24`). The Python bindings (`L-21`) and headless
+server (`L-22`) have both shipped. Large-catalog ingest (`L-17`) has landed at
+the catalog-backend layer (Hipparcos / Tycho-2 / Gaia DR3 CSV backends + fetch
+scripts + identifier cross-match); LOD streaming and host wiring remain the
+`L-17` follow-up. Observation-planning polish (`L-09`) has now shipped:
+Moon-impact and visibility scoring, recommended-object ranking, favourites,
+and iCalendar export. Guided education mode (`L-23`) has now shipped: a
+deterministic, cross-host "first night" guided tour.
 
 A row is `✅ done` only when the model named in its references is implemented,
 documented, tested, and wired into all relevant hosts.
@@ -256,7 +257,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-20` | Variable star light curves | ⬜ |
 | `L-21` | Python bindings (PyO3) | ✅ |
 | `L-22` | Headless server mode | ✅ |
-| `L-23` | Guided education mode | ⬜ |
+| `L-23` | Guided education mode | ✅ |
 | `L-24` | Accessibility pass | ⬜ |
 | `L-25` | `CITATION.cff` + Zenodo DOI | ✅ |
 | `L-26` | Standards-compliance document | ✅ |
@@ -3480,29 +3481,48 @@ the HTTP envelope + content negotiation.
 
 ## Education and accessibility
 
-### `L-23` Guided education mode — ⬜
+### `L-23` Guided education mode — ✅ done
 
 **Item.** Cross-host tour content explaining horizon, equator, ecliptic,
-galactic plane, time motion, twilight, and projection choices. Drives the
-renderer through documented sequences rather than ad-hoc panning.
+galactic plane, twilight, and projection choices. Drives the renderer through
+documented sequences rather than ad-hoc panning.
 
 **Scientific basis.** Pedagogical sequencing; tour steps reference the
-literature that motivates each overlay (e.g., the equation of time, the
-analemma, the obliquity of the ecliptic).
+literature that motivates each overlay (horizontal vs equatorial vs galactic
+coordinate systems, the obliquity of the ecliptic, solar-depression twilight
+bands, and equal-area map projections).
 
-**Implementation scope.**
-- `crates/common`: `Tour { steps: Vec<TourStep> }` schema; each
-  `TourStep` has session-delta + caption + optional reference URL.
-- Hosts render the caption in their native UI; the renderer itself
-  doesn't know about tours.
-- A built-in "first night" tour ships in `apps/{cli,viewer,web}`.
+**Implementation.**
+- `crates/common/src/tour.rs`: `Tour { id, title, description, steps }` and
+  `TourStep { id, title, caption, reference_url, scene }`, where `TourScene`
+  is a fully declarative, host-agnostic scene (observer lat/lng, a **fixed**
+  ISO-8601 time, view az/alt/fov, overlays, projection, atmosphere preset,
+  planets). `TourScene::to_session_scene` reuses the same `earth_scene`
+  construction the deterministic presets use, so a tour step and an
+  equivalent preset render identically. `first_night_tour()` is the built-in
+  six-step tour (horizon → celestial equator → ecliptic → Milky Way →
+  twilight → projections).
+- Hosts render the caption in their native UI; the renderer never learns
+  about tours. CLI: `--list-tour` (text), `--tour-json` (canonical JSON),
+  `--tour-step N` (render one step). Viewer: the `T` key starts/advances the
+  tour, applying each step's scene live and showing the caption in the
+  title-bar info panel. Web: a self-contained `TourPanel` walks the steps and
+  drives the existing React state setters; the tour content is mirrored in
+  `apps/web/frontend/src/tour.ts` (the web renderer deliberately does not
+  depend on `stars-host-common`, so the mirror avoids pulling `clap`/`chrono`
+  into the WASM bundle — the two are kept in sync by review).
 
 **Tests / validation.**
-- Roundtrip a sample tour through JSON.
-- Each step must reduce to a deterministic render (no time-of-walltime
-  dependence).
+- `tour` unit tests: JSON round-trip of the built-in tour; the six expected
+  reference structures are present with unique ids and non-empty captions;
+  every step pins a parseable fixed instant (no wall-clock dependence) and
+  sane view/observer fields.
 
 **Hosts wired.** CLI / viewer / web.
+
+**Deferred.** Persisting the optical-design / live time-lapse *within* a tour
+step, and localising the web tour captions (currently English), are tracked
+as follow-ups; the schema is additive so neither needs a session-schema bump.
 
 ---
 
