@@ -11,13 +11,14 @@ use renderer::{
 };
 use stars_host_common::{
     atmosphere_from_args, aurora_from_args, curated_comet_layer, curated_satellite_layer,
-    eyepiece_from_args, hyg_catalog_snapshot, light_pollution_from_args, load_session,
-    overlay_config_from_args, parse_time_to_time_scales, render_scene_from_catalog_path,
-    resolve_goto_query, save_session, scene_from_preset, scene_preset_infos,
-    scintillation_from_args, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
-    AuroraSeasonArg, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides,
-    LightPollutionOverrides, OpticalDesign, OutputColourspaceArg, OverlayArg, ProjectionArg,
-    RenderOptions, ScenePresetArg, ScintillationOverrides, SessionScene, StarSession, ViewpointArg,
+    eyepiece_from_args, first_night_tour, hyg_catalog_snapshot, light_pollution_from_args,
+    load_session, overlay_config_from_args, parse_time_to_time_scales,
+    render_scene_from_catalog_path, resolve_goto_query, save_session, scene_from_preset,
+    scene_preset_infos, scintillation_from_args, viewpoint_from_args, AtmosphereOverrides,
+    AtmospherePresetArg, AuroraSeasonArg, CorrectionSnapshot, ExternalViewpointOverrides,
+    EyepieceOverrides, LightPollutionOverrides, OpticalDesign, OutputColourspaceArg, OverlayArg,
+    ProjectionArg, RenderOptions, ScenePresetArg, ScintillationOverrides, SessionScene,
+    StarSession, ViewpointArg,
 };
 
 /// Resolve the V-45 optical design from the `--telescope-design` /
@@ -60,6 +61,20 @@ struct Args {
     /// List built-in deterministic validation/demo scene presets and exit.
     #[arg(long)]
     list_presets: bool,
+
+    /// L-23: print the built-in "first night" guided tour (step titles,
+    /// captions, and reference links) and exit.
+    #[arg(long)]
+    list_tour: bool,
+
+    /// L-23: print the built-in guided tour as JSON and exit.
+    #[arg(long)]
+    tour_json: bool,
+
+    /// L-23: render a single guided-tour step (1-based index into the
+    /// "first night" tour) instead of a manual/preset/session scene.
+    #[arg(long, value_name = "N")]
+    tour_step: Option<usize>,
 
     /// Write the effective scene to a schema-versioned JSON session file.
     #[arg(long)]
@@ -409,7 +424,32 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mut scene = if let Some(session_path) = &args.session {
+    if args.list_tour {
+        print_tour();
+        return Ok(());
+    }
+
+    if args.tour_json {
+        println!("{}", first_night_tour().to_json());
+        return Ok(());
+    }
+
+    let mut scene = if let Some(step_number) = args.tour_step {
+        let tour = first_night_tour();
+        let index = step_number
+            .checked_sub(1)
+            .filter(|i| *i < tour.steps.len())
+            .with_context(|| {
+                format!(
+                    "--tour-step must be between 1 and {} (got {step_number})",
+                    tour.steps.len()
+                )
+            })?;
+        let step = &tour.steps[index];
+        log::info!("Tour step {step_number}: {} — {}", step.title, step.caption);
+        step.scene
+            .to_session_scene(&args.catalog, args.limiting_magnitude)?
+    } else if let Some(session_path) = &args.session {
         load_session(session_path)?.to_scene()?
     } else if let Some(preset) = args.preset {
         scene_from_preset(preset, &args.catalog, args.limiting_magnitude)?
@@ -740,6 +780,23 @@ fn print_scene_presets() {
             info.title,
             info.validation_focus
         );
+    }
+}
+
+/// L-23: print the built-in guided tour as human-readable text. Each step
+/// shows its 1-based index (usable with `--tour-step`), title, caption, and
+/// reference link.
+fn print_tour() {
+    let tour = first_night_tour();
+    println!("{} — {}\n", tour.title, tour.description);
+    for (i, step) in tour.steps.iter().enumerate() {
+        println!("{}. {} [{}]", i + 1, step.title, step.id);
+        println!("   {}", step.caption);
+        if let Some(url) = &step.reference_url {
+            println!("   ↳ {url}");
+        }
+        println!("   render with: --tour-step {}", i + 1);
+        println!();
     }
 }
 
