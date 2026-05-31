@@ -1,4 +1,5 @@
 mod camera;
+mod colourspace;
 mod constellations;
 #[cfg(test)]
 mod lunar_phase;
@@ -15,6 +16,7 @@ pub use camera::{
     Atmosphere, AtmospherePreset, Camera, ExternalViewpoint, EyepieceSimulation, LocalView,
     SatelliteLayer, Scintillation, SkyProjection, SkyViewpoint, MAX_SATELLITES,
 };
+pub use colourspace::OutputColourSpace;
 pub use overlay::{OverlayConfig, OverlayKind, DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT};
 pub use renderer::Renderer;
 pub use vertex::{

@@ -116,7 +116,8 @@ remaining items are realism polish (`V-24` scintillation, `V-25`–`V-28`
 have all shipped), site-specific brightness (Bortle / SQM core shipped
 via `V-39`; Falchi 2016 atlas loader tracked as follow-up `V-39-Atlas`),
 niche visual
-features (`V-45`–`V-50`), and rare phenomena (`V-47`–`V-49`).
+features (`V-45`, `V-46`; `V-50` output colour management has shipped),
+and rare phenomena (`V-47`–`V-49`).
 
 **High priority next:** the visual-richness gaps `V-51`–`V-56` (eclipses /
 occultations, planetary rings and moons, resolved star clusters, double
@@ -214,7 +215,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-47` | **Meteor shower display** | ⬜ |
 | `V-48` | **Aurora display** | ⬜ |
 | `V-49` | **Comet rendering** | ⬜ |
-| `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ⬜ |
+| `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ✅ |
 | `V-51` | **Unified eclipse / occultation pass** (`a` + `b` + `c` + `d` + `e` + `f` done) | ✅ |
 | `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** (all rungs `a`–`d` done; Galilean at Lainey 2006 L1.2, Titan at TASS1.7) | ✅ |
 | `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** (showpiece bootstrap done) | ✅ |
@@ -1638,7 +1639,7 @@ manifest version bumps.
 
 ## Output colour
 
-### `V-50` Output colour management — ⬜
+### `V-50` Output colour management — ✅ done
 
 **Item.** Today the renderer writes sRGB-encoded RGB and
 `docs/standards-compliance.md` notes that no colour management is
@@ -1671,6 +1672,38 @@ management is a post-gamut matrix + transfer-function swap.
   and check chromaticity.
 - Visual: same scene rendered to sRGB and P3 should produce different
   but predictable chromaticity logs.
+
+**Implementation (as shipped).**
+- `crates/renderer/src/colourspace.rs`: `OutputColourSpace { Srgb,
+  DisplayP3, Rec2020 }` with the published CSS-Color-4 linear
+  sRGB→target 3×3 gamut matrices (both D65, no chromatic adaptation),
+  primary/white-point chromaticities for PNG tagging, and pinned tests
+  (sRGB identity; a pure primary's chromaticity is preserved across the
+  transform when re-projected through the target's own RGB→XYZ matrix;
+  wide-gamut saturation check; string round-trip).
+- `crates/renderer/src/tonemap.rs` + `shaders/tonemap.wgsl`: a
+  `ColourManagementUniform` (gamut matrix rows padded to `vec4`) bound at
+  tonemap binding 4. The shader applies the matrix as its final step
+  after the Reinhard operator, clamped to non-negative. sRGB is the
+  identity, so output is bit-identical to the pre-V-50 pipeline. The host
+  swap-chain / PNG keeps the sRGB transfer function; only the primaries
+  change, then the primaries are tagged on the output. Display-P3 (sRGB
+  transfer) is exact; Rec.2020 is tagged with its primaries and uses the
+  sRGB transfer as a documented approximation
+  (`docs/standards-compliance.md`).
+- `crates/common`: `OutputColourspaceArg` (clap `ValueEnum` + serde
+  kebab-case) mirrors the engine enum; `SessionScene.output_colourspace`
+  and the JSON `outputColourspace` field carry it. Session schema bumped
+  to **v6**; the web frontend schema and committed preset sessions were
+  regenerated under v6, and `data/manifest.toml` re-hashed.
+- `apps/cli`: `--output-colourspace {srgb,display-p3,rec2020}`; the PNG
+  encoder writes an `sRGB` chunk for sRGB and a `cHRM` primaries chunk
+  for Display-P3 / Rec.2020 (switched from the `image` crate to `png`).
+- `apps/viewer`: `--output-colourspace` flag plumbed onto the camera.
+- `apps/web`: `StarView.set_output_colourspace`, a settings-panel
+  dropdown, and localStorage / session persistence. The canvas remains
+  sRGB-tagged, so wide-gamut primaries fall back to sRGB on unsupported
+  browsers (documented).
 
 **Hosts wired.** CLI / viewer / web.
 

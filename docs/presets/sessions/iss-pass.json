@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 6,
+  "schemaVersion": 7,
   "appVersion": "0.1.0",
   "createdBy": "stars-cli",
   "observer": {
@@ -102,5 +102,6 @@
     "properMotion": true,
     "atmosphericRefraction": true,
     "topocentricSolarSystem": true
-  }
+  },
+  "outputColourspace": "srgb"
 }

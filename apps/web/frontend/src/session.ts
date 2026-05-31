@@ -4,11 +4,13 @@ import {
   DEFAULT_OVERLAY_CONFIG,
   DEFAULT_PLANETS_CONFIG,
   DEFAULT_PROJECTION_CONFIG,
+  DEFAULT_OUTPUT_COLOURSPACE,
   DEFAULT_SATELLITES_CONFIG,
   DEFAULT_SCINTILLATION_CONFIG,
   MAX_FOV_DEG,
   MIN_FOV_DEG,
   isAtmospherePreset,
+  isOutputColourspace,
   isOverlayLayer,
   isSkyProjection,
   isSkyViewpoint,
@@ -16,6 +18,7 @@ import {
   type EyepieceConfig,
   type ExternalViewpointConfig,
   type Observer,
+  type OutputColourspace,
   type OverlayConfig,
   type PlanetsConfig,
   type ProjectionConfig,
@@ -28,10 +31,12 @@ import {
 // Must track `SESSION_SCHEMA_VERSION` in `crates/common/src/session.rs`.
 // v2 unified spectral extinction (V-37); v3 added `surfaceAlbedo` for the
 // Hošek-Wilkie daylight model (V-38); v4 added the `scintillation` block
-// for V-24. The Rust hosts and `docs/presets/sessions/*.json` all emit v4,
-// so the web UI must accept and emit v4 too or cross-host session
-// import/export is broken.
-export const SESSION_SCHEMA_VERSION = 4;
+// for V-24; v6 added the `outputColourspace` field for V-50 output colour
+// management (matching the Rust host bump that also covered intermediate
+// native-only schema changes). The Rust hosts and
+// `docs/presets/sessions/*.json` all emit v6, so the web UI must accept and
+// emit v6 too or cross-host session import/export is broken.
+export const SESSION_SCHEMA_VERSION = 6;
 const APP_VERSION = "0.1.0";
 const UNIX_EPOCH_JD = 2440587.5;
 const SECONDS_PER_DAY = 86400;
@@ -61,6 +66,7 @@ export type StarSession = {
   planets: PlanetsConfig;
   satellites: SatellitesConfig;
   eyepiece: EyepieceConfig;
+  outputColourspace: OutputColourspace;
   catalog: {
     backend: string;
     source: string;
@@ -90,6 +96,7 @@ export type SessionState = {
   satellites: SatellitesConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
+  outputColourspace: OutputColourspace;
   timeMs: number;
 };
 
@@ -164,6 +171,7 @@ export function buildStarSession(state: SessionState): StarSession {
     planets: state.planets,
     satellites: state.satellites,
     eyepiece: state.eyepiece,
+    outputColourspace: state.outputColourspace,
     catalog: {
       backend: "hyg-embedded-wasm",
       source: "HYG",
@@ -204,8 +212,23 @@ export function parseStarSessionJson(raw: string): SessionState {
   const satellites = parseSatellites(s.satellites);
   const projection = parseProjection(s.projection);
   const eyepiece = parseEyepiece(s.eyepiece);
+  const outputColourspace = isOutputColourspace(s.outputColourspace)
+    ? s.outputColourspace
+    : DEFAULT_OUTPUT_COLOURSPACE;
   const timeMs = parseTimeMs(s.time);
-  return { observer, view, overlays, atmosphere, scintillation, planets, satellites, projection, eyepiece, timeMs };
+  return {
+    observer,
+    view,
+    overlays,
+    atmosphere,
+    scintillation,
+    planets,
+    satellites,
+    projection,
+    eyepiece,
+    outputColourspace,
+    timeMs,
+  };
 }
 
 function parseObserver(value: unknown): Observer {

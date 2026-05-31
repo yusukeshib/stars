@@ -26,6 +26,8 @@
 //! display space so dark-sky pixels desaturate toward a V'(λ)-weighted rod
 //! signal instead of tone-mapping RGB unchanged.
 
+use wgpu::util::DeviceExt;
+
 /// Format of the intermediate scene buffer.
 ///
 /// `Rgba16Float` is the smallest wgpu format guaranteed by
@@ -44,6 +46,31 @@ pub(crate) const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Fl
 /// versus 16-bit avoids the latter's quantisation at the low end of the
 /// scotopic regime.
 const ADAPTATION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
+
+/// V-50 output colour-management uniform. Carries the linear sRGB→target
+/// gamut matrix (row-major, each row padded to a `vec4` for WGSL std140
+/// alignment) the tonemap shader applies as its final step. `info.x` is the
+/// [`crate::colourspace::OutputColourSpace::shader_code`] (informational).
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct ColourManagementUniform {
+    matrix: [[f32; 4]; 3],
+    info: [f32; 4],
+}
+
+impl ColourManagementUniform {
+    fn from_colourspace(cs: crate::colourspace::OutputColourSpace) -> Self {
+        let m = cs.linear_from_srgb_matrix();
+        Self {
+            matrix: [
+                [m[0][0], m[0][1], m[0][2], 0.0],
+                [m[1][0], m[1][1], m[1][2], 0.0],
+                [m[2][0], m[2][1], m[2][2], 0.0],
+            ],
+            info: [cs.shader_code() as f32, 0.0, 0.0, 0.0],
+        }
+    }
+}
 
 /// Resources for the tone-reproduction post-process pass.
 pub(crate) struct Tonemap {
@@ -64,6 +91,9 @@ pub(crate) struct Tonemap {
     adaptation_view: wgpu::TextureView,
     luminance_bind_group: wgpu::BindGroup,
     tonemap_bind_group: wgpu::BindGroup,
+    /// V-50 colour-management uniform buffer (gamut matrix + info). Bound at
+    /// tonemap binding 4 and rewritten by [`Tonemap::set_output_colourspace`].
+    cm_buffer: wgpu::Buffer,
     width: u32,
     height: u32,
 }
@@ -201,6 +231,22 @@ impl Tonemap {
                         },
                         count: None,
                     },
+                    // V-50 output colour-management uniform (gamut matrix).
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: Some(
+                                std::num::NonZeroU64::new(
+                                    std::mem::size_of::<ColourManagementUniform>() as u64,
+                                )
+                                .unwrap(),
+                            ),
+                        },
+                        count: None,
+                    },
                 ],
             });
 
@@ -264,6 +310,16 @@ impl Tonemap {
         let (hdr_texture, hdr_view, adaptation_texture, adaptation_view, luminance_bind_group) =
             create_render_targets(device, &luminance_bind_group_layout, width, height);
 
+        // Default to sRGB (identity gamut transform) so a host that never
+        // selects a colour space renders bit-identically to the pre-V-50 path.
+        let cm_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Tonemap Colour Management Uniform"),
+            contents: bytemuck::bytes_of(&ColourManagementUniform::from_colourspace(
+                crate::colourspace::OutputColourSpace::Srgb,
+            )),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
         let tonemap_bind_group = create_tonemap_bind_group(
             device,
             &tonemap_bind_group_layout,
@@ -271,6 +327,7 @@ impl Tonemap {
             &sampler,
             &adaptation_view,
             camera_buffer,
+            &cm_buffer,
         );
 
         Self {
@@ -285,9 +342,25 @@ impl Tonemap {
             adaptation_view,
             luminance_bind_group,
             tonemap_bind_group,
+            cm_buffer,
             width,
             height,
         }
+    }
+
+    /// Update the V-50 output colour space. Writes the linear sRGB→target
+    /// gamut matrix into the colour-management uniform; the tonemap shader
+    /// applies it as its final step. Cheap enough to call every frame.
+    pub fn set_output_colourspace(
+        &self,
+        queue: &wgpu::Queue,
+        cs: crate::colourspace::OutputColourSpace,
+    ) {
+        queue.write_buffer(
+            &self.cm_buffer,
+            0,
+            bytemuck::bytes_of(&ColourManagementUniform::from_colourspace(cs)),
+        );
     }
 
     /// Recreate the HDR target at the new size. No-op when the size is
@@ -314,6 +387,7 @@ impl Tonemap {
             &self.sampler,
             &adaptation_view,
             camera_buffer,
+            &self.cm_buffer,
         );
         self._hdr_texture = hdr_texture;
         self.hdr_view = hdr_view;
@@ -447,6 +521,7 @@ fn create_render_targets(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_tonemap_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
@@ -454,6 +529,7 @@ fn create_tonemap_bind_group(
     sampler: &wgpu::Sampler,
     adaptation_view: &wgpu::TextureView,
     camera_buffer: &wgpu::Buffer,
+    cm_buffer: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Tonemap Bind Group"),
@@ -474,6 +550,10 @@ fn create_tonemap_bind_group(
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: camera_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: cm_buffer.as_entire_binding(),
             },
         ],
     })

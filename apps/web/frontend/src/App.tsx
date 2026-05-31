@@ -13,6 +13,7 @@ import {
   DEFAULT_PLANETS_CONFIG,
   DEFAULT_SATELLITES_CONFIG,
   DEFAULT_PROJECTION_CONFIG,
+  DEFAULT_OUTPUT_COLOURSPACE,
   MIN_FOV_DEG,
   MAX_FOV_DEG,
   isAtmospherePreset,
@@ -24,6 +25,7 @@ import {
   type EyepieceConfig,
   type ExternalViewpointConfig,
   type Observer,
+  type OutputColourspace,
   type OverlayConfig,
   type PlanetsConfig,
   type PlanningTable,
@@ -351,6 +353,9 @@ export function App() {
   const [eyepiece, setEyepiece] = useState<EyepieceConfig>(
     URL_SESSION?.eyepiece ?? PERSISTED?.eyepiece ?? DEFAULT_EYEPIECE_CONFIG,
   );
+  const [outputColourspace, setOutputColourspace] = useState<OutputColourspace>(
+    URL_SESSION?.outputColourspace ?? PERSISTED?.outputColourspace ?? DEFAULT_OUTPUT_COLOURSPACE,
+  );
   const [timeMs, setTimeMs] = useState<number>(() => URL_SESSION?.timeMs ?? Date.now());
   const [sunAltitudeDeg, setSunAltitudeDeg] = useState<number | null>(null);
   const [planning, setPlanning] = useState<PlanningTable | null>(null);
@@ -375,11 +380,11 @@ export function App() {
   // next load would silently mislead the user.
   useEffect(() => {
     const handle = setTimeout(
-      () => saveConfig({ observer, view, overlays, atmosphere, scintillation, planets, satellites, projection, eyepiece }),
+      () => saveConfig({ observer, view, overlays, atmosphere, scintillation, planets, satellites, projection, eyepiece, outputColourspace }),
       250,
     );
     return () => clearTimeout(handle);
-  }, [observer, view, overlays, atmosphere, scintillation, planets, satellites, projection, eyepiece]);
+  }, [observer, view, overlays, atmosphere, scintillation, planets, satellites, projection, eyepiece, outputColourspace]);
 
   // Mirror the current session into the address bar so the user can copy the
   // URL at any time without going through the explicit "Copy URL" action.
@@ -424,6 +429,7 @@ export function App() {
     satellites,
     projection,
     eyepiece,
+    outputColourspace,
     timeMs,
   });
 
@@ -437,6 +443,7 @@ export function App() {
     setSatellites(session.satellites);
     setProjection(session.projection);
     setEyepiece(session.eyepiece);
+    setOutputColourspace(session.outputColourspace);
     setTimeMs(session.timeMs);
     lastTickRef.current = performance.now();
   };
@@ -464,6 +471,7 @@ export function App() {
         satellites={satellites}
         projection={projection}
         eyepiece={eyepiece}
+        outputColourspace={outputColourspace}
         onDrag={(daz, dalt) =>
           setView((v) => ({
             ...v,
@@ -518,6 +526,8 @@ export function App() {
         onSetSatellites={setSatellites}
         onSetProjection={setProjection}
         onSetEyepiece={setEyepiece}
+        outputColourspace={outputColourspace}
+        onSetOutputColourspace={setOutputColourspace}
         onSetView={setView}
         onCopySessionJson={async () => {
           const json = starSessionJson(currentSessionState());

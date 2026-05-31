@@ -2,6 +2,7 @@ import {
   MAX_FOV_DEG,
   MIN_FOV_DEG,
   isAtmospherePreset,
+  isOutputColourspace,
   isOverlayLayer,
   isSkyProjection,
   isSkyViewpoint,
@@ -12,6 +13,7 @@ import {
   type AtmosphereConfig,
   type ExternalViewpointConfig,
   type Observer,
+  type OutputColourspace,
   type OverlayConfig,
   type PlanetsConfig,
   type ProjectionConfig,
@@ -36,6 +38,7 @@ export type PersistedConfig = {
   satellites?: SatellitesConfig;
   projection?: ProjectionConfig;
   eyepiece?: EyepieceConfig;
+  outputColourspace?: OutputColourspace;
 };
 
 export type PartialPersistedConfig = Partial<PersistedConfig>;
@@ -60,6 +63,7 @@ export function loadConfig(): PartialPersistedConfig | null {
       satellites?: unknown;
       projection?: unknown;
       eyepiece?: unknown;
+      outputColourspace?: unknown;
     };
     const out: PartialPersistedConfig = {};
     if (isObserver(obj.observer)) out.observer = obj.observer;
@@ -77,6 +81,7 @@ export function loadConfig(): PartialPersistedConfig | null {
     if (projection) out.projection = projection;
     const eyepiece = parseEyepieceConfig(obj.eyepiece);
     if (eyepiece) out.eyepiece = eyepiece;
+    if (isOutputColourspace(obj.outputColourspace)) out.outputColourspace = obj.outputColourspace;
     return out;
   } catch {
     return null;

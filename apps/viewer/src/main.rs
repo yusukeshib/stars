@@ -6,8 +6,8 @@ use anyhow::Result;
 use astronomy::Observer;
 use clap::Parser;
 use renderer::{
-    Atmosphere, Camera, LightPollution, LocalView, OverlayConfig, Renderer, SatelliteLayer,
-    StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    Atmosphere, Camera, LightPollution, LocalView, OutputColourSpace, OverlayConfig, Renderer,
+    SatelliteLayer, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
     atmosphere_from_args, curated_satellite_layer, eyepiece_from_args, light_pollution_from_args,
@@ -15,8 +15,8 @@ use stars_host_common::{
     parse_time_to_time_scales, resolve_goto_query, scene_from_preset, scene_preset_infos,
     scintillation_from_args, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
     CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides,
-    LightPollutionOverrides, OverlayArg, ProjectionArg, ScenePresetArg, ScintillationOverrides,
-    SessionScene, ViewpointArg,
+    LightPollutionOverrides, OutputColourspaceArg, OverlayArg, ProjectionArg, ScenePresetArg,
+    ScintillationOverrides, SessionScene, ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -171,6 +171,12 @@ struct Args {
     #[arg(long)]
     surface_albedo: Option<f32>,
 
+    /// V-50 output colour management: the primaries the viewer presents and
+    /// stores in saved sessions. `srgb` (default), `display-p3`, or `rec2020`.
+    /// When omitted, a `--session` / `--preset` scene keeps its stored value.
+    #[arg(long, value_enum)]
+    output_colourspace: Option<OutputColourspaceArg>,
+
     /// V-39 light-pollution Bortle class (1..=9). Class 1 = rural dark sky
     /// (default), Class 9 = inner-city. Mutually exclusive with `--sqm`.
     #[arg(long)]
@@ -257,7 +263,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let scene = if let Some(session_path) = &args.session {
+    let mut scene = if let Some(session_path) = &args.session {
         load_session(session_path)?.to_scene()?
     } else if let Some(preset) = args.preset {
         scene_from_preset(preset, &args.catalog, DEFAULT_SCREEN_LIMITING_MAGNITUDE)?
@@ -340,8 +346,14 @@ fn main() -> Result<()> {
             ),
             catalog: catalog_snapshot(&args.catalog, DEFAULT_SCREEN_LIMITING_MAGNITUDE),
             corrections: CorrectionSnapshot::for_scene(atmosphere),
+            output_colourspace: OutputColourSpace::default(),
         }
     };
+
+    // V-50: explicit flag overrides the scene's stored colour space.
+    if let Some(cs) = args.output_colourspace {
+        scene.output_colourspace = cs.into();
+    }
 
     let catalog_path = scene
         .catalog
@@ -380,6 +392,7 @@ fn main() -> Result<()> {
         scene.viewpoint,
         scene.external_viewpoint,
         scene.eyepiece,
+        scene.output_colourspace,
         args.goto.clone(),
     );
     event_loop.run_app(&mut app)?;
@@ -445,6 +458,7 @@ struct App {
     viewpoint: renderer::SkyViewpoint,
     external_viewpoint: renderer::ExternalViewpoint,
     eyepiece: renderer::EyepieceSimulation,
+    output_colourspace: OutputColourSpace,
     sky_clock: SkyClock,
     mouse_pressed: bool,
     last_mouse: Option<(f64, f64)>,
@@ -525,6 +539,7 @@ impl App {
         viewpoint: renderer::SkyViewpoint,
         external_viewpoint: renderer::ExternalViewpoint,
         eyepiece: renderer::EyepieceSimulation,
+        output_colourspace: OutputColourSpace,
         pending_goto: Option<String>,
     ) -> Self {
         // Always keep the curated TLEs available so the runtime toggle works
@@ -551,6 +566,7 @@ impl App {
             viewpoint,
             external_viewpoint,
             eyepiece,
+            output_colourspace,
             sky_clock: SkyClock::new(start_jd),
             mouse_pressed: false,
             last_mouse: None,
@@ -683,6 +699,7 @@ impl ApplicationHandler for App {
         camera.viewpoint = self.viewpoint;
         camera.external_viewpoint = self.external_viewpoint;
         camera.eyepiece = self.eyepiece;
+        camera.output_colourspace = self.output_colourspace;
 
         // V-56 GoTo supplied via `--goto`: centre the initial view on the
         // resolved target before the first frame.

@@ -63,10 +63,20 @@ struct CameraUniform {
     moon_disk: vec4<f32>,
 };
 
+// V-50 output colour management: linear sRGB→target gamut matrix. Rows are
+// padded to vec4 for std140 alignment; `info.x` is the colour-space code.
+struct ColourManagement {
+    row0: vec4<f32>,
+    row1: vec4<f32>,
+    row2: vec4<f32>,
+    info: vec4<f32>,
+};
+
 @group(0) @binding(0) var hdr_texture: texture_2d<f32>;
 @group(0) @binding(1) var hdr_sampler: sampler;
 @group(0) @binding(2) var adaptation_texture: texture_2d<f32>;
 @group(0) @binding(3) var<uniform> camera: CameraUniform;
+@group(0) @binding(4) var<uniform> colour_management: ColourManagement;
 
 const LN10: f32 = 2.30258509299;
 const EYE_PSF_SOLID_ANGLE_SR: f32 = 8.461594994075e-8;
@@ -206,5 +216,19 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let lw2 = L_WHITE * L_WHITE;
     let rgb = scaled * (vec3<f32>(1.0) + scaled / vec3<f32>(lw2)) / (vec3<f32>(1.0) + scaled);
 
-    return vec4<f32>(rgb, 1.0);
+    // V-50: transform the tone-mapped linear sRGB-primary radiance into the
+    // selected output primaries (sRGB = identity). The host swap-chain / PNG
+    // applies the sRGB transfer function; only the primaries change here, and
+    // the chosen primaries are tagged on the output. Clamp to non-negative so
+    // a wider-gamut matrix can never emit negative radiance.
+    let managed = max(
+        vec3<f32>(
+            dot(colour_management.row0.xyz, rgb),
+            dot(colour_management.row1.xyz, rgb),
+            dot(colour_management.row2.xyz, rgb),
+        ),
+        vec3<f32>(0.0),
+    );
+
+    return vec4<f32>(managed, 1.0);
 }

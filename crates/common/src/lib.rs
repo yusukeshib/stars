@@ -30,8 +30,8 @@ pub use render::*;
 pub use renderer::DEFAULT_SCREEN_LIMITING_MAGNITUDE;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation,
-    LightPollution, OverlayConfig, OverlayKind, Scintillation, SkyProjection, SkyViewpoint,
-    StarInstance,
+    LightPollution, OutputColourSpace, OverlayConfig, OverlayKind, Scintillation, SkyProjection,
+    SkyViewpoint, StarInstance,
 };
 pub use satellites::{
     curated_satellite_layer, curated_satellite_tles, CURATED_TLE_TEXT,
@@ -173,6 +173,45 @@ impl From<AtmospherePresetArg> for AtmospherePreset {
             AtmospherePresetArg::ClearRural => AtmospherePreset::ClearRural,
             AtmospherePresetArg::HazyUrban => AtmospherePreset::HazyUrban,
             AtmospherePresetArg::HighAltitude => AtmospherePreset::HighAltitude,
+        }
+    }
+}
+
+/// CLI-facing mirror of [`OutputColourSpace`] for `clap` parsing and session
+/// serialization (V-50). Kept here (not in `renderer`) so the engine crate
+/// stays free of `clap` / `serde`. The variant set and kebab-case spelling are
+/// pinned to [`OutputColourSpace`] by [`output_colourspace_arg_round_trips`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OutputColourspaceArg {
+    #[default]
+    Srgb,
+    DisplayP3,
+    Rec2020,
+}
+
+impl std::fmt::Display for OutputColourspaceArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(OutputColourSpace::from(*self).as_str())
+    }
+}
+
+impl From<OutputColourspaceArg> for OutputColourSpace {
+    fn from(c: OutputColourspaceArg) -> Self {
+        match c {
+            OutputColourspaceArg::Srgb => OutputColourSpace::Srgb,
+            OutputColourspaceArg::DisplayP3 => OutputColourSpace::DisplayP3,
+            OutputColourspaceArg::Rec2020 => OutputColourSpace::Rec2020,
+        }
+    }
+}
+
+impl From<OutputColourSpace> for OutputColourspaceArg {
+    fn from(c: OutputColourSpace) -> Self {
+        match c {
+            OutputColourSpace::Srgb => OutputColourspaceArg::Srgb,
+            OutputColourSpace::DisplayP3 => OutputColourspaceArg::DisplayP3,
+            OutputColourSpace::Rec2020 => OutputColourspaceArg::Rec2020,
         }
     }
 }
@@ -565,6 +604,24 @@ mod tests {
             let s = projection.as_kebab_str();
             assert_eq!(SkyProjection::from_kebab_str(s), Some(projection));
             assert_eq!(format!("{arg}"), s);
+        }
+    }
+
+    #[test]
+    fn output_colourspace_arg_round_trips() {
+        for arg in [
+            OutputColourspaceArg::Srgb,
+            OutputColourspaceArg::DisplayP3,
+            OutputColourspaceArg::Rec2020,
+        ] {
+            let cs: OutputColourSpace = arg.into();
+            // CLI/session string spelling matches the engine identifier.
+            assert_eq!(format!("{arg}"), cs.as_str());
+            // Round-trips back to the same arg variant.
+            assert_eq!(OutputColourspaceArg::from(cs), arg);
+            // serde tag matches the kebab spelling.
+            let json = serde_json::to_string(&arg).unwrap();
+            assert_eq!(json, format!("\"{}\"", cs.as_str()));
         }
     }
 

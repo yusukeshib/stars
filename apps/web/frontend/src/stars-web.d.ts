@@ -57,6 +57,8 @@ declare module "stars-web" {
       atlasLongitudeDeg: number,
     ): void;
     set_scintillation(enabled: boolean, cN2Scale: number, seed: number): void;
+    /// V-50 output colour management: "srgb" | "display-p3" | "rec2020".
+    set_output_colourspace(space: string): void;
     resize(width: number, height: number): void;
     sun_altitude_deg(): number;
     /// V-56 search: free-text lookup over named stars, deep-sky catalogs,

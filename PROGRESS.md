@@ -3137,6 +3137,37 @@ Hosts wired: web (info panel links) / CLI (`--goto` metadata) / viewer
 
 ---
 
+## `V-50` Output colour management (sRGB / Display-P3 / Rec.2020) — shipped (CLI + viewer + web)
+
+1. **What changed.** The renderer now selects an output colour space at the
+   final tone-map step and tags the output with the chosen primaries, so the
+   same scene reproduces the same colour on a calibrated wide-gamut screen.
+   Previously the pipeline emitted untagged sRGB-encoded RGB.
+2. **Why it counts as complete.** The gamut math is unit-tested, the transform
+   is wired through the shared tonemap pass, the choice is persisted in the
+   session JSON (schema v7), and all three hosts expose a control; a smoke
+   render confirms sRGB PNGs carry an `sRGB` chunk while Display-P3 / Rec.2020
+   PNGs carry a `cHRM` primaries chunk and differ in pixels from sRGB.
+3. **Where it lives.** `crates/renderer/src/colourspace.rs`
+   (`OutputColourSpace` + CSS-Color-4 linear gamut matrices + chromaticities),
+   `crates/renderer/src/tonemap.rs` + `shaders/tonemap.wgsl` (binding-4
+   `ColourManagementUniform`, applied after the Reinhard operator),
+   `crates/common` (`OutputColourspaceArg`, `SessionScene.output_colourspace`,
+   `outputColourspace` JSON field, schema bump to v7), `apps/cli`
+   (`--output-colourspace`, `png`-crate encoder with `sRGB` / `cHRM` chunks),
+   `apps/viewer` (`--output-colourspace`), and `apps/web`
+   (`StarView.set_output_colourspace`, settings-panel dropdown, persistence).
+4. **Tests / validation.** `renderer::colourspace` pins the sRGB identity, a
+   primary's chromaticity preserved across each transform, the wide-gamut
+   saturation check, and string round-trips; `stars-host-common` pins the
+   `OutputColourspaceArg` ↔ engine round-trip and the v7 `outputColourspace`
+   session field; the Python-binding template test tracks schema v7.
+   Committed preset sessions and `data/manifest.toml` were regenerated.
+5. **Hosts wired.** CLI, viewer, web. The host swap-chain / PNG keeps the sRGB
+   transfer function (Display-P3 is exact; Rec.2020 uses the sRGB transfer as a
+   documented approximation), and the web canvas falls back to sRGB where
+   wide-gamut presentation is unsupported.
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

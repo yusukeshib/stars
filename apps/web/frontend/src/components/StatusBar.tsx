@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ATMOSPHERE_PRESET_DEFAULTS,
   ATMOSPHERE_PRESETS,
+  OUTPUT_COLOURSPACES,
   SKY_PROJECTIONS,
   SKY_VIEWPOINTS,
   clampAltitude,
@@ -19,6 +20,7 @@ import {
   type PlanetsConfig,
   type SatellitesConfig,
   type PlanningTable,
+  type OutputColourspace,
   type ProjectionConfig,
   type RecommendedPlan,
   type SkyProjection,
@@ -46,6 +48,7 @@ type Props = {
   satellites: SatellitesConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
+  outputColourspace: OutputColourspace;
   planning: PlanningTable | null;
   recommended: RecommendedPlan | null;
   onExportIcal: () => void;
@@ -57,6 +60,7 @@ type Props = {
   onSetSatellites: (next: SatellitesConfig) => void;
   onSetProjection: (next: ProjectionConfig) => void;
   onSetEyepiece: (next: EyepieceConfig) => void;
+  onSetOutputColourspace: (next: OutputColourspace) => void;
   onSetView: (next: View) => void;
   onCopySessionJson: () => void | Promise<void>;
   onImportSessionJson: (raw: string) => void;
@@ -151,6 +155,7 @@ export function StatusBar({
   satellites,
   projection,
   eyepiece,
+  outputColourspace,
   planning,
   recommended,
   onExportIcal,
@@ -162,6 +167,7 @@ export function StatusBar({
   onSetSatellites,
   onSetProjection,
   onSetEyepiece,
+  onSetOutputColourspace,
   onSetView,
   onCopySessionJson,
   onImportSessionJson,
@@ -450,6 +456,7 @@ export function StatusBar({
             satellites={satellites}
             projection={projection}
             eyepiece={eyepiece}
+            outputColourspace={outputColourspace}
             planning={planning}
             recommended={recommended}
             onExportIcal={onExportIcal}
@@ -459,6 +466,7 @@ export function StatusBar({
             onSetSatellites={onSetSatellites}
             onSetProjection={onSetProjection}
             onSetEyepiece={onSetEyepiece}
+            onSetOutputColourspace={onSetOutputColourspace}
             onCopySessionJson={onCopySessionJson}
             onImportSessionJson={onImportSessionJson}
           />
@@ -632,6 +640,7 @@ type SettingsPanelProps = Pick<
   | "satellites"
   | "projection"
   | "eyepiece"
+  | "outputColourspace"
   | "planning"
   | "recommended"
   | "onExportIcal"
@@ -641,6 +650,7 @@ type SettingsPanelProps = Pick<
   | "onSetSatellites"
   | "onSetProjection"
   | "onSetEyepiece"
+  | "onSetOutputColourspace"
   | "onCopySessionJson"
   | "onImportSessionJson"
 >;
@@ -655,6 +665,7 @@ function SettingsPanel({
   satellites,
   projection,
   eyepiece,
+  outputColourspace,
   planning,
   recommended,
   onExportIcal,
@@ -664,6 +675,7 @@ function SettingsPanel({
   onSetSatellites,
   onSetProjection,
   onSetEyepiece,
+  onSetOutputColourspace,
   onCopySessionJson,
   onImportSessionJson,
 }: SettingsPanelProps) {
@@ -821,6 +833,30 @@ function SettingsPanel({
           ))}
         </select>
             <p style={helperTextStyle}>{t("card.view.helper")}</p>
+          </SettingCard>
+
+          <SettingCard
+            title={t("card.colourManagement.title")}
+            description={t("card.colourManagement.description")}
+          >
+            <label htmlFor="output-colourspace" style={labelStyle}>
+              {t("card.colourManagement.outputSpace")}
+            </label>
+            <select
+              id="output-colourspace"
+              value={outputColourspace}
+              onChange={(e) =>
+                onSetOutputColourspace(e.target.value as OutputColourspace)
+              }
+              style={{ ...inputStyle, width: "100%" }}
+            >
+              {OUTPUT_COLOURSPACES.map((c) => (
+                <option key={c} value={c}>
+                  {t(`colourspace.${c}`)}
+                </option>
+              ))}
+            </select>
+            <p style={helperTextStyle}>{t("card.colourManagement.helper")}</p>
           </SettingCard>
 
           <SettingCard
