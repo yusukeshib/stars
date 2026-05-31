@@ -25,6 +25,7 @@ mod planning;
 pub mod satellites;
 pub mod scintillation;
 pub mod skyglow;
+pub mod spk;
 mod time;
 
 pub use aurora::{
@@ -90,6 +91,7 @@ pub use satellites::{
     apparent_satellites, parse_tle_set, Satellite, SatelliteApparent, SatelliteError, Tle,
     DEFAULT_STD_MAGNITUDE,
 };
+pub use spk::{naif, SpkError, SpkKernel};
 pub use time::{
     approximate_tdb_from_tt, gmst_radians, julian_date_from_unix_seconds, lmst_radians,
     tai_minus_utc_seconds_at_jd_utc, LeapSecond, TimeScales, J2000_JD, LEAP_SECONDS,

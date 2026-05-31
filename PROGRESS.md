@@ -3491,6 +3491,41 @@ McKinley, D. W. R. 1961, *Meteor Science and Engineering*.
    `VALIDATION.md`.
 6. **Hosts wired.** CLI, viewer, web.
 
+## `L-06` DE440 SPK Chebyshev reader — partial (reader shipped; kernel ingest deferred)
+
+First slice of the DE440 ephemeris upgrade: the Chebyshev **kernel reader**
+that DE440 ingest is built on.
+
+1. **What changed.** New `crates/astronomy/src/spk.rs` (`astronomy::SpkKernel`):
+   a dependency-free, endianness-aware NAIF **DAF/SPK** parser that reads the
+   file record, summary/segment descriptors, and evaluates **Type 2**
+   (Chebyshev position) and **Type 3** (Chebyshev position + velocity)
+   segments. It resolves a body's state to the solar-system barycenter by
+   walking the SPK center tree (e.g. Moon → Earth-Moon barycenter → SSB) and
+   differencing, exposing `state_km` / `position_km` / `geocentric_equatorial`
+   plus NAIF body-id constants. This reads real JPL `de440.bsp` / `de440s.bsp`
+   kernels.
+2. **Why it is partial (◑, not ✅).** No DE440 kernel is committed (32–110 MB
+   binary) and the reader does not yet drive `apparent_sun/moon/planet`, so the
+   rendered Sun/Moon/planet output is still the analytic VSOP87 / ELP2000
+   visual tier (also the WASM fallback). Wiring a fetched kernel through the
+   apparent-place pipeline and the JPL Horizons sub-arcsecond cross-check are
+   deferred; `DATA_SOURCES.md` + `scripts/fetch-de440-subset.sh` document the
+   kernel retrieval.
+3. **Where it lives.** `crates/astronomy/src/spk.rs`, exported from
+   `crates/astronomy/src/lib.rs` (`SpkKernel`, `SpkError`, `naif`).
+4. **Tests / validation.** 8 unit tests against a synthetic, spec-accurate
+   in-memory DAF/SPK image: Type 2 position vs closed-form Chebyshev, Type 2
+   velocity vs finite difference, Type 3 explicit-velocity series, little- vs
+   big-endian byte-identical decode, direct and barycenter-chained geocentric
+   states, non-DAF / truncated rejection, and missing-coverage errors. No new
+   committed data → `make manifest-check` unchanged.
+5. **Hosts wired.** None yet (library-only; see deferral above).
+
+References (pinned in ROADMAP `L-06`): Park, R. S. et al. 2021, AJ 161, 105
+(DE440); Acton, C. H. 1996, Planet. Space Sci. 44, 65 (SPICE); NAIF DAF / SPK
+Required Reading.
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

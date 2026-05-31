@@ -122,6 +122,14 @@ Current limitation:
 
 - `L-06` still tracks higher-precision DE440 / publication-grade ephemeris
   work. Do not describe the current stack as final research-grade ephemerides.
+  A DAF/SPK Chebyshev kernel reader (`crates/astronomy/src/spk.rs`,
+  `astronomy::SpkKernel`) has shipped and is unit-tested against a synthetic,
+  spec-accurate in-memory SPK (parser, Type 2/3 evaluation, center chaining,
+  endianness). It is **not** yet validated against a real DE440 kernel or JPL
+  Horizons: no kernel is committed (multi-MB binary) and the reader does not
+  yet drive `apparent_sun/moon/planet`, so the rendered Sun/Moon/planet output
+  remains the VSOP87 / ELP2000 visual tier. The Horizons sub-arcsecond
+  cross-check is deferred with the kernel-ingest work.
 - The Galilean-moon position backend now runs on the full Lainey 2006
   L1.2 series (V-52b-E5, pivot from the originally-targeted Lieske 1998
   E5; the L1.2 IMCCE distribution is the only reachable source of an

@@ -150,9 +150,10 @@ manifest-pinned curated TLE snapshot, an `iss-pass` preset, and CLI / viewer /
 web host controls. With both shipped, every `V-51`–`V-56` item is now done.
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
-DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), variable-star
-library (`L-20`), and education / accessibility (`L-23`, `L-24`). The Python
-bindings (`L-21`) and headless server (`L-22`) have both shipped.
+DE440-class ephemerides (`L-06`: the SPK Chebyshev kernel reader has shipped;
+kernel ingest + Horizons cross-check remain), large catalog ingest (`L-17`),
+variable-star library (`L-20`), and education / accessibility (`L-23`, `L-24`).
+The Python bindings (`L-21`) and headless server (`L-22`) have both shipped.
 Observation-planning polish
 (`L-09`) has now shipped: Moon-impact and visibility scoring, recommended-
 object ranking, favourites, and iCalendar export.
@@ -236,7 +237,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-03` | Compact nutation | ✅ |
 | `L-04` | Annual aberration | ✅ |
 | `L-05` | Stellar proper motion | ✅ |
-| `L-06` | DE440 / VSOP87 ephemeris upgrade | ⬜ |
+| `L-06` | DE440 / VSOP87 ephemeris upgrade (SPK Chebyshev reader ✅; kernel ingest + Horizons cross-check ⬜) | ◑ |
 | `L-07` | Rise / transit / set tables | ✅ |
 | `L-08` | Twilight indicators | ✅ |
 | `L-09` | Observation-planning polish | ✅ |
@@ -2933,7 +2934,7 @@ vs. SIMBAD.
 
 ---
 
-### `L-06` DE440 / VSOP87 ephemeris upgrade — ⬜
+### `L-06` DE440 / VSOP87 ephemeris upgrade — ◑ (SPK Chebyshev reader shipped; kernel ingest + Horizons cross-check deferred)
 
 **Item.** Move Sun / Moon / planet states from the current VSOP87 /
 ELP2000 visual-quality models to publication-quality JPL DE440 Chebyshev
@@ -2970,6 +2971,28 @@ jplephem reference implementations).
 **Visual side-effect.** Sun / Moon / planet apparent positions used by
 `V-30`, `V-35`, `V-36`, `V-49` get a precision bump; user-visible only at
 sub-arcminute scales.
+
+**Shipped (this iteration).** A dependency-free, endianness-aware **DAF/SPK
+Chebyshev kernel reader** at `crates/astronomy/src/spk.rs`
+(`astronomy::SpkKernel`): parses the NAIF DAF file/summary records and
+evaluates SPK **Type 2** (Chebyshev position) and **Type 3** (position +
+velocity) segments, with NAIF body-id center chaining
+(`target → … → solar-system barycenter`) and a geocentric-equatorial
+reduction. This is the core of DE440 ingest and reads real JPL `de440.bsp`
+/ `de440s.bsp` kernels. It is unit-tested against a synthetic,
+spec-accurate in-memory SPK whose Chebyshev coefficients are known in
+closed form (parser, segment selection, position + velocity evaluation,
+little/big-endian, multi-segment chaining, missing-coverage errors). The
+default Sun/Moon/planet path and the WASM build keep the analytic VSOP87 /
+ELP2000 series unchanged.
+
+**Deferred (why ◑, not ✅).** Committing or fetching an actual DE440 kernel
+(a 32–110 MB binary, documented in `DATA_SOURCES.md` +
+`scripts/fetch-de440-subset.sh`) and wiring it through the apparent-place
+pipeline, plus the JPL Horizons sub-arcsecond cross-check, are not done:
+both require the external kernel and so are out of scope for the offline
+crate build. The row stays ◑ until a fetched kernel drives
+`apparent_sun/moon/planet` and the Horizons comparison is pinned.
 
 ---
 
