@@ -462,6 +462,49 @@ Current limitation:
 - Hyades (Mel 25) is deferred: no V-42 marker today, so there is
   nothing to suppress.
 
+### Aurora display (`V-48`)
+
+Current implementation (`crates/astronomy/src/aurora.rs`) includes:
+
+- `auroral_oval_boundary(kp, season)` — equatorward / poleward boundaries
+  of the auroral oval in corrected geomagnetic latitude, a Kp-anchored
+  linear fit calibrated to the Feldstein & Starkov 1967 midnight oval
+  (equatorward boundary ≈ 63° at Kp = 4);
+- `geomagnetic_latitude_deg` / `bearing_to_geomagnetic_pole_rad` — a
+  **centered-dipole** corrected geomagnetic latitude and pole bearing
+  using the IGRF-13 2020 north geomagnetic pole;
+- `emission_apparent_altitude_rad` — apparent elevation of an emitting
+  layer at a given height and ground central angle;
+- `aurora_view` — the statistically-expected apparent arc the renderer
+  paints (green O I 557.7 nm discrete arc, O I 630.0 nm red curtain above,
+  N₂ magenta border below; Chamberlain 1961 emission heights).
+
+Numeric / structural pins:
+
+- `equatorward_boundary_at_kp4_is_63_degrees` asserts the ROADMAP `V-48`
+  validation point (≈ 63° within 1°);
+- `oval_expands_equatorward_with_activity`, `geomagnetic_latitude_for_tromso_is_high`,
+  `overhead_emission_is_at_zenith`, `emission_drops_below_horizon_with_distance`,
+  `red_curtain_appears_higher_than_green_base`, `intensity_is_monotonic_and_bounded`,
+  `subauroral_observer_sees_low_arc_toward_the_pole`, and
+  `quiet_low_latitude_shows_no_aurora` pin the supporting geometry;
+- `renderer::camera` pins the uniform packing (off by default, off for an
+  external viewpoint, a real arc at Tromsø / Kp 5).
+
+Model limits (named approximations):
+
+- **Centered dipole, not full AACGM.** Corrected geomagnetic latitude uses
+  a single IGRF-13 2020 dipole, so the oval position is accurate to a
+  degree or two of corrected geomagnetic latitude — sufficient for
+  naked-eye placement and a small WASM build, replaceable with AACGM-v2
+  coefficients later.
+- **Statistical oval only.** Real-time morphology (curtains, rays,
+  substorm dynamics) is a deliberate non-goal; the renderer shows the
+  expected oval position and brightness for the supplied Kp.
+- **Single discrete arc.** The bright arc is placed at the equatorward
+  boundary with a red curtain rising poleward; the full diffuse oval band
+  is not individually resolved.
+
 ### Catalog backend scaffold
 
 Current implementation includes:

@@ -7,6 +7,7 @@
 //! - Angles internally are radians; helpers also accept degrees / hours where noted.
 
 pub mod atmosphere;
+pub mod aurora;
 pub mod corrections;
 mod ephemeris;
 pub mod galaxy;
@@ -25,6 +26,11 @@ pub mod scintillation;
 pub mod skyglow;
 mod time;
 
+pub use aurora::{
+    aurora_intensity, aurora_view, auroral_oval_boundary, bearing_to_geomagnetic_pole_rad,
+    emission_apparent_altitude_rad, geomagnetic_latitude_deg, AuroraSeason, AuroraView,
+    AURORA_GREEN_HEIGHT_KM, AURORA_N2_HEIGHT_KM, AURORA_RED_HEIGHT_KM,
+};
 pub use corrections::{
     annual_aberration, earth_velocity_over_c_j2000, edlen_refractivity_standard_air,
     equation_of_equinoxes, mean_obliquity_iau2006, nutation_iau2000b_approx,

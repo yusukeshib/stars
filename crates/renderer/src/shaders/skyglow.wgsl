@@ -143,6 +143,12 @@ struct CameraUniform {
     meteor_segments: array<vec4<f32>, 128>,
     // V-47 meteor header: [count, enabled, reserved, reserved].
     meteor_params: vec4<f32>,
+    // V-48 aurora arc geometry in the local horizontal frame:
+    // [center_azimuth_rad, center_altitude_rad, vertical_extent_rad,
+    // azimuth_half_width_rad].
+    aurora_geometry: vec4<f32>,
+    // V-48 aurora control header: [enabled, intensity, reserved, reserved].
+    aurora_params: vec4<f32>,
 };
 
 const MAX_SATELLITES: u32 = 32u;
@@ -1043,6 +1049,96 @@ fn henyey_greenstein(cos_angle: f32, g: f32) -> f32 {
     return (1.0 - gg) / max(4.0 * PI * denom, 1e-4);
 }
 
+// =====================================================================
+// V-48 aurora layer (SELF-CONTAINED — see the single insertion point in
+// `fs_main`). Paints the statistically-expected auroral-oval arc computed by
+// `astronomy::aurora` (host) and packed into `camera.aurora_geometry` /
+// `camera.aurora_params`. Vertical structure follows Chamberlain 1961:
+// O I 557.7 nm green discrete arc (~110 km) with an O I 630.0 nm red band
+// (~230 km) rising above it and a magenta N2 lower border (~95 km). Disabled
+// (params == 0) makes this a free zero per pixel.
+// =====================================================================
+
+// Peak surface brightness (V mag/arcsec^2) of each auroral component at
+// intensity == 1; fainter components have larger magnitudes. Anchored so a
+// bright (Kp ~ storm) green arc reads like a luminous twilight band.
+const AURORA_GREEN_PEAK_MAG: f32 = 7.5;
+const AURORA_RED_PEAK_MAG: f32 = 9.5;
+const AURORA_N2_PEAK_MAG: f32 = 10.5;
+
+// Linear-RGB chromaticities of the auroral emission lines.
+const AURORA_GREEN_RGB: vec3<f32> = vec3<f32>(0.10, 1.00, 0.30);
+const AURORA_RED_RGB: vec3<f32> = vec3<f32>(1.00, 0.12, 0.12);
+const AURORA_N2_RGB: vec3<f32> = vec3<f32>(0.75, 0.22, 0.95);
+
+fn aurora_gaussian(x: f32, mu: f32, sigma: f32) -> f32 {
+    let d = (x - mu) / max(sigma, 1e-4);
+    return exp(-0.5 * d * d);
+}
+
+// Aurora radiance contribution for this pixel, in the renderer's HDR units.
+fn aurora_radiance(ray_dir: vec3<f32>, zeropoint: f32, pixel_arcsec2: f32) -> vec3<f32> {
+    if camera.aurora_params.x <= 0.5 {
+        return vec3<f32>(0.0);
+    }
+    let intensity = max(camera.aurora_params.y, 0.0);
+    if intensity <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+
+    // Local horizontal direction (East, North, Up) for this pixel ray.
+    let local = (camera.eq_to_local * vec4<f32>(ray_dir, 0.0)).xyz;
+    let alt = asin(clamp(local.z, -1.0, 1.0));
+    if alt <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let az = atan2(local.x, local.y); // from North toward East
+
+    let center_az = camera.aurora_geometry.x;
+    let center_alt = camera.aurora_geometry.y;
+    let extent = max(camera.aurora_geometry.z, 1.0 * DEG_TO_RAD);
+    let half_width = max(camera.aurora_geometry.w, 1.0 * DEG_TO_RAD);
+
+    // Signed azimuth difference wrapped to [-PI, PI].
+    var daz = az - center_az;
+    daz = daz - 2.0 * PI * round(daz / (2.0 * PI));
+    if abs(daz) > half_width {
+        return vec3<f32>(0.0);
+    }
+    // Azimuth envelope: smooth cosine taper to zero at the arc ends.
+    let az_env = pow(max(cos(0.5 * PI * daz / half_width), 0.0), 1.5);
+
+    // Vertical profiles (across-arc, in apparent altitude). The green discrete
+    // arc sits at center_alt; the red band peaks `extent` higher; the magenta
+    // N2 border sits just below the green base.
+    let green_sigma = max(0.30 * extent, 1.5 * DEG_TO_RAD);
+    let red_sigma = max(0.55 * extent, 3.0 * DEG_TO_RAD);
+    let n2_sigma = max(0.18 * extent, 0.8 * DEG_TO_RAD);
+    let green_p = aurora_gaussian(alt, center_alt, green_sigma);
+    let red_p = aurora_gaussian(alt, center_alt + extent, red_sigma);
+    let n2_p = aurora_gaussian(alt, center_alt - 0.20 * extent, n2_sigma);
+
+    // Per-component surface brightness -> per-pixel flux on the renderer scale.
+    let green_flux =
+        exp(NEG_OH_FOUR_LN10 * (AURORA_GREEN_PEAK_MAG - zeropoint)) * pixel_arcsec2;
+    let red_flux = exp(NEG_OH_FOUR_LN10 * (AURORA_RED_PEAK_MAG - zeropoint)) * pixel_arcsec2;
+    let n2_flux = exp(NEG_OH_FOUR_LN10 * (AURORA_N2_PEAK_MAG - zeropoint)) * pixel_arcsec2;
+
+    var rgb = AURORA_GREEN_RGB * (green_flux * green_p);
+    rgb += AURORA_RED_RGB * (red_flux * red_p);
+    rgb += AURORA_N2_RGB * (n2_flux * n2_p);
+    rgb *= intensity * az_env;
+
+    // The emitting layer is high (>= 95 km) but the slant path near the horizon
+    // still attenuates it; reuse the scene's per-channel extinction.
+    let k_rgb = camera.extinction_k_rgb.xyz;
+    if k_rgb.x + k_rgb.y + k_rgb.z > 0.0 {
+        let x = airmass_kasten_young(max(alt, 1.0 * DEG_TO_RAD));
+        rgb *= exp(NEG_OH_FOUR_LN10 * k_rgb * x);
+    }
+    return rgb;
+}
+
 fn moonlit_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> vec3<f32> {
     if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
         return vec3<f32>(0.0);
@@ -1713,5 +1809,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let satellite_radiance_rgb = satellite_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
     // V-47 meteor-shower contribution (single insertion point).
     let meteor_radiance_rgb = meteor_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
-    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance + planet_radiance + galilean_radiance + titan_radiance + satellite_radiance_rgb + meteor_radiance_rgb, 1.0);
+    // V-48 aurora insertion point (self-contained; zero when the layer is off).
+    let aurora_radiance_rgb = aurora_radiance(ray_dir, zeropoint, pixel_arcsec2);
+    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance + planet_radiance + galilean_radiance + titan_radiance + satellite_radiance_rgb + meteor_radiance_rgb + aurora_radiance_rgb, 1.0);
 }

@@ -29,17 +29,21 @@ import {
   type ScintillationConfig,
   type Vec3,
   type View,
+  DEFAULT_AURORA_CONFIG,
+  isAuroraSeason,
+  type AuroraConfig,
 } from "./observer";
 
 // Must track `SESSION_SCHEMA_VERSION` in `crates/common/src/session.rs`.
 // v2 unified spectral extinction (V-37); v3 added `surfaceAlbedo` for the
 // Hošek-Wilkie daylight model (V-38); v4 added the `scintillation` block
 // for V-24; v6 added the `outputColourspace` field for V-50 output colour
-// management (matching the Rust host bump that also covered intermediate
-// native-only schema changes). The Rust hosts and
-// `docs/presets/sessions/*.json` all emit v6, so the web UI must accept and
-// emit v6 too or cross-host session import/export is broken.
-export const SESSION_SCHEMA_VERSION = 6;
+// management; v7 tracks the Rust host bump (V-55 satellites + V-50). The
+// V-48 `aurora` block is additive (`#[serde(default)]` on the Rust side) and
+// does not bump the version. The Rust hosts and
+// `docs/presets/sessions/*.json` all emit v7, so the web UI must accept and
+// emit v7 too or cross-host session import/export is broken.
+export const SESSION_SCHEMA_VERSION = 7;
 const APP_VERSION = "0.1.0";
 const UNIX_EPOCH_JD = 2440587.5;
 const SECONDS_PER_DAY = 86400;
@@ -69,6 +73,7 @@ export type StarSession = {
   planets: PlanetsConfig;
   satellites: SatellitesConfig;
   meteors: MeteorsConfig;
+  aurora: AuroraConfig;
   eyepiece: EyepieceConfig;
   outputColourspace: OutputColourspace;
   catalog: {
@@ -99,6 +104,7 @@ export type SessionState = {
   planets: PlanetsConfig;
   satellites: SatellitesConfig;
   meteors: MeteorsConfig;
+  aurora: AuroraConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   outputColourspace: OutputColourspace;
@@ -176,6 +182,7 @@ export function buildStarSession(state: SessionState): StarSession {
     planets: state.planets,
     satellites: state.satellites,
     meteors: state.meteors,
+    aurora: state.aurora,
     eyepiece: state.eyepiece,
     outputColourspace: state.outputColourspace,
     catalog: {
@@ -217,6 +224,7 @@ export function parseStarSessionJson(raw: string): SessionState {
   const planets = parsePlanets(s.planets);
   const satellites = parseSatellites(s.satellites);
   const meteors = parseMeteors(s.meteors);
+  const aurora = parseAurora(s.aurora);
   const projection = parseProjection(s.projection);
   const eyepiece = parseEyepiece(s.eyepiece);
   const outputColourspace = isOutputColourspace(s.outputColourspace)
@@ -232,6 +240,7 @@ export function parseStarSessionJson(raw: string): SessionState {
     planets,
     satellites,
     meteors,
+    aurora,
     projection,
     eyepiece,
     outputColourspace,
@@ -334,6 +343,19 @@ function parsePlanets(value: unknown): PlanetsConfig {
   if (!value || typeof value !== "object") return DEFAULT_PLANETS_CONFIG;
   const v = value as Partial<PlanetsConfig>;
   return typeof v.enabled === "boolean" ? { enabled: v.enabled } : DEFAULT_PLANETS_CONFIG;
+}
+
+function parseAurora(value: unknown): AuroraConfig {
+  if (!value || typeof value !== "object") return DEFAULT_AURORA_CONFIG;
+  const v = value as Partial<AuroraConfig>;
+  return {
+    enabled: typeof v.enabled === "boolean" ? v.enabled : DEFAULT_AURORA_CONFIG.enabled,
+    kp:
+      typeof v.kp === "number" && Number.isFinite(v.kp) && v.kp >= 0 && v.kp <= 9
+        ? v.kp
+        : DEFAULT_AURORA_CONFIG.kp,
+    season: isAuroraSeason(v.season) ? v.season : DEFAULT_AURORA_CONFIG.season,
+  };
 }
 
 function parseProjection(value: unknown): ProjectionConfig {

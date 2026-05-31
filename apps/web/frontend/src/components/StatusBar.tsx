@@ -3,6 +3,7 @@ import {
   ATMOSPHERE_PRESET_DEFAULTS,
   ATMOSPHERE_PRESETS,
   OPTICAL_DESIGNS,
+  AURORA_SEASONS,
   OUTPUT_COLOURSPACES,
   SKY_PROJECTIONS,
   SKY_VIEWPOINTS,
@@ -15,6 +16,7 @@ import {
   wrapAzimuth,
   type AtmosphereConfig,
   type AtmospherePreset,
+  type AuroraConfig,
   type EyepieceConfig,
   type MeteorsConfig,
   type Observer,
@@ -50,6 +52,7 @@ type Props = {
   planets: PlanetsConfig;
   satellites: SatellitesConfig;
   meteors: MeteorsConfig;
+  aurora: AuroraConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   outputColourspace: OutputColourspace;
@@ -63,6 +66,7 @@ type Props = {
   onSetPlanets: (next: PlanetsConfig) => void;
   onSetSatellites: (next: SatellitesConfig) => void;
   onSetMeteors: (next: MeteorsConfig) => void;
+  onSetAurora: (next: AuroraConfig) => void;
   onSetProjection: (next: ProjectionConfig) => void;
   onSetEyepiece: (next: EyepieceConfig) => void;
   onSetOutputColourspace: (next: OutputColourspace) => void;
@@ -159,6 +163,7 @@ export function StatusBar({
   planets,
   satellites,
   meteors,
+  aurora,
   projection,
   eyepiece,
   outputColourspace,
@@ -172,6 +177,7 @@ export function StatusBar({
   onSetPlanets,
   onSetSatellites,
   onSetMeteors,
+  onSetAurora,
   onSetProjection,
   onSetEyepiece,
   onSetOutputColourspace,
@@ -462,6 +468,7 @@ export function StatusBar({
             planets={planets}
             satellites={satellites}
             meteors={meteors}
+            aurora={aurora}
             projection={projection}
             eyepiece={eyepiece}
             outputColourspace={outputColourspace}
@@ -473,6 +480,7 @@ export function StatusBar({
             onSetPlanets={onSetPlanets}
             onSetSatellites={onSetSatellites}
             onSetMeteors={onSetMeteors}
+            onSetAurora={onSetAurora}
             onSetProjection={onSetProjection}
             onSetEyepiece={onSetEyepiece}
             onSetOutputColourspace={onSetOutputColourspace}
@@ -648,6 +656,7 @@ type SettingsPanelProps = Pick<
   | "planets"
   | "satellites"
   | "meteors"
+  | "aurora"
   | "projection"
   | "eyepiece"
   | "outputColourspace"
@@ -659,6 +668,7 @@ type SettingsPanelProps = Pick<
   | "onSetPlanets"
   | "onSetSatellites"
   | "onSetMeteors"
+  | "onSetAurora"
   | "onSetProjection"
   | "onSetEyepiece"
   | "onSetOutputColourspace"
@@ -675,6 +685,7 @@ function SettingsPanel({
   planets,
   satellites,
   meteors,
+  aurora,
   projection,
   eyepiece,
   outputColourspace,
@@ -686,6 +697,7 @@ function SettingsPanel({
   onSetPlanets,
   onSetSatellites,
   onSetMeteors,
+  onSetAurora,
   onSetProjection,
   onSetEyepiece,
   onSetOutputColourspace,
@@ -802,6 +814,59 @@ function SettingsPanel({
                 }}
                 style={{ width: "5rem", marginLeft: "0.5rem" }}
               />
+            </label>
+          </SettingCard>
+
+          <SettingCard title={t("card.aurora.title")} description={t("card.aurora.description")}>
+            <label style={checkboxRowStyle}>
+              <input
+                type="checkbox"
+                checked={aurora.enabled}
+                onChange={(e) =>
+                  onSetAurora({
+                    ...aurora,
+                    enabled: e.target.checked,
+                    // Give the toggle an immediately-visible default activity.
+                    kp: e.target.checked && aurora.kp <= 0 ? 5 : aurora.kp,
+                  })
+                }
+                style={{ accentColor: "#8fb1ff" }}
+              />
+              {t("card.view.aurora")}
+            </label>
+            <label style={checkboxRowStyle}>
+              <span>{t("card.view.auroraKp")}</span>
+              <input
+                type="number"
+                min={0}
+                max={9}
+                step={0.1}
+                value={aurora.kp}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  onSetAurora({
+                    ...aurora,
+                    kp: Number.isFinite(v) ? Math.min(9, Math.max(0, v)) : 0,
+                  });
+                }}
+                style={{ width: "5rem", marginLeft: "0.5rem" }}
+              />
+            </label>
+            <label style={checkboxRowStyle}>
+              <span>{t("card.view.auroraSeason")}</span>
+              <select
+                value={aurora.season}
+                onChange={(e) =>
+                  onSetAurora({ ...aurora, season: e.target.value as AuroraConfig["season"] })
+                }
+                style={{ marginLeft: "0.5rem" }}
+              >
+                {AURORA_SEASONS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
             </label>
           </SettingCard>
 

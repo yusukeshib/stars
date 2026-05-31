@@ -399,6 +399,17 @@ pub(crate) struct CameraUniform {
     /// counts meteors (not rows) and is `<= MAX_METEORS`; `enabled` is `1.0`
     /// when the meteor layer should render.
     pub meteor_params: [f32; 4],
+    /// V-48 aurora arc geometry in the observer's local horizontal frame:
+    /// `[center_azimuth_rad, center_altitude_rad, vertical_extent_rad,
+    /// azimuth_half_width_rad]`. The shader paints a green discrete arc at
+    /// `(center_azimuth, center_altitude)`, a red O I 630.0 nm band rising
+    /// `vertical_extent` above it, and a magenta N₂ border just below.
+    pub aurora_geometry: [f32; 4],
+    /// V-48 aurora control header: `[enabled, intensity, reserved, reserved]`.
+    /// `enabled` is `1.0` when an above-horizon arc is expected; `intensity`
+    /// in `[0, 1]` scales the emission radiance. Both `0.0` reproduces the
+    /// pre-V-48 dark-sky composition bit-for-bit.
+    pub aurora_params: [f32; 4],
 }
 
 /// Lower bound of the V-51c totality smoothstep on obscuration.
@@ -1235,6 +1246,9 @@ pub struct Camera {
     /// stays identical to the pre-V-47 pipeline; hosts opt in and the renderer
     /// draws a deterministic Poisson sample of shower + sporadic meteors.
     pub meteors: MeteorLayer,
+    /// V-48 aurora layer. Off by default so the dark-sky composition stays
+    /// identical to the pre-V-48 pipeline; hosts opt in and supply a Kp index.
+    pub aurora: AuroraLayer,
 }
 
 /// V-47 host-tier meteor-shower layer configuration carried on [`Camera`].
@@ -1264,6 +1278,32 @@ impl Default for MeteorLayer {
             seed: 1,
             rate_scale: 1.0,
             window_seconds: 120.0,
+        }
+    }
+}
+
+/// V-48 host-tier aurora-layer configuration carried on [`Camera`].
+///
+/// The renderer computes the statistically-expected auroral-oval arc for the
+/// observer's geographic position and the supplied Kp index
+/// ([`astronomy::aurora::aurora_view`]) and paints it as a green/red/magenta
+/// horizon-region emission. Real-time morphology is intentionally not modelled.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AuroraLayer {
+    /// Master on/off. Off by default.
+    pub enabled: bool,
+    /// Planetary Kp index (0..9) driving oval position and brightness.
+    pub kp: f32,
+    /// Season for the small oval shift / dark-sky visibility weight.
+    pub season: astronomy::AuroraSeason,
+}
+
+impl Default for AuroraLayer {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            kp: 0.0,
+            season: astronomy::AuroraSeason::default(),
         }
     }
 }
@@ -1303,6 +1343,7 @@ impl Camera {
             satellites: SatelliteLayer::default(),
             output_colourspace: crate::colourspace::OutputColourSpace::default(),
             meteors: MeteorLayer::default(),
+            aurora: AuroraLayer::default(),
         }
     }
 
@@ -1748,6 +1789,36 @@ impl Camera {
     /// the VSOP87 planet block this is recomputed every frame because LEO
     /// satellites sweep the sky in seconds. Returns all-zero / disabled when
     /// the layer is off, empty, or an external viewpoint is active.
+    /// V-48: compute the aurora arc geometry + control uniforms for the
+    /// observer's geographic position and the configured Kp. Returns the
+    /// disabled `[0; 4]` sentinels when the layer is off, the viewpoint is
+    /// external, or no above-horizon arc is expected, so the shader's aurora
+    /// branch is a free zero per pixel in the dark-sky default.
+    pub(crate) fn aurora_uniforms(&self) -> ([f32; 4], [f32; 4]) {
+        let disabled = ([0.0; 4], [0.0; 4]);
+        if !self.aurora.enabled || self.viewpoint.is_external() {
+            return disabled;
+        }
+        let view = astronomy::aurora_view(
+            self.observer.latitude_rad.to_degrees(),
+            self.observer.longitude_rad.to_degrees(),
+            self.aurora.kp as f64,
+            self.aurora.season,
+        );
+        if !view.visible {
+            return disabled;
+        }
+        (
+            [
+                view.center_azimuth_rad as f32,
+                view.center_altitude_rad as f32,
+                view.vertical_extent_rad as f32,
+                view.azimuth_half_width_rad as f32,
+            ],
+            [1.0, view.intensity as f32, 0.0, 0.0],
+        )
+    }
+
     pub(crate) fn satellite_uniforms(&self) -> (SatelliteUniform, SatelliteUniform, [f32; 4]) {
         let mut dir_radius = [[0.0; 4]; MAX_SATELLITES];
         let mut streak = [[0.0; 4]; MAX_SATELLITES];
@@ -1913,6 +1984,7 @@ impl Camera {
         let (satellite_dir_radius, satellite_streak, satellite_params) = self.satellite_uniforms();
         let (instrument_optics_1, instrument_optics2) = self.instrument_optics_uniforms(height);
         let (meteor_segments, meteor_params) = self.meteor_uniforms();
+        let (aurora_geometry, aurora_params) = self.aurora_uniforms();
         let observer_altitude_m = if self.atmosphere.observer_altitude_m.is_finite() {
             self.atmosphere.observer_altitude_m.max(0.0)
         } else {
@@ -2255,6 +2327,8 @@ impl Camera {
             instrument_optics2,
             meteor_segments,
             meteor_params,
+            aurora_geometry,
+            aurora_params,
         }
     }
 
@@ -2281,6 +2355,59 @@ impl Camera {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aurora_uniforms_disabled_by_default() {
+        let observer = Observer::from_degrees_with_time(
+            69.65,
+            18.96,
+            astronomy::TimeScales::from_utc_julian_date(2_461_190.912_5),
+        );
+        let cam = Camera::new(observer, LocalView::default(), 16.0 / 9.0);
+        let (geometry, params) = cam.aurora_uniforms();
+        assert_eq!(params, [0.0; 4], "aurora off by default");
+        assert_eq!(geometry, [0.0; 4]);
+    }
+
+    #[test]
+    fn aurora_uniforms_pack_visible_arc_at_tromso() {
+        let observer = Observer::from_degrees_with_time(
+            69.65,
+            18.96,
+            astronomy::TimeScales::from_utc_julian_date(2_461_190.912_5),
+        );
+        let mut cam = Camera::new(observer, LocalView::default(), 16.0 / 9.0);
+        cam.aurora = AuroraLayer {
+            enabled: true,
+            kp: 5.0,
+            season: astronomy::AuroraSeason::Equinox,
+        };
+        let (geometry, params) = cam.aurora_uniforms();
+        assert_eq!(params[0], 1.0, "layer enabled");
+        assert!(params[1] > 0.0, "non-zero intensity at Kp=5");
+        // A real arc geometry: positive vertical extent and a sane azimuth
+        // half-width.
+        assert!(geometry[2] > 0.0, "vertical extent should be positive");
+        assert!(geometry[3] > 0.0, "azimuth half-width should be positive");
+    }
+
+    #[test]
+    fn aurora_uniforms_zero_when_external_viewpoint() {
+        let observer = Observer::from_degrees_with_time(
+            69.65,
+            18.96,
+            astronomy::TimeScales::from_utc_julian_date(2_461_190.912_5),
+        );
+        let mut cam = Camera::new(observer, LocalView::default(), 16.0 / 9.0);
+        cam.aurora = AuroraLayer {
+            enabled: true,
+            kp: 7.0,
+            season: astronomy::AuroraSeason::Equinox,
+        };
+        cam.viewpoint = SkyViewpoint::GalacticNorth;
+        let (_geometry, params) = cam.aurora_uniforms();
+        assert_eq!(params, [0.0; 4], "no aurora from an external viewpoint");
+    }
 
     #[test]
     fn satellite_uniforms_pack_visible_iss() {

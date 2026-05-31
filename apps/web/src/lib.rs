@@ -17,9 +17,9 @@ use catalog::search::{
 };
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, ExternalViewpoint,
-    EyepieceSimulation, LightPollution, LocalView, MeteorLayer, OpticalDesign, OutputColourSpace,
-    OverlayConfig, OverlayKind, Renderer, SatelliteLayer, Scintillation, SkyProjection,
-    SkyViewpoint, StarInstance,
+    AuroraLayer, EyepieceSimulation, LightPollution, LocalView, MeteorLayer, OpticalDesign,
+    OutputColourSpace, OverlayConfig, OverlayKind, Renderer, SatelliteLayer, Scintillation,
+    SkyProjection, SkyViewpoint, StarInstance,
     DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 
@@ -608,6 +608,23 @@ impl StarView {
             window_seconds: window_seconds.max(0.0),
         };
     }
+
+    /// V-48: configure the aurora layer. `kp` is the planetary Kp index
+    /// (0..9); `season` is `"winter"`, `"equinox"`, or `"summer"` (anything
+    /// else falls back to equinox).
+    pub fn set_aurora(&self, enabled: bool, kp: f32, season: &str) {
+        let season = match season {
+            "winter" => astronomy::AuroraSeason::Winter,
+            "summer" => astronomy::AuroraSeason::Summer,
+            _ => astronomy::AuroraSeason::Equinox,
+        };
+        self.state.borrow_mut().camera.aurora = AuroraLayer {
+            enabled,
+            kp: if kp.is_finite() { kp.clamp(0.0, 9.0) } else { 0.0 },
+            season,
+        };
+    }
+
 
     /// Update the telescope eyepiece simulator. When enabled, the renderer
     /// overrides the perspective FoV with the true field from these optics.

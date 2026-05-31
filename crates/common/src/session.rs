@@ -12,15 +12,18 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use astronomy::TimeScales;
 use renderer::{
-    Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView,
-    MeteorLayer, OutputColourSpace, OverlayConfig, OverlayKind, SatelliteLayer, Scintillation,
-    SkyProjection, SkyViewpoint,
+    Atmosphere, AtmospherePreset, AuroraLayer, ExternalViewpoint, EyepieceSimulation,
+    LightPollution, LocalView, MeteorLayer, OutputColourSpace, OverlayConfig, OverlayKind,
+    SatelliteLayer, Scintillation, SkyProjection, SkyViewpoint,
 };
 
 use crate::curated_satellite_layer;
 use serde::{Deserialize, Serialize};
 
-use crate::{AtmospherePresetArg, OutputColourspaceArg, OverlayArg, ProjectionArg, ViewpointArg};
+use crate::{
+    AtmospherePresetArg, AuroraSeasonArg, OutputColourspaceArg, OverlayArg, ProjectionArg,
+    ViewpointArg,
+};
 
 /// Current JSON session schema. Increment when a breaking semantic change is
 /// made to any serialized field.
@@ -70,6 +73,10 @@ pub struct StarSession {
     /// needed. Appended at the END of the struct.
     #[serde(default, skip_serializing_if = "SessionMeteors::is_default")]
     pub meteors: SessionMeteors,
+    /// V-48 aurora layer. `#[serde(default)]` (disabled) so the field is
+    /// additive and does not require a schema bump.
+    #[serde(default)]
+    pub aurora: SessionAurora,
 }
 
 /// Native rendering-ready scene derived from a [`StarSession`].
@@ -98,6 +105,53 @@ pub struct SessionScene {
     pub output_colourspace: OutputColourSpace,
     /// V-47 meteor-shower layer (engine-ready).
     pub meteors: MeteorLayer,
+    /// V-48 aurora layer (engine-ready).
+    pub aurora: AuroraLayer,
+}
+
+/// Serialized V-48 aurora-layer settings.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionAurora {
+    pub enabled: bool,
+    /// Planetary Kp index (0..9).
+    pub kp: f32,
+    pub season: AuroraSeasonArg,
+}
+
+impl Default for SessionAurora {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            kp: 0.0,
+            season: AuroraSeasonArg::default(),
+        }
+    }
+}
+
+impl From<&AuroraLayer> for SessionAurora {
+    fn from(layer: &AuroraLayer) -> Self {
+        Self {
+            enabled: layer.enabled,
+            kp: layer.kp,
+            season: layer.season.into(),
+        }
+    }
+}
+
+impl SessionAurora {
+    /// Build an engine-ready [`AuroraLayer`], clamping Kp to `[0, 9]`.
+    pub fn to_aurora_layer(self) -> AuroraLayer {
+        AuroraLayer {
+            enabled: self.enabled,
+            kp: if self.kp.is_finite() {
+                self.kp.clamp(0.0, 9.0)
+            } else {
+                0.0
+            },
+            season: self.season.into(),
+        }
+    }
 }
 
 /// Serialized V-55 satellite-layer settings. The TLE set itself is *not*
@@ -519,6 +573,7 @@ impl StarSession {
             corrections: scene.corrections,
             output_colourspace: OutputColourspaceArg::from(scene.output_colourspace),
             meteors: SessionMeteors::from(&scene.meteors),
+            aurora: SessionAurora::from(&scene.aurora),
         }
     }
 
@@ -606,6 +661,7 @@ impl StarSession {
             corrections: self.corrections,
             output_colourspace: self.output_colourspace.into(),
             meteors: self.meteors.to_meteor_layer(),
+            aurora: self.aurora.to_aurora_layer(),
         })
     }
 }
@@ -981,6 +1037,11 @@ mod tests {
                 rate_scale: 2.0,
                 window_seconds: 300.0,
             },
+            aurora: AuroraLayer {
+                enabled: true,
+                kp: 5.0,
+                season: astronomy::AuroraSeason::Winter,
+            },
         }
     }
 
@@ -1012,6 +1073,25 @@ mod tests {
         assert_eq!(restored.viewpoint, scene.viewpoint);
         assert_eq!(restored.eyepiece, scene.eyepiece);
         assert_eq!(restored.scintillation, scene.scintillation);
+        assert_eq!(restored.aurora, scene.aurora);
+    }
+
+    #[test]
+    fn aurora_session_round_trips_and_defaults_when_absent() {
+        // Round-trip the aurora block through JSON.
+        let scene = sample_scene();
+        let session = StarSession::from_scene("0.1.0", "test", &scene);
+        let json = serde_json::to_string(&session).unwrap();
+        assert!(json.contains("\"aurora\""));
+        let parsed: StarSession = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.to_scene().unwrap().aurora, scene.aurora);
+
+        // A session written before V-48 (no `aurora` key) still deserializes,
+        // defaulting the layer to disabled (additive, no schema bump).
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        value.as_object_mut().unwrap().remove("aurora");
+        let legacy: StarSession = serde_json::from_value(value).unwrap();
+        assert_eq!(legacy.to_scene().unwrap().aurora, AuroraLayer::default());
     }
 
     #[test]

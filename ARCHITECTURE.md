@@ -80,6 +80,14 @@ Owns scientific and geometric models:
   `dust_extinction_az(distance, l, b)` screen, in galactocentric IAU parsecs.
   These are the reference for the external-viewpoint shader, whose WGSL
   constants mirror this module value-for-value (pinned by the `galaxy` tests);
+- the V-48 aurora model (`aurora.rs`): the Feldstein-Starkov 1967 auroral-
+  oval boundary as a function of Kp, centered-dipole corrected geomagnetic
+  latitude / pole bearing (IGRF-13 2020 pole), the apparent elevation of an
+  elevated emitting layer, and the statistically-expected apparent arc
+  (`aurora_view`) the renderer paints. The renderer carries an `AuroraLayer`
+  and packs `aurora_geometry` / `aurora_params` rows appended at the end of
+  `CameraUniform`; `shaders/skyglow.wgsl::aurora_radiance` composites the
+  green / red / magenta emission near the horizon;
 - planning helpers such as rise / transit / set, twilight bands, and the
   `L-09` observation-planning layer: Krisciunas-Schaefer 1991 Moon-impact
   (`moon_impact`), visibility scoring (`visibility_score`), recommended-

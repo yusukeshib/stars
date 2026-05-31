@@ -14,6 +14,7 @@ declare module "stars-web" {
     set_planets_enabled(enabled: boolean): void;
     set_satellites(enabled: boolean, exposureSeconds: number): void;
     set_meteors(enabled: boolean, seed: number, rateScale: number, windowSeconds: number): void;
+    set_aurora(enabled: boolean, kp: number, season: string): void;
     set_eyepiece_simulation(
       enabled: boolean,
       apertureMm: number,

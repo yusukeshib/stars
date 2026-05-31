@@ -218,6 +218,59 @@ impl From<OutputColourSpace> for OutputColourspaceArg {
     }
 }
 
+/// CLI / session mirror of [`astronomy::AuroraSeason`] for `clap` parsing and
+/// serde (V-48). Kept here so the engine crate stays free of `clap` / `serde`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AuroraSeasonArg {
+    Winter,
+    #[default]
+    Equinox,
+    Summer,
+}
+
+impl From<AuroraSeasonArg> for astronomy::AuroraSeason {
+    fn from(s: AuroraSeasonArg) -> Self {
+        match s {
+            AuroraSeasonArg::Winter => astronomy::AuroraSeason::Winter,
+            AuroraSeasonArg::Equinox => astronomy::AuroraSeason::Equinox,
+            AuroraSeasonArg::Summer => astronomy::AuroraSeason::Summer,
+        }
+    }
+}
+
+impl From<astronomy::AuroraSeason> for AuroraSeasonArg {
+    fn from(s: astronomy::AuroraSeason) -> Self {
+        match s {
+            astronomy::AuroraSeason::Winter => AuroraSeasonArg::Winter,
+            astronomy::AuroraSeason::Equinox => AuroraSeasonArg::Equinox,
+            astronomy::AuroraSeason::Summer => AuroraSeasonArg::Summer,
+        }
+    }
+}
+
+/// V-48 aurora overrides applied on top of a session/preset scene by the
+/// native hosts.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AuroraOverrides {
+    pub kp: Option<f32>,
+    pub season: Option<AuroraSeasonArg>,
+}
+
+/// Build a renderer [`AuroraLayer`] from native-host CLI values. `enabled`
+/// gates the layer; `kp` is clamped to `[0, 9]`.
+pub fn aurora_from_args(enabled: bool, kp: f32, season: AuroraSeasonArg) -> renderer::AuroraLayer {
+    renderer::AuroraLayer {
+        enabled,
+        kp: if kp.is_finite() {
+            kp.clamp(0.0, 9.0)
+        } else {
+            0.0
+        },
+        season: season.into(),
+    }
+}
+
 /// Build a renderer overlay configuration from native-host CLI values.
 ///
 /// Keeping this here prevents `stars-cli` and `stars-viewer` from drifting on

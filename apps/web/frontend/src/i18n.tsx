@@ -133,6 +133,11 @@ const en: Dictionary = {
   "card.view.meteors": "Meteor showers (V-47)",
   "card.view.meteorSeed": "Meteor seed",
   "card.view.meteorRateScale": "Meteor rate scale",
+  "card.aurora.title": "Aurora",
+  "card.aurora.description": "Statistically-expected auroral oval for a Kp index (V-48).",
+  "card.view.aurora": "Aurora display",
+  "card.view.auroraKp": "Geomagnetic Kp (0–9)",
+  "card.view.auroraSeason": "Season",
   "card.view.viewpoint": "Viewpoint",
   "card.view.screenProjection": "Screen projection",
   "card.view.helper":
@@ -362,6 +367,11 @@ const ja: Dictionary = {
   "card.view.meteors": "流星群（V-47）",
   "card.view.meteorSeed": "流星シード",
   "card.view.meteorRateScale": "流星レート倍率",
+  "card.aurora.title": "オーロラ",
+  "card.aurora.description": "Kp 指数から統計的に期待されるオーロラオーバル（V-48）。",
+  "card.view.aurora": "オーロラ表示",
+  "card.view.auroraKp": "地磁気 Kp（0〜9）",
+  "card.view.auroraSeason": "季節",
   "card.view.viewpoint": "視点",
   "card.view.screenProjection": "画面投影",
   "card.view.helper":
