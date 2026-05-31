@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { StarView } from "stars-web";
+import { useT } from "../i18n";
 import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type AuroraConfig, type CometsConfig, type EyepieceConfig, type MeteorsConfig, type Observer, type OutputColourspace, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type RecommendedPlan, type SatellitesConfig, type ScintillationConfig, type View } from "../observer";
 
 type Props = {
@@ -68,6 +69,7 @@ export function StarCanvas({
   onRecommended,
   onSearchReady,
 }: Props) {
+  const t = useT();
   const onSearchReadyRef = useRef(onSearchReady);
   onSearchReadyRef.current = onSearchReady;
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -329,10 +331,51 @@ export function StarCanvas({
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  // L-24 keyboard operability (WCAG 2.1.1): the canvas is focusable and the
+  // arrow keys pan / +- zoom, mirroring the pointer drag + wheel handlers so
+  // the sky is fully navigable without a mouse. Steps scale with the current
+  // field of view (Shift = a coarser step); the keys we consume are
+  // preventDefault-ed so the page does not scroll underneath.
+  const onKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    const fov = view.fovDeg;
+    const panStep = (e.shiftKey ? fov / 4 : fov / 15) || 1;
+    const zoomIn = e.shiftKey ? 0.8 : 0.9;
+    switch (e.key) {
+      case "ArrowLeft":
+        onDrag(-panStep, 0);
+        break;
+      case "ArrowRight":
+        onDrag(panStep, 0);
+        break;
+      case "ArrowUp":
+        onDrag(0, panStep);
+        break;
+      case "ArrowDown":
+        onDrag(0, -panStep);
+        break;
+      case "+":
+      case "=":
+        onWheel(zoomIn);
+        break;
+      case "-":
+      case "_":
+        onWheel(1 / zoomIn);
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+  };
+
   return (
     <canvas
       id="star-canvas"
       ref={canvasRef}
+      tabIndex={0}
+      role="application"
+      aria-label={t("a11y.canvas.label")}
+      aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Plus Minus"
+      onKeyDown={onKeyDown}
       style={{
         width: "100%",
         height: "100%",

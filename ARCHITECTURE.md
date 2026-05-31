@@ -215,7 +215,14 @@ Hosts own platform lifecycle:
   WASM binding and the native hosts share one source of truth, re-exported
   on the `stars_host_common` path for CLI / viewer. These are inert
   strings — no host or the renderer ever calls the network, keeping
-  deterministic renders offline.
+  deterministic renders offline. The `L-24` accessibility layer is part of
+  this host only: global a11y CSS in `index.html` (`:focus-visible`,
+  `.sr-only`, reduced-motion / forced-colors), a keyboard-operable
+  `StarCanvas` (arrow-key pan, `+`/`-` zoom), modal focus management +
+  focus trap on the popovers, and the WAI-ARIA tabs pattern on the settings
+  panel. It is attribute-level only — no session-schema or renderer change —
+  so the renderer CVD-safe overlay palette and audio cues remain `L-24`
+  follow-ups.
 
 ### `bindings/python` (L-21, read-only)
 

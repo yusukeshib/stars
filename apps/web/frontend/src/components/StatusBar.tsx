@@ -634,10 +634,57 @@ function PopoverPanel({
   fillViewport?: boolean;
 }) {
   const t = useT();
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // L-24 focus management (WCAG 2.4.3 Focus Order / 2.1.2 No Keyboard Trap):
+  // the popover is modal over a backdrop, so move focus into it on open,
+  // keep Tab cycling inside it, and restore focus to the trigger on close.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const panel = panelRef.current;
+    const focusables = (): HTMLElement[] =>
+      panel
+        ? Array.from(
+            panel.querySelectorAll<HTMLElement>(
+              'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+            ),
+          ).filter((el) => !el.hasAttribute("disabled"))
+        : [];
+    (focusables()[0] ?? panel)?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || !panel) return;
+      const items = focusables();
+      if (items.length === 0) {
+        event.preventDefault();
+        panel.focus();
+        return;
+      }
+      const firstEl = items[0];
+      const lastEl = items[items.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === firstEl || active === panel)) {
+        event.preventDefault();
+        lastEl.focus();
+      } else if (!event.shiftKey && active === lastEl) {
+        event.preventDefault();
+        firstEl.focus();
+      }
+    };
+    panel?.addEventListener("keydown", onKeyDown);
+    return () => {
+      panel?.removeEventListener("keydown", onKeyDown);
+      previouslyFocused?.focus?.();
+    };
+  }, []);
+
   return (
     <div
+      ref={panelRef}
       role="dialog"
+      aria-modal="true"
       aria-label={t("popover.dialogLabel", { title })}
+      tabIndex={-1}
       style={fillViewport ? popoverFillViewportStyle : popoverStyle}
     >
       <header style={popoverHeaderStyle}>
@@ -718,6 +765,30 @@ function SettingsPanel({
   const t = useT();
   const [tab, setTab] = useState<SettingsTab>("sky");
   const sessionFileRef = useRef<HTMLInputElement>(null);
+  const tabListRef = useRef<HTMLDivElement>(null);
+
+  // L-24 tablist keyboard pattern (WAI-ARIA APG): Left/Right (and Home/End)
+  // move the selection and roving focus between tabs; Tab then jumps straight
+  // to the panel because non-selected tabs are removed from the tab order.
+  const onTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    const current = SETTINGS_TABS.indexOf(tab);
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (current + 1) % SETTINGS_TABS.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = (current - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = SETTINGS_TABS.length - 1;
+    }
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextTab = SETTINGS_TABS[nextIndex];
+    setTab(nextTab);
+    const buttons = tabListRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+    buttons?.[nextIndex]?.focus();
+  };
   const setAtmospherePreset = (preset: AtmospherePreset) => {
     onSetAtmosphere({
       ...atmosphere,
@@ -728,20 +799,38 @@ function SettingsPanel({
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      <div role="tablist" aria-label={t("settings.tabsLabel")} style={settingsTabBarStyle}>
+      <div
+        ref={tabListRef}
+        role="tablist"
+        aria-label={t("settings.tabsLabel")}
+        style={settingsTabBarStyle}
+      >
         {SETTINGS_TABS.map((id) => (
           <button
             key={id}
+            id={`settings-tab-${id}`}
             role="tab"
             aria-selected={tab === id}
+            aria-controls={`settings-tabpanel-${id}`}
+            tabIndex={tab === id ? 0 : -1}
             type="button"
             onClick={() => setTab(id)}
+            onKeyDown={onTabKeyDown}
             style={settingsTabButtonStyle(tab === id)}
           >
             {t(`settings.tab.${id}`)}
           </button>
         ))}
       </div>
+
+      <div
+        role="tabpanel"
+        id={`settings-tabpanel-${tab}`}
+        aria-labelledby={`settings-tab-${tab}`}
+        aria-label={t("a11y.settings.tabpanel", { tab: t(`settings.tab.${tab}`) })}
+        tabIndex={0}
+        style={{ display: "grid", gap: 14 }}
+      >
 
       {tab === "sky" && (
         <>
@@ -1298,6 +1387,7 @@ function SettingsPanel({
           <p style={{ ...helperTextStyle, marginTop: 10 }}>{t("card.session.helper")}</p>
         </SettingCard>
       )}
+      </div>
     </div>
   );
 }
