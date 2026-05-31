@@ -1,4 +1,4 @@
-.PHONY: cli viewer server dev web web-build web-install web-dev frontend-check setup scene-presets validation-gallery validation-gallery-check demo-gallery demo-gallery-check notebook-check manifest-check pyo3-check fmt clippy test ci clean
+.PHONY: cli viewer server dev web web-build web-install web-dev frontend-check frontend-a11y setup scene-presets validation-gallery validation-gallery-check demo-gallery demo-gallery-check notebook-check manifest-check pyo3-check fmt clippy test ci clean
 
 # PNG-output CLI (override ARGS, e.g. `make cli ARGS="--lat 35.68 --lng 139.69 -o /tmp/sky.png"`).
 ARGS ?= --lat 35.68 --lng 139.69 --azimuth 180 --altitude 30 -o stars.png
@@ -32,6 +32,13 @@ web-dev:
 frontend-check:
 	cd apps/web/frontend && bun install --frozen-lockfile
 	cd apps/web/frontend && bun run tsc --noEmit
+
+# L-24 automated accessibility gate: mount the interactive frontend components
+# in jsdom and run axe-core (WCAG 2.2 A/AA) against the rendered DOM. Assumes
+# `frontend-check` (or another `bun install`) has populated node_modules.
+frontend-a11y:
+	cd apps/web/frontend && bun install --frozen-lockfile
+	cd apps/web/frontend && bun run test
 
 # Download star catalog
 setup: web-build web-install
@@ -91,6 +98,7 @@ ci: fmt
 	$(MAKE) notebook-check
 	cargo check -p stars-web --target wasm32-unknown-unknown --manifest-path apps/web/Cargo.toml
 	$(MAKE) frontend-check
+	$(MAKE) frontend-a11y
 	$(MAKE) pyo3-check
 
 # Clean

@@ -174,9 +174,10 @@ export. Guided education mode (`L-23`) has now shipped: a deterministic,
 cross-host "first night" guided tour. The `L-24` accessibility pass is now
 complete: the web WCAG core (keyboard, ARIA, focus management, visible focus),
 the renderer CVD-safe overlay palette (Okabe-Ito / Wong 2011, selectable in
-CLI / viewer / web), and the opt-in Az/Alt Web Audio cue have all shipped;
-only the automated axe-core CI gate remains, blocked on a frontend JS test
-harness.
+CLI / viewer / web), the opt-in Az/Alt Web Audio cue, and the automated
+axe-core CI gate (a vitest + jsdom + axe-core harness over the interactive
+frontend components, wired into the `frontend` CI job and `make ci`) have all
+shipped.
 
 A row is `✅ done` only when the model named in its references is implemented,
 documented, tested, and wired into all relevant hosts.
@@ -275,7 +276,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-21` | Python bindings (PyO3) | ✅ |
 | `L-22` | Headless server mode | ✅ |
 | `L-23` | Guided education mode | ✅ |
-| `L-24` | Accessibility pass (web WCAG core + CVD overlay palette + Az/Alt audio cues ✅; automated axe-core CI gate ⬜) | ✅ |
+| `L-24` | Accessibility pass (web WCAG core + CVD overlay palette + Az/Alt audio cues + automated axe-core CI gate ✅) | ✅ |
 | `L-25` | `CITATION.cff` + Zenodo DOI | ✅ |
 | `L-26` | Standards-compliance document | ✅ |
 | `L-27` | Validation / demo gallery | ✅ |
@@ -3398,10 +3399,10 @@ services for stellar metadata; their query URL formats are documented
 - `stars_host_common::goto` (3 tests): a named star resolves to a HIP
   `sim-id` link, a Messier object resolves to a designation `sim-id`
   link, and solar-system bodies expose no CDS links.
-- Frontend: the web project ships no JS test harness, so the link
-  rendering is covered by the Rust JSON-emission tests plus the `tsc`
-  type-check in `make ci`; a `vitest` browser test is deferred with the
-  rest of the frontend test-infra work.
+- Frontend: the link rendering is covered by the Rust JSON-emission tests
+  plus the `tsc` type-check in `make ci`. The frontend now also has a
+  `vitest` + jsdom harness (added for the `L-24` axe-core gate); a
+  dedicated component test for the deep-link UI is an optional follow-up.
 
 **Hosts wired.** Web (info panel links). CLI / viewer expose the URLs in
 the GoTo metadata output.
@@ -3629,7 +3630,7 @@ as follow-ups; the schema is additive so neither needs a session-schema bump.
 
 ---
 
-### `L-24` Accessibility pass — ✅ done (automated axe-core CI gate deferred)
+### `L-24` Accessibility pass — ✅ done
 
 **Item.** ARIA labels on every web control, keyboard navigation,
 high-contrast / colour-vision-safe modes, screen-reader summaries, and
@@ -3665,8 +3666,18 @@ The two deferred follow-ups have now landed:
   panning is audible for low-vision users. Default off; a device
   preference (not in the session schema), with an ARIA-labelled toggle.
 
-**Still open (tracked):** an automated axe-core / Lighthouse score gate in
-CI, which waits on the frontend gaining a JS test harness.
+**Now shipped:** an automated axe-core accessibility gate in CI. The web
+frontend gained a JS test harness (vitest + jsdom + `@testing-library/react`),
+and `apps/web/frontend/src/__tests__/a11y.test.tsx` mounts the interactive
+presentational components (overlay settings card, guided-tour launcher, and
+active tour step) and runs axe-core over the WCAG 2.2 A/AA rule tags, failing
+on any violation. The gate runs via `bun run test` in the `frontend` CI job and
+the `frontend-a11y` Makefile target (part of `make ci`). Two rule families are
+disabled under jsdom and documented in the test: `color-contrast` (jsdom does
+no layout/paint, so contrast is unmeasurable — still covered by the manual
+contrast pass and a future Playwright/Lighthouse audit) and `region` /
+landmark structure (page-level checks that do not apply to isolated component
+fragments).
 
 **Scientific basis.** WCAG 2.2 AA. Colour-blind safe palettes following
 Wong 2011, Nature Methods 8, 441.
@@ -3692,8 +3703,14 @@ Wong 2011, Nature Methods 8, 441.
   palette dropdown + audio toggle.
 - Manual screen-reader + keyboard pass on the gear menu, tour mode, and the
   audio cue while panning.
-- Deferred: automated Lighthouse / axe-core score gate (needs a frontend JS
-  test harness).
+- Automated axe-core gate (shipped): `apps/web/frontend/src/__tests__/a11y.test.tsx`
+  mounts the overlay settings card and the guided-tour panel (launch + active
+  step) and runs axe-core over the WCAG 2.2 A/AA tags with zero violations.
+  Runs as `bun run test` in the `frontend` CI job / the `frontend-a11y` Make
+  target. `color-contrast` and page-level `region`/landmark rules are disabled
+  under jsdom (layout/paint and whole-page landmark structure are not
+  evaluable for an isolated component in jsdom); a real-browser Lighthouse
+  contrast audit remains an optional future layer.
 
 **Hosts wired.** CVD palette: CLI / viewer / web. Audio cue: web (the
 low-vision sonification target); CLI / viewer are non-visual already.

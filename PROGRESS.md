@@ -3713,7 +3713,7 @@ reproducible scenes rather than ad-hoc panning.
    both files.
 7. **Hosts wired.** CLI, viewer, web.
 
-## `L-24` Accessibility pass — ✅ (web WCAG core + CVD overlay palette + Az/Alt audio cue; axe-core CI gate deferred)
+## `L-24` Accessibility pass — ✅ (web WCAG core + CVD overlay palette + Az/Alt audio cue + axe-core CI gate; gate landed in the follow-up below)
 
 The web frontend now meets the WCAG 2.2 AA core that the `V-05` HUD note
 deferred here. No session-schema change and no new feature component — the
@@ -3758,9 +3758,9 @@ components, so it stays separable from the parallel `L-23` education work.
 
 ### `L-24` follow-up — CVD-safe overlay palette + Az/Alt audio cues (flips L-24 to ✅)
 
-The two deferred sub-items have now shipped, so the row is `✅` (only the
-automated axe-core CI gate stays deferred, since the frontend still has no JS
-test harness).
+The two deferred sub-items have now shipped, so the row is `✅`. (The
+automated axe-core CI gate, the last deferred sub-item, then landed too — see
+the "automated axe-core CI gate" follow-up below.)
 
 1. **CVD-safe overlay palette.** `renderer::OverlayPalette`
    (`Default` / `ColorblindSafe` / `HighContrast`) on `OverlayConfig::palette`.
@@ -3800,6 +3800,42 @@ test harness).
    green.
 6. **Reference.** Wong, B. 2011, Nature Methods 8, 441 (= Okabe & Ito 2008
    colour-universal design palette); W3C WCAG 2.2; WAI-ARIA APG.
+
+### `L-24` follow-up — automated axe-core CI gate (closes the last deferred sub-item)
+
+The one remaining deferred sub-item — an automated axe-core / Lighthouse
+accessibility gate, blocked on the frontend lacking a JS test harness — has
+now shipped, so `L-24` is fully closed.
+
+1. **JS test harness.** Added `vitest` + `jsdom` + `@testing-library/react` to
+   `apps/web/frontend` (devDependencies + regenerated `bun.lock`), with a
+   dedicated `vitest.config.ts` (jsdom environment, React plugin only — it
+   deliberately omits the `vite-plugin-wasm` / `stars-web` alias from the app
+   build so the tests need no `wasm-pack` artifact) and a `src/test/setup.ts`
+   that unmounts React trees between tests. New npm scripts: `test`
+   (`vitest run`) and `test:a11y`.
+2. **The gate.** `apps/web/frontend/src/__tests__/a11y.test.tsx` mounts the
+   interactive presentational components — the overlay settings card
+   (`OverlayToggles`: checkboxes, sliders, the palette `<select>`) and the
+   guided-tour panel (`TourPanel`, both the launch button and the active
+   stepper) inside the real `I18nProvider` — and runs `axe-core` over the
+   `wcag2a`/`wcag2aa`/`wcag21a`/`wcag21aa`/`wcag22aa` rule tags, failing on any
+   violation. All three scans pass with zero violations; no real a11y defect
+   was surfaced (the existing components were already ARIA/label-correct).
+3. **Documented jsdom exclusions.** Two rule families are disabled and
+   justified inline: `color-contrast` (jsdom does no layout/paint, so contrast
+   ratios are unmeasurable — still covered by the manual contrast pass and a
+   possible future real-browser Lighthouse audit) and `region` (whole-page
+   landmark structure does not apply to an isolated component fragment).
+4. **Where it lives.** `apps/web/frontend/package.json` + `bun.lock`,
+   `apps/web/frontend/vitest.config.ts`, `apps/web/frontend/src/test/setup.ts`,
+   `apps/web/frontend/src/__tests__/a11y.test.tsx`; wired into CI via the
+   `frontend-a11y` Makefile target (added to the `ci` target) and a
+   `bun run test` step in the `frontend` job of `.github/workflows/ci.yml`.
+5. **Tests / validation.** `bun run test` (3 axe scans, green),
+   `bun run tsc --noEmit` still green over the new test files, and
+   `bun install --frozen-lockfile` verifies the regenerated lockfile.
+6. **Reference.** W3C WCAG 2.2; Deque axe-core rule set.
 
 ## `L-18` Identifier preservation through the renderer — ✅ (round-trip + CLI/web primary-ID; canvas pick added in the follow-up below)
 
