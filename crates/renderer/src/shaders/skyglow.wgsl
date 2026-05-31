@@ -1380,43 +1380,161 @@ fn external_world_ray_from_ndc(ndc: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(normalize(far - near), 1.0);
 }
 
-fn spiral_arm_modulation(phi: f32, r_kpc: f32) -> f32 {
-    // Log-spiral arms as a deliberately compact visual context model. It is
-    // not a star-count catalogue; it gives the external Phase-4 view enough
-    // Milky-Way-disc structure to orient the local HYG stars.
-    let pitch = 0.32;
-    let arm_phase = phi - log(max(r_kpc, 0.2)) / pitch;
-    let four_arms = 0.5 + 0.5 * cos(4.0 * arm_phase);
-    return 0.65 + 0.35 * pow(max(four_arms, 0.0), 8.0);
+// ===========================================================================
+// V-46 Galactic structural model (Drimmel & Spergel 2001 + Reid 2019 arms).
+//
+// These constants and the density/dust functions below mirror, value for
+// value, `crates/astronomy/src/galaxy.rs`; the pinned tests in that module
+// guard against drift. All positions are galactocentric IAU-galactic parsecs
+// (world origin = Galactic Centre, +z toward the NGP, Sun on +x at R_SUN).
+// ===========================================================================
+const GAL_R_SUN_PC: f32 = 8122.0;
+const GAL_Z_SUN_PC: f32 = 20.8;
+const GAL_THIN_RHO0: f32 = 1.243;
+const GAL_THIN_H_R_PC: f32 = 2600.0;
+const GAL_THIN_H_Z_PC: f32 = 300.0;
+const GAL_THICK_RHO0: f32 = 0.039;
+const GAL_THICK_H_R_PC: f32 = 3600.0;
+const GAL_THICK_H_Z_PC: f32 = 900.0;
+const GAL_BAR_RHO0: f32 = 95.0;
+const GAL_BAR_A_PC: f32 = 1700.0;
+const GAL_BAR_B_PC: f32 = 700.0;
+const GAL_BAR_C_PC: f32 = 500.0;
+const GAL_BAR_ANGLE_RAD: f32 = 0.4712;
+const GAL_BAR_R_TRUNC_PC: f32 = 3500.0;
+const GAL_ARM_WIDTH_PC: f32 = 350.0;
+const GAL_ARM_AMPLITUDE: f32 = 0.9;
+const GAL_DUST_K0_MAG_PER_PC: f32 = 0.0011;
+const GAL_DUST_H_R_PC: f32 = 3000.0;
+const GAL_DUST_H_Z_PC: f32 = 120.0;
+
+// Reid 2019 arm ridge anchors: (r_ref_pc, phi_ref_rad, pitch_rad) per arm,
+// matching `astronomy::galaxy::SPIRAL_ARMS`.
+const GAL_ARM0: vec3<f32> = vec3<f32>(5100.0, 0.4712, 0.2112); // Scutum-Centaurus
+const GAL_ARM1: vec3<f32> = vec3<f32>(6600.0, -0.4014, 0.2234); // Sagittarius-Carina
+const GAL_ARM2: vec3<f32> = vec3<f32>(8200.0, 0.0873, 0.1763); // Local
+const GAL_ARM3: vec3<f32> = vec3<f32>(9900.0, 0.5236, 0.1728); // Perseus
+
+fn gal_sech2(x: f32) -> f32 {
+    let c = cosh(x);
+    return 1.0 / (c * c);
 }
 
+fn gal_arm_term(arm: vec3<f32>, phi: f32, r: f32) -> f32 {
+    // Nearest winding +/- one turn so the spiral matches over the full disc.
+    var best = 0.0;
+    let tanp = tan(arm.z);
+    for (var turn = -1; turn <= 1; turn = turn + 1) {
+        let dphi = phi - arm.y + f32(turn) * 6.2831853;
+        let r_arm = arm.x * exp(-dphi * tanp);
+        if r_arm < 1000.0 || r_arm > 20000.0 {
+            continue;
+        }
+        let d = abs(r - r_arm);
+        let g = GAL_ARM_AMPLITUDE * exp(-(d * d) / (2.0 * GAL_ARM_WIDTH_PC * GAL_ARM_WIDTH_PC));
+        best = max(best, g);
+    }
+    return best;
+}
+
+fn gal_spiral_enhancement(x: f32, y: f32) -> f32 {
+    let r = sqrt(x * x + y * y);
+    if r < 1000.0 {
+        return 0.0;
+    }
+    let phi = atan2(y, x);
+    var best = 0.0;
+    best = max(best, gal_arm_term(GAL_ARM0, phi, r));
+    best = max(best, gal_arm_term(GAL_ARM1, phi, r));
+    best = max(best, gal_arm_term(GAL_ARM2, phi, r));
+    best = max(best, gal_arm_term(GAL_ARM3, phi, r));
+    return best;
+}
+
+fn gal_bar_density(x: f32, y: f32, z: f32) -> f32 {
+    let r = sqrt(x * x + y * y);
+    if r > GAL_BAR_R_TRUNC_PC {
+        return 0.0;
+    }
+    let s = sin(GAL_BAR_ANGLE_RAD);
+    let c = cos(GAL_BAR_ANGLE_RAD);
+    let xb = x * c + y * s;
+    let yb = -x * s + y * c;
+    let m = (xb / GAL_BAR_A_PC) * (xb / GAL_BAR_A_PC)
+        + (yb / GAL_BAR_B_PC) * (yb / GAL_BAR_B_PC)
+        + (z / GAL_BAR_C_PC) * (z / GAL_BAR_C_PC);
+    return GAL_BAR_RHO0 * exp(-sqrt(m));
+}
+
+// Stellar mass density (M_sun/pc^3); mirrors
+// `astronomy::galaxy::milky_way_luminosity_density`.
+fn gal_density(x: f32, y: f32, z: f32) -> f32 {
+    let r = sqrt(x * x + y * y);
+    let thin_smooth = GAL_THIN_RHO0 * exp(-r / GAL_THIN_H_R_PC) * gal_sech2(z / (2.0 * GAL_THIN_H_Z_PC));
+    let thin = thin_smooth * (1.0 + gal_spiral_enhancement(x, y));
+    let thick = GAL_THICK_RHO0 * exp(-r / GAL_THICK_H_R_PC) * exp(-abs(z) / GAL_THICK_H_Z_PC);
+    return thin + thick + gal_bar_density(x, y, z);
+}
+
+// Local dust volume density (double-exponential, normalised to 1 at the
+// solar midplane); the renderer uses it as a volumetric opacity to carve the
+// dark dust lanes that `astronomy::galaxy::dust_extinction_az` integrates.
+fn gal_dust_density(x: f32, y: f32, z: f32) -> f32 {
+    let r = sqrt(x * x + y * y);
+    return exp(-(r - GAL_R_SUN_PC) / GAL_DUST_H_R_PC) * exp(-abs(z) / GAL_DUST_H_Z_PC);
+}
+
+// V-46 external Milky Way map: emission-absorption ray-march of the
+// multi-component stellar density attenuated by the dust disk, replacing the
+// old single-plane analytic disc. Self-contained so it can be dropped in /
+// merged without touching the surrounding sky-dome path.
 fn external_galaxy_disc_radiance(ndc: vec2<f32>, zeropoint: f32) -> vec4<f32> {
     let origin = camera.viewpoint_params.yzw;
     let ray = external_world_ray_from_ndc(ndc).xyz;
-    if abs(ray.z) < 1e-5 {
+
+    // March only through the dusty/luminous slab around the midplane.
+    let z_max = 3000.0;
+    let max_len = 70000.0;
+    var t_near = 0.0;
+    var t_far = max_len;
+    if abs(ray.z) > 1e-5 {
+        let ta = (-z_max - origin.z) / ray.z;
+        let tb = (z_max - origin.z) / ray.z;
+        t_near = max(0.0, min(ta, tb));
+        t_far = min(max_len, max(ta, tb));
+    } else if abs(origin.z) > z_max {
         return vec4<f32>(0.0, 0.0, 0.0, 1.0);
     }
-    let t = -origin.z / ray.z;
-    if t <= 0.0 {
+    if t_far <= t_near {
         return vec4<f32>(0.0, 0.0, 0.0, 1.0);
     }
 
-    let hit = origin + ray * t;
-    let r_pc = length(hit.xy);
-    let r_kpc = r_pc / 1000.0;
-    if r_kpc > 35.0 {
-        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
-    }
+    let steps = 96;
+    let dt = (t_far - t_near) / f32(steps);
+    let emission_coeff = 6.0e-5;
+    let dust_kappa = GAL_DUST_K0_MAG_PER_PC / 1.086; // mag/pc -> optical depth/pc
+    let zp_scale = exp(-0.4 * LN10 * (7.5 - zeropoint));
 
-    let phi = atan2(hit.y, hit.x);
-    let disk = exp(-r_kpc / 3.0) * spiral_arm_modulation(phi, r_kpc);
-    let thin_lane = 0.75 + 0.25 * exp(-pow(abs(hit.y) / 900.0, 2.0));
-    let bulge = 3.0 * exp(-pow(r_kpc / 1.2, 2.0));
-    let local = 0.20 * exp(-pow((r_kpc - 8.2) / 2.5, 2.0));
-    let flux = (0.020 * disk * thin_lane + 0.015 * bulge + local * 0.01)
-        * exp(-0.4 * LN10 * (7.5 - zeropoint));
-    let tint = mix(vec3<f32>(1.0, 0.78, 0.55), vec3<f32>(0.78, 0.84, 1.0), clamp(r_kpc / 18.0, 0.0, 1.0));
-    return vec4<f32>(tint * flux, 1.0);
+    var transmittance = 1.0;
+    var accum = vec3<f32>(0.0, 0.0, 0.0);
+    for (var i = 0; i < steps; i = i + 1) {
+        let t = t_near + (f32(i) + 0.5) * dt;
+        let p = origin + ray * t;
+        let r = sqrt(p.x * p.x + p.y * p.y);
+        if r > 35000.0 {
+            continue;
+        }
+        let dens = gal_density(p.x, p.y, p.z);
+        let r_kpc = r / 1000.0;
+        let tint = mix(vec3<f32>(1.0, 0.78, 0.55), vec3<f32>(0.78, 0.84, 1.0), clamp(r_kpc / 18.0, 0.0, 1.0));
+        accum += transmittance * (emission_coeff * dens * dt) * tint;
+        let tau = dust_kappa * gal_dust_density(p.x, p.y, p.z) * dt;
+        transmittance *= exp(-tau);
+        if transmittance < 0.002 {
+            break;
+        }
+    }
+    return vec4<f32>(accum * zp_scale, 1.0);
 }
 
 // Fullscreen triangle (big-triangle trick, no vertex buffer).

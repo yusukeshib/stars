@@ -117,8 +117,9 @@ remaining items are realism polish (`V-24` scintillation, `V-25`–`V-28`
 have all shipped), site-specific brightness (Bortle / SQM core shipped
 via `V-39`, including the `V-39-Atlas` Falchi 2016 World Atlas loader),
 niche visual
-features (`V-46`; `V-45` telescope-side optical artifacts and `V-50` output
-colour management have shipped), and rare phenomena (`V-47`–`V-49`).
+features (`V-45` telescope-side optical artifacts, `V-46` galactic structural
+model, and `V-50` output colour management have all shipped), and rare
+phenomena (`V-47`–`V-49`).
 
 **High priority next:** the visual-richness gaps `V-51`–`V-56` (eclipses /
 occultations, planetary rings and moons, resolved star clusters, double
@@ -212,7 +213,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-43` | Telescope eyepiece simulation | ✅ |
 | `V-44` | Custom external viewpoint origin | ✅ |
 | `V-45` | **Telescope-side optical artifacts** | ✅ |
-| `V-46` | **Galactic structural model for external viewpoints** | ⬜ |
+| `V-46` | **Galactic structural model for external viewpoints** | ✅ |
 | `V-47` | **Meteor shower display** | ⬜ |
 | `V-48` | **Aurora display** | ⬜ |
 | `V-49` | **Comet rendering** | ⬜ |
@@ -1493,7 +1494,7 @@ optional fields without a schema bump).
 
 ---
 
-### `V-46` Galactic structural model for external viewpoints — ⬜
+### `V-46` Galactic structural model for external viewpoints — ✅ done
 
 **Item.** The current external galactic viewpoint (`V-41`, `V-44`) draws
 an analytic thin Milky Way disc. Replace this with a Drimmel & Spergel-
@@ -1517,22 +1518,38 @@ a usable Python implementation.
 - Robitaille, T. P. 2017, A&A 600, A11 (mwdust).
 - Bland-Hawthorn, J., Gerhard, O. 2016, ARA&A 54, 529 (review).
 
-**Implementation scope.**
+**Implementation.**
 - `crates/astronomy/src/galaxy.rs`: closed-form
-  `milky_way_luminosity_density(x_pc, y_pc, z_pc)` and
-  `dust_extinction_az(distance_pc, l_rad, b_rad)`.
-- `crates/renderer/src/shaders/skyglow.wgsl` external-viewpoint branch:
-  ray-march the new functions instead of the analytic disc.
-- Optional: Gaia DR3 OB stars overplotted as bright points on the arms
-  (uses `L-17` catalog ingest infrastructure).
+  `milky_way_luminosity_density(x_pc, y_pc, z_pc)` (thin disk with a
+  sech² vertical profile + Reid 2019 four-arm log-spiral enhancement,
+  exponential thick disk, and a rotated triaxial boxy bar) plus
+  `dust_extinction_az(distance_pc, l_rad, b_rad)` (double-exponential
+  dust disk integrated along the line of sight). Galactocentric IAU
+  parsecs, Sun on +x at `R_SUN_PC = 8122`, `Z_SUN_PC = 20.8`. Arm ridge
+  anchors (`SPIRAL_ARMS`) carry the Reid 2019 pitch angles.
+- `crates/renderer/src/shaders/skyglow.wgsl`: the external-viewpoint
+  branch (`external_galaxy_disc_radiance`) now emission-absorption
+  ray-marches `gal_density` attenuated by the dust disk
+  (`gal_dust_density`) instead of intersecting a single analytic plane,
+  so the bar, arms, and dark dust lanes resolve. Constants mirror
+  `astronomy::galaxy` value-for-value (kept in lock-step like the ISL
+  model); the pinned Rust tests guard the shared model.
+- No new host control, session field, or `CameraUniform` slot: the
+  existing external viewpoint toggle (`V-41` / `V-44`) drives the upgrade
+  across CLI / viewer / web.
+- The model is closed-form (no external data artifact), so no
+  `DATA_SOURCES.md` / manifest row is required.
 
 **Tests / validation.**
-- Unit: solar position at (8.122 kpc, 0, 0.020 kpc) IAU 2018 returns
-  local stellar density ≈ 0.1 M_sun pc⁻³.
-- Visual: external view from (0, 0, 1 kpc) above the Sun should show
-  Sagittarius-Carina and Perseus arms in correct azimuth.
+- Unit (pinned): solar position (8.122 kpc, 0, 0.0208 kpc) returns local
+  stellar density ≈ 0.1 M_sun pc⁻³; density falls with `|z|` and with `R`;
+  the bar dominates the centre by ≫ 50×; an on-arm point exceeds the
+  inter-arm density; dust extinction is zero at zero distance, monotone
+  in distance, plane-concentrated, and ≈ 1 mag/kpc locally.
+- Visual: external view from above the Sun shows the four arms and the
+  central bar in the correct azimuths with dark dust lanes.
 
-**Hosts wired.** CLI / viewer / web.
+**Hosts wired.** CLI / viewer / web (via the existing external viewpoint).
 
 ---
 

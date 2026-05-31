@@ -74,6 +74,12 @@ Owns scientific and geometric models:
   including the V-39 light-pollution model and the V-39-Atlas `FalchiAtlas`
   parser + bilinear sampler for a compact `FALATL01` zenith-brightness grid
   (`light_pollution_atlas.rs`, IO-free; the host crate does the file read);
+- the `V-46` galactic structural model (`galaxy.rs`): a Drimmel & Spergel 2001
+  style `milky_way_luminosity_density(x, y, z)` (thin + thick disk, triaxial
+  bar, Reid 2019 four-arm log-spiral enhancement) and a double-exponential
+  `dust_extinction_az(distance, l, b)` screen, in galactocentric IAU parsecs.
+  These are the reference for the external-viewpoint shader, whose WGSL
+  constants mirror this module value-for-value (pinned by the `galaxy` tests);
 - planning helpers such as rise / transit / set, twilight bands, and the
   `L-09` observation-planning layer: Krisciunas-Schaefer 1991 Moon-impact
   (`moon_impact`), visibility scoring (`visibility_score`), recommended-
@@ -370,8 +376,11 @@ The exact pass layout can change, but responsibilities should stay separated:
   reconstructs rays through the inverse view-projection matrix; all-sky modes
   invert the selected Mollweide / Aitoff / Hammer map before rotating the ray
   back to equatorial coordinates. In external viewpoints, this pass instead
-  ray-marches the galactic-plane intersection from the configured parsec-scale
-  origin and draws a compact analytic Milky Way disc for context.
+  emission-absorption ray-marches the `V-46` galactic structural model from the
+  configured parsec-scale origin: `gal_density` (thin/thick disk, triaxial bar,
+  Reid 2019 spiral arms) attenuated by the `gal_dust_density` dust disk, so the
+  bar, arms, and dark dust lanes resolve. Its constants mirror
+  `astronomy::galaxy` and are guarded by that module's pinned tests.
 - **Star pass**: per-star proper motion, corrections, refraction, extinction,
   projection, PSF/glare, and HDR accumulation. In the external galactic
   viewpoint, atmospheric effects are skipped and stars are projected as parsec
