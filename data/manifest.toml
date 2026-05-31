@@ -220,6 +220,33 @@ are encoded in `scripts/extract-named-stars.py`.
 """
 
 [[artifact]]
+id = "bright-star-xmatch"
+description = "L-17 bright-star Hipparcos <-> Henry Draper cross-identification anchor index: HIP, HD, V, B-V for naked-eye stars (V <= 3.0), derived from HYG v4.2. Used for the catalog ingest identifier round-trip tests; the Tycho-2 / Gaia DR3 cross-IDs are filled at ingest time from the catalogue backends, not committed here."
+kind = "generated"
+path = "crates/catalog/data/bright_star_xmatch.csv"
+sha256 = "b1ff7f753af4b5e23bf98790542923acde731206095e919f530d9e0d9128783c"
+bytes = 5464
+source = "https://github.com/astronexus/HYG-Database"
+archive_id = "HYG v4.2 (hyg_v42.csv)"
+citation = "ESA 1997, *The Hipparcos and Tycho Catalogues* (ESA SP-1200); Cannon, A. J. & Pickering, E. C. 1918-1924, *Henry Draper Catalogue* (Harvard Annals); HYG v4.2 (https://github.com/astronexus/HYG-Database)."
+version = "HYG v4.2 snapshot 2024"
+retrieved = "2026-05"
+license = "CC0-1.0"
+license_url = "https://github.com/astronexus/HYG-Database/blob/main/LICENSE"
+preprocessing = "scripts/extract-bright-star-xmatch.py"
+fields_used = ["hip", "hd", "mag", "ci", "proper"]
+used_by = [
+    "crates/catalog/src/ingest.rs",
+]
+limitations = """
+Bright anchor set only (177 stars, V <= 3.0). It exists to exercise the
+L-17 HIP <-> HD identifier round-trip without a network dependency at
+build time; the actual large-catalog ingest (Hipparcos / Tycho-2 / Gaia
+DR3) reads the un-committed CSV exports fetched by
+scripts/fetch-hipparcos.sh / fetch-tycho2.sh / fetch-gaia-dr3-subset.sh.
+"""
+
+[[artifact]]
 id = "open-cluster-membership-bootstrap"
 description = "Open-cluster membership table joining HYG / Hipparcos IDs to V-42 DSO IDs for the V-53 showpiece bootstrap slice (Pleiades, Beehive, Double Cluster)."
 kind = "embedded"
@@ -1049,6 +1076,90 @@ page before use; this manifest records `see-upstream` because the release
 terms must be confirmed at download time. The shipped default render path does
 not read it — Atlas2016 falls back to the Bortle-1 floor when STARS_FALCHI_ATLAS
 is unset.
+"""
+
+# ---------------------------------------------------------------------------
+# Large external star catalogues (L-17). Modelled as runtime-service rows (no
+# committed local bytes) following the Falchi-atlas precedent: the full
+# archives are far too large to commit (Hipparcos ~10 MB, Tycho-2 ~250 MB,
+# Gaia DR3 ~1.8 billion rows). The fetch scripts pull normalised CSV exports
+# on demand; the catalog backends (crates/catalog/src/ingest.rs) parse them.
+# The default render path never requires them (it stays on HYG); pinning a
+# full-archive SHA-256 would require either committing a subset or a manifest
+# `external` kind, deferred with the LOD-streaming follow-up.
+# ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "hipparcos-i239-main"
+description = "Hipparcos main catalogue (VizieR I/239/hip_main, ~118k stars, ~1 mas astrometry). Fetched on demand as a normalised CSV by scripts/fetch-hipparcos.sh and parsed by catalog::HipparcosCsvBackend; not committed."
+kind = "runtime-service"
+endpoint = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
+source = "https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=I/239"
+archive_id = "VizieR I/239/hip_main"
+citation = "Perryman, M. A. C. et al. 1997, A&A 323, L49; ESA 1997, The Hipparcos and Tycho Catalogues, ESA SP-1200."
+version = "I/239"
+license = "see-upstream"
+license_url = "https://cds.unistra.fr/vizier-org/licences_vizier.html"
+fields_used = ["HIP", "RAICRS", "DEICRS", "Vmag", "Plx", "pmRA", "pmDE", "B-V", "HD"]
+used_by = [
+    "scripts/fetch-hipparcos.sh",
+    "crates/catalog/src/ingest.rs",
+]
+limitations = """
+Not committed and not called during rendering: an offline ingest source the
+user fetches with scripts/fetch-hipparcos.sh. Accept the CDS/VizieR terms
+before redistributing. A full-archive SHA-256 is not pinned here because the
+manifest schema reserves sha256 for committed bytes; the committed
+`bright-star-xmatch` anchor index is the reproducible test fixture instead.
+"""
+
+[[artifact]]
+id = "tycho2-i259"
+description = "Tycho-2 catalogue (VizieR I/259, ~2.5M stars, ~60 mas astrometry). Fetched on demand as a normalised CSV by scripts/fetch-tycho2.sh and parsed by catalog::Tycho2CsvBackend; not committed."
+kind = "runtime-service"
+endpoint = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
+source = "https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=I/259"
+archive_id = "VizieR I/259/tyc2"
+citation = "Høg, E. et al. 2000, A&A 355, L27."
+version = "I/259"
+license = "see-upstream"
+license_url = "https://cds.unistra.fr/vizier-org/licences_vizier.html"
+fields_used = ["TYC1", "TYC2", "TYC3", "RAmdeg", "DEmdeg", "BTmag", "VTmag", "pmRA", "pmDE", "HIP"]
+used_by = [
+    "scripts/fetch-tycho2.sh",
+    "crates/catalog/src/ingest.rs",
+]
+limitations = """
+Not committed and not called during rendering: an offline ingest source the
+user fetches with scripts/fetch-tycho2.sh (default VTmag <= 8 cut). V and B-V
+are derived from VT/BT via the ESA 1997 transformation in ingest.rs. Tycho-2
+carries no parallax, so ingested rows are placed on the unit sphere
+(distance unknown).
+"""
+
+[[artifact]]
+id = "gaia-dr3-i355"
+description = "Gaia DR3 source catalogue (Gaia archive gaiadr3.gaia_source / VizieR I/355, ~1.8 billion rows, micro-arcsecond astrometry for bright stars). A magnitude-cut subset is fetched on demand by scripts/fetch-gaia-dr3-subset.sh and parsed by catalog::GaiaDr3CsvBackend; not committed."
+kind = "runtime-service"
+endpoint = "https://gea.esac.esa.int/tap-server/tap/sync"
+source = "https://gea.esac.esa.int/archive/"
+archive_id = "gaiadr3.gaia_source"
+citation = "Gaia Collaboration 2022, A&A 674, A1 (Gaia DR3)."
+version = "DR3"
+license = "CC-BY-SA-3.0-IGO"
+license_url = "https://www.cosmos.esa.int/web/gaia-users/credits"
+fields_used = ["source_id", "ra", "dec", "parallax", "pmra", "pmdec", "phot_g_mean_mag", "bp_rp"]
+used_by = [
+    "scripts/fetch-gaia-dr3-subset.sh",
+    "crates/catalog/src/ingest.rs",
+]
+limitations = """
+Not committed and not called during rendering: the full Gaia DR3 source is too
+large to embed, so only a bright all-sky tier (default G <= 8) is fetched.
+Gaia G is used directly as the display magnitude and BP-RP is mapped to an
+approximate B-V for display chroma only (gaia_bv_from_bp_rp) — the exact
+Riello et al. 2021 photometric transforms and LOD streaming of the full
+source are the L-17 follow-up.
 """
 
 # Demo gallery (L-14): curated public demo PNGs.

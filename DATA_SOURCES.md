@@ -95,10 +95,49 @@ Notes:
 
 - `docs/catalog-backend-design.md` defines the backend, identifier, LOD, paging,
   and WASM-subset policy for future large-catalog ingest.
-- If a future Gaia / Hipparcos / Tycho backend lands, record its source,
-  license, version, preprocessing, and identifier mapping here **and** add a
-  corresponding entry to `data/manifest.toml` so JSON sessions can cite the
-  exact snapshot consumed.
+
+### Large-catalog ingest: Hipparcos / Tycho-2 / Gaia DR3 (`L-17`)
+
+`crates/catalog/src/ingest.rs` implements three additional backends behind the
+`CatalogBackend` trait. They parse the **normalised CSV export** of each
+catalogue by column name (not the fragile fixed-width native records); the
+companion fetch scripts request exactly those columns.
+
+| Catalogue | VizieR / archive | Astrometry | Backend | Fetch script | Manifest id |
+|---|---|---|---|---|---|
+| Hipparcos main | I/239/hip_main | ≈1 mas | `HipparcosCsvBackend` | `scripts/fetch-hipparcos.sh` | `hipparcos-i239-main` |
+| Tycho-2 | I/259/tyc2 | ≈60 mas | `Tycho2CsvBackend` | `scripts/fetch-tycho2.sh` | `tycho2-i259` |
+| Gaia DR3 | `gaiadr3.gaia_source` / I/355 | ≈20 µas (bright) | `GaiaDr3CsvBackend` | `scripts/fetch-gaia-dr3-subset.sh` | `gaia-dr3-i355` |
+
+References: Perryman et al. 1997, A&A 323, L49 (Hipparcos); ESA 1997, *The
+Hipparcos and Tycho Catalogues*, ESA SP-1200 (the `V = VT − 0.090(BT−VT)`,
+`B−V = 0.850(BT−VT)` Tycho transform); Høg et al. 2000, A&A 355, L27
+(Tycho-2); Gaia Collaboration 2022, A&A 674, A1 (Gaia DR3).
+
+The raw archives are **not committed** (Hipparcos ~10 MB, Tycho-2 ~250 MB,
+Gaia DR3 ~1.8 billion rows): they are fetched on demand and recorded as
+`runtime-service` rows, following the Falchi-atlas precedent. License is
+`see-upstream` for the CDS/VizieR catalogues and `CC-BY-SA-3.0-IGO` for Gaia
+(use the standard Gaia acknowledgement). Identifier mapping: HIP → primary
+`Hipparcos`; Tycho-2 → primary packed `Tycho2` (`(TYC1<<24)|(TYC2<<4)|TYC3`)
+with HIP cross-ID; Gaia → primary `GaiaDr3` source_id with optional HIP/HD
+cross-IDs. Gaia `G` is used directly as the display magnitude and `BP−RP` is
+mapped to an approximate `B−V` for display chroma only (the exact Riello et
+al. 2021 transforms are deferred with LOD streaming and host wiring).
+
+### Bright-star HIP↔HD cross-match anchor index (`L-17`)
+
+Repository location: `crates/catalog/data/bright_star_xmatch.csv` (manifest id
+`bright-star-xmatch`, `generated`). 177 naked-eye stars (V ≤ 3.0) with their
+Hipparcos and Henry Draper numbers, V, and B−V, extracted deterministically
+from the in-repo HYG catalogue by `scripts/extract-bright-star-xmatch.py` (no
+network dependency). It backs the ingest identifier round-trip tests; the
+Tycho-2 / Gaia cross-IDs are filled at ingest time from the catalogue
+backends, not hand-entered here. Regenerate with:
+
+```bash
+python3 scripts/extract-bright-star-xmatch.py
+```
 
 ## Constellation data
 
