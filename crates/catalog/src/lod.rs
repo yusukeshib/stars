@@ -331,11 +331,19 @@ impl<S: BlobStore> LodCatalog<S> {
         let mut selected: Vec<&LodTileEntry> = Vec::new();
         let mut tiles_examined = 0usize;
         for entry in self.index.entries() {
-            // A tier whose bright bound already exceeds the faint limit can be
-            // skipped without geometry work.
-            if TIER_BOUNDS[entry.tile.tier as usize] > query.faint_limit_mag
-                && entry.tile.tier != BASE_TIER
-            {
+            // A tier can be skipped without geometry work only when even its
+            // *brightest* possible star is fainter than the limit. A tier holds
+            // stars in `(TIER_BOUNDS[tier-1], TIER_BOUNDS[tier]]`, so its
+            // minimum magnitude is the previous tier's bound (−∞ for the base
+            // tier). Testing the tier's *bright* bound here would wrongly drop
+            // the in-limit stars of a partially-included tier.
+            let tier = entry.tile.tier as usize;
+            let tier_min_mag = if tier == 0 {
+                f32::NEG_INFINITY
+            } else {
+                TIER_BOUNDS[tier - 1]
+            };
+            if tier_min_mag >= query.faint_limit_mag {
                 continue;
             }
             tiles_examined += 1;
@@ -471,6 +479,28 @@ mod tests {
         let stream = cat.stream(&LodQuery::all_sky(6.0));
         assert_eq!(stream.tiles_loaded, (LON_BANDS / 2) as usize);
         assert!(stream.stars.iter().all(|s| s.magnitude <= 6.0));
+    }
+
+    #[test]
+    fn faint_limit_inside_a_tier_keeps_its_in_limit_stars() {
+        // Regression: a tier holds stars brighter than its bright bound, so a
+        // faint limit that falls *inside* a tier must still load that tier and
+        // surface its in-limit stars (not skip the whole tier on its bound).
+        let mut store = MemoryBlobStore::new();
+        let mut index = LodIndex::new();
+        // One tier-1 tile (bound 9.0) holding a mag-7 star, at RA 0 / Dec 0.
+        let payload = gaia_tile(42, 0.0, 0.0, 7.0);
+        let hash = store.put(payload.into_bytes());
+        let dir = crate::coords::radec_hours_deg_to_cartesian(0.0, 0.0);
+        index.insert(TileId::for_direction(1, dir), hash, 1);
+        let cat = LodCatalog::new(index, store);
+        // Faint limit 8.0 lands inside tier 1 (6,9]; the mag-7 star must show.
+        let stream = cat.stream(&LodQuery::all_sky(8.0));
+        assert_eq!(stream.tiles_loaded, 1, "tier-1 tile must not be culled");
+        assert_eq!(stream.stars.len(), 1);
+        // G=7.0 with BP−RP=0.8 → Riello V ≈ 7.146, still within the 8.0 limit.
+        let m = stream.stars[0].magnitude;
+        assert!(m > 7.0 && m <= 8.0, "V={m}");
     }
 
     #[test]
