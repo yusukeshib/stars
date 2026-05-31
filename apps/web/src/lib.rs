@@ -17,8 +17,8 @@ use catalog::search::{
 };
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, ExternalViewpoint,
-    EyepieceSimulation, LightPollution, LocalView, OverlayConfig, OverlayKind, Renderer,
-    SatelliteLayer, Scintillation, SkyProjection, SkyViewpoint, StarInstance,
+    EyepieceSimulation, LightPollution, LocalView, OutputColourSpace, OverlayConfig, OverlayKind,
+    Renderer, SatelliteLayer, Scintillation, SkyProjection, SkyViewpoint, StarInstance,
     DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 
@@ -915,6 +915,17 @@ impl StarView {
         } else {
             Scintillation::OFF
         };
+    }
+
+    /// V-50 output colour management. `space` is one of `"srgb"`,
+    /// `"display-p3"`, or `"rec2020"`. Unrecognised values fall back to sRGB.
+    /// The renderer applies the gamut transform in the tonemap step; the
+    /// canvas swap-chain itself stays sRGB-tagged, so wide-gamut primaries are
+    /// reproduced on browsers/screens that honour the sRGB-encoded values,
+    /// with sRGB as the documented fallback elsewhere.
+    pub fn set_output_colourspace(&self, space: String) {
+        let cs = OutputColourSpace::from_str_opt(&space).unwrap_or(OutputColourSpace::Srgb);
+        self.state.borrow_mut().camera.output_colourspace = cs;
     }
 
     pub fn resize(&self, width: u32, height: u32) {

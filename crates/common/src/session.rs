@@ -13,13 +13,14 @@ use anyhow::{bail, Context, Result};
 use astronomy::TimeScales;
 use renderer::{
     Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView,
-    OverlayConfig, OverlayKind, SatelliteLayer, Scintillation, SkyProjection, SkyViewpoint,
+    OutputColourSpace, OverlayConfig, OverlayKind, SatelliteLayer, Scintillation, SkyProjection,
+    SkyViewpoint,
 };
 
 use crate::curated_satellite_layer;
 use serde::{Deserialize, Serialize};
 
-use crate::{AtmospherePresetArg, OverlayArg, ProjectionArg, ViewpointArg};
+use crate::{AtmospherePresetArg, OutputColourspaceArg, OverlayArg, ProjectionArg, ViewpointArg};
 
 /// Current JSON session schema. Increment when a breaking semantic change is
 /// made to any serialized field.
@@ -29,9 +30,11 @@ use crate::{AtmospherePresetArg, OverlayArg, ProjectionArg, ViewpointArg};
 /// previous schema do not migrate forward automatically — the host must
 /// re-run `--write-session` to bump.
 /// v6: V-55 adds the `satellites` block (artificial-satellite TLE / SGP4
-/// layer). The field is required in v6+; older sessions must re-run
+/// layer). v7: V-50 adds the `outputColourspace` scene field (sRGB /
+/// Display-P3 / Rec.2020 output colour management). These fields are required
+/// in their respective schema versions; older sessions must re-run
 /// `--write-session` to bump.
-pub const SESSION_SCHEMA_VERSION: u32 = 6;
+pub const SESSION_SCHEMA_VERSION: u32 = 7;
 
 /// Complete scene/session file. Unknown future fields are ignored by serde, but
 /// the top-level schema version must match before a host uses the data.
@@ -55,6 +58,11 @@ pub struct StarSession {
     pub eyepiece: SessionEyepiece,
     pub catalog: CatalogSnapshot,
     pub corrections: CorrectionSnapshot,
+    /// V-50 output colour management. `#[serde(default)]` so sessions written
+    /// before the field existed still deserialize (to sRGB), even though the
+    /// schema version is the hard gate for forward compatibility.
+    #[serde(default)]
+    pub output_colourspace: OutputColourspaceArg,
 }
 
 /// Native rendering-ready scene derived from a [`StarSession`].
@@ -79,6 +87,8 @@ pub struct SessionScene {
     pub eyepiece: EyepieceSimulation,
     pub catalog: CatalogSnapshot,
     pub corrections: CorrectionSnapshot,
+    /// V-50 selected output colour space (sRGB / Display-P3 / Rec.2020).
+    pub output_colourspace: OutputColourSpace,
 }
 
 /// Serialized V-55 satellite-layer settings. The TLE set itself is *not*
@@ -445,6 +455,7 @@ impl StarSession {
             eyepiece: SessionEyepiece::from(scene.eyepiece),
             catalog: scene.catalog.clone(),
             corrections: scene.corrections,
+            output_colourspace: OutputColourspaceArg::from(scene.output_colourspace),
         }
     }
 
@@ -530,6 +541,7 @@ impl StarSession {
             eyepiece: self.eyepiece.to_eyepiece()?,
             catalog: self.catalog.validated()?,
             corrections: self.corrections,
+            output_colourspace: self.output_colourspace.into(),
         })
     }
 }
@@ -890,6 +902,7 @@ mod tests {
             eyepiece: EyepieceSimulation::OFF,
             catalog: crate::hyg_catalog_snapshot("crates/catalog/data/hyg_v42.csv", 7.5),
             corrections: CorrectionSnapshot::default(),
+            output_colourspace: OutputColourSpace::DisplayP3,
         }
     }
 
@@ -898,11 +911,13 @@ mod tests {
         let scene = sample_scene();
         let session = StarSession::from_scene("0.1.0", "test", &scene);
         let json = serde_json::to_string(&session).unwrap();
-        assert!(json.contains("\"schemaVersion\":6"));
+        assert!(json.contains("\"schemaVersion\":7"));
         assert!(json.contains("\"cardinal-labels\""));
         assert!(json.contains("\"scintillation\""));
+        assert!(json.contains("\"outputColourspace\":\"display-p3\""));
         let parsed: StarSession = serde_json::from_str(&json).unwrap();
         let restored = parsed.to_scene().unwrap();
+        assert_eq!(restored.output_colourspace, scene.output_colourspace);
         assert_eq!(restored.latitude_deg, scene.latitude_deg);
         assert_eq!(restored.longitude_deg, scene.longitude_deg);
         assert!((restored.time.jd_utc - scene.time.jd_utc).abs() < 1e-12);

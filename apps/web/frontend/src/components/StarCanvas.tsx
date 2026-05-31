@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { StarView } from "stars-web";
-import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type EyepieceConfig, type Observer, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type RecommendedPlan, type SatellitesConfig, type ScintillationConfig, type View } from "../observer";
+import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type EyepieceConfig, type Observer, type OutputColourspace, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type RecommendedPlan, type SatellitesConfig, type ScintillationConfig, type View } from "../observer";
 
 type Props = {
   observer: Observer;
@@ -14,6 +14,7 @@ type Props = {
   satellites: SatellitesConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
+  outputColourspace: OutputColourspace;
   onDrag: (deltaAzDeg: number, deltaAltDeg: number) => void;
   onWheel: (zoomFactor: number) => void;
   onSunAltitude: (sunAltitudeDeg: number) => void;
@@ -53,6 +54,7 @@ export function StarCanvas({
   satellites,
   projection,
   eyepiece,
+  outputColourspace,
   onDrag,
   onWheel,
   onSunAltitude,
@@ -80,6 +82,7 @@ export function StarCanvas({
   const satellitesRef = useRef(satellites);
   const projectionRef = useRef(projection);
   const eyepieceRef = useRef(eyepiece);
+  const outputColourspaceRef = useRef(outputColourspace);
   observerRef.current = observer;
   viewRef.current = view;
   timeRef.current = timeMs;
@@ -90,6 +93,7 @@ export function StarCanvas({
   satellitesRef.current = satellites;
   projectionRef.current = projection;
   eyepieceRef.current = eyepiece;
+  outputColourspaceRef.current = outputColourspace;
 
   // Push overlays to wasm whenever the config changes. Geometry is rebuilt on
   // the GPU side, so we don't want to do it every frame -- a useEffect keyed
@@ -165,6 +169,10 @@ export function StarCanvas({
     );
   }, [scintillation]);
 
+  useEffect(() => {
+    handleRef.current?.set_output_colourspace(outputColourspace);
+  }, [outputColourspace]);
+
   // Boot wasm + start the render loop. Only ever runs once.
   useEffect(() => {
     let cancelled = false;
@@ -199,6 +207,7 @@ export function StarCanvas({
       );
       const sc = scintillationRef.current;
       handle.set_scintillation(sc.enabled, sc.cN2Scale, sc.seed);
+      handle.set_output_colourspace(outputColourspaceRef.current);
       handle.set_planets_enabled(planetsRef.current.enabled);
       const sat = satellitesRef.current;
       handle.set_satellites(sat.enabled, sat.exposureSeconds);

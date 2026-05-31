@@ -239,6 +239,17 @@ const en: Dictionary = {
   "projection.aitoff": "Aitoff (full sky)",
   "projection.hammer": "Hammer (full sky)",
 
+  // V-50 output colour management.
+  "card.colourManagement.title": "Colour management",
+  "card.colourManagement.description":
+    "Choose the output colour space the renderer encodes and the page is tagged with.",
+  "card.colourManagement.outputSpace": "Output colour space",
+  "card.colourManagement.helper":
+    "sRGB is the default working space. Display-P3 and Rec.2020 remap the gamut for wide-gamut screens; the canvas stays sRGB-tagged so colours fall back to sRGB on displays that do not support wide gamut.",
+  "colourspace.srgb": "sRGB (IEC 61966-2-1)",
+  "colourspace.display-p3": "Display-P3 (wide gamut)",
+  "colourspace.rec2020": "Rec.2020 (ultra-wide gamut)",
+
   // Camera viewpoints.
   "viewpoint.earth": "Earth-centred sky",
   "viewpoint.galactic-north": "Milky Way from above",
@@ -435,6 +446,17 @@ const ja: Dictionary = {
   "projection.mollweide": "モルワイデ (全天)",
   "projection.aitoff": "エイトフ (全天)",
   "projection.hammer": "ハンマー (全天)",
+
+  // V-50 出力カラーマネジメント。
+  "card.colourManagement.title": "カラーマネジメント",
+  "card.colourManagement.description":
+    "レンダラーがエンコードし、ページにタグ付けする出力色空間を選択します。",
+  "card.colourManagement.outputSpace": "出力色空間",
+  "card.colourManagement.helper":
+    "sRGB が既定の作業色空間です。Display-P3 と Rec.2020 は広色域画面向けにガモットを変換します。キャンバスは sRGB タグのままなので、広色域非対応のディスプレイでは sRGB にフォールバックします。",
+  "colourspace.srgb": "sRGB (IEC 61966-2-1)",
+  "colourspace.display-p3": "Display-P3 (広色域)",
+  "colourspace.rec2020": "Rec.2020 (超広色域)",
 
   "viewpoint.earth": "地球中心の天球",
   "viewpoint.galactic-north": "銀河北極からの俯瞰",

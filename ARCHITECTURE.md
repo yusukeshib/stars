@@ -217,8 +217,10 @@ All crates should preserve these conventions:
 ## Session files
 
 Portable scene state uses schema-versioned JSON with the current top-level
-`schemaVersion: 3` (v2 unified the spectral extinction state via `V-37`; v3
-added `surfaceAlbedo` for the Hošek-Wilkie daylight model in `V-38`). The
+`schemaVersion: 6` (v2 unified the spectral extinction state via `V-37`; v3
+added `surfaceAlbedo` for the Hošek-Wilkie daylight model in `V-38`; v4 added
+the scintillation block for `V-24`; v6 added the `outputColourspace` field for
+`V-50` output colour management). The
 native representation lives in
 `stars_host_common::session`; the web frontend keeps a TypeScript mirror in
 `apps/web/frontend/src/session.ts`. Field names are stable host-facing names
@@ -228,7 +230,8 @@ angles and explicit time-scale fields (`jdUtc`, `jdUt1`, `jdTai`, `jdTt`,
 
 A session records observer, view, overlays, projection/viewpoint, custom
 external viewpoint vectors, atmosphere/refraction controls, planet visibility,
-eyepiece optics, active correction flags, catalog snapshot metadata, and app
+eyepiece optics, the output colour space (`V-50`: `srgb` / `display-p3` /
+`rec2020`), active correction flags, catalog snapshot metadata, and app
 version. Hosts should reject unknown future schema versions instead of silently
 interpreting them. Compact web URL query parameters remain a convenience format;
 JSON sessions are the reproducibility format intended for presets, validation
@@ -376,8 +379,13 @@ The exact pass layout can change, but responsibilities should stay separated:
 - **Overlay pass**: reference circles, grids, constellation lines, boundaries,
   projection, and LDR text labels from the shared bitmap font atlas /
   label-placement pass.
-- **Tonemap pass**: local adaptation, mesopic / scotopic split, and conversion
-  from HDR radiance-like values to display output.
+- **Tonemap pass**: local adaptation, mesopic / scotopic split, conversion
+  from HDR radiance-like values to display output, and the `V-50` output
+  colour-management step — a linear sRGB→target gamut matrix
+  (`renderer::colourspace`) applied after the Reinhard operator and uploaded
+  via a dedicated tonemap uniform. The swap-chain / PNG keeps the sRGB
+  transfer function; only the primaries change and are then tagged on the
+  output (PNG `cHRM`, sRGB-fallback canvas).
 
 ## Adding a new host
 

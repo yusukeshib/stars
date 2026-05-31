@@ -196,6 +196,9 @@ impl Renderer {
         };
         let uniform = camera.uniform_with_planets(width, height, &planet_uniforms);
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
+        // V-50: keep the tonemap's output-gamut matrix in sync with the camera.
+        self.tonemap
+            .set_output_colourspace(queue, camera.output_colourspace);
         self.overlay.update_camera(queue, camera);
         self.text
             .update_camera(queue, camera, &uniform, &planet_uniforms, width, height);

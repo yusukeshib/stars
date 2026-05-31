@@ -52,6 +52,7 @@ approximations, and deliberate non-goals.
 | Star colour | B-V to temperature to blackbody/CIE/sRGB approximation | Catalogue-colour visualization from limited HYG inputs | `crates/catalog/src/color.rs` |
 | Human vision | CIE/Ferwerda/Reinhard/Pattanaik-inspired mesopic, scotopic, and tonemap helpers | Display-facing perception model, not metrology | `crates/astronomy/src/photometry.rs`, renderer shaders |
 | Artificial satellites (`V-55`) | SGP4 (Vallado 2006 / Spacetrack #3, via the `sgp4` crate) on a curated manifest-pinned TLE snapshot; TEME treated as the J2000-ish equatorial frame; conical umbra/penumbra Earth-shadow visibility; McCants/QuickSat standard-magnitude photometry | Naked-eye satellite rendering and visibility, validated against the AIAA 2006-6753 reference vector (sub-km). TLEs are epoch-local (drift over weeks); not operational tracking, and apparent magnitudes use a hand-curated intrinsic-magnitude table, not a cross-section/BRDF model. | `crates/astronomy/src/satellites.rs`, `crates/renderer/src/shaders/skyglow.wgsl` |
+| Output colour management (`V-50`) | Linear sRGB→target gamut matrix (sRGB / Display-P3 / Rec.2020, D65, CSS-Color-4 constants) applied after tone-mapping; output tagged with the chosen primaries (PNG `cHRM`/`sRGB`, sRGB-fallback canvas) | The swap-chain / PNG keeps the sRGB transfer function: Display-P3 (sRGB transfer) is exact, Rec.2020 uses the sRGB transfer as a documented approximation rather than the BT.2020 transfer; no ICC-profile embedding or per-display calibration | `crates/renderer/src/colourspace.rs`, `crates/renderer/src/tonemap.rs`, `crates/renderer/src/shaders/tonemap.wgsl` |
 
 ## SOFA routines deliberately not implemented as complete routines
 
@@ -78,8 +79,11 @@ approximations, and deliberate non-goals.
   catalog stars.
 - No DE440 / SPICE kernel reader yet; current Sun/Moon/planet states are visual
   approximations and should not be described as publication-grade ephemerides.
-- No terrain horizon, clouds, weather, local light pollution, or colour-managed
-  display calibration.
+- No terrain horizon, clouds, weather, or local light pollution beyond the
+  `V-39` Bortle / SQM model. Output colour management (`V-50`) selects and
+  tags sRGB / Display-P3 / Rec.2020 primaries, but there is no embedded ICC
+  profile, no per-display calibration, and Rec.2020 uses the sRGB transfer
+  function rather than the BT.2020 transfer.
 - No constellation point-in-region classifier; boundaries are rendered for
   education, not used as authoritative catalog labels.
 - **No live TLE fetch in the default render path (`V-55`).** The artificial-

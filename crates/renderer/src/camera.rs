@@ -1032,6 +1032,11 @@ pub struct Camera {
     /// dark-sky composition stays identical to the pre-V-55 pipeline; hosts
     /// opt in and supply the curated (or live) TLE snapshot.
     pub satellites: SatelliteLayer,
+    /// V-50 output colour management. Selects the primaries the final
+    /// tone-map step encodes into. [`OutputColourSpace::Srgb`] is the
+    /// renderer's native working space, so the gamut transform is the
+    /// identity and output is bit-identical to the pre-V-50 pipeline.
+    pub output_colourspace: crate::colourspace::OutputColourSpace,
 }
 
 /// V-55 host-tier satellite layer configuration carried on [`Camera`].
@@ -1067,6 +1072,7 @@ impl Camera {
             limiting_magnitude: NAKED_EYE_LIMITING_MAGNITUDE,
             light_pollution: astronomy::skyglow::LightPollution::default(),
             satellites: SatelliteLayer::default(),
+            output_colourspace: crate::colourspace::OutputColourSpace::default(),
         }
     }
 

@@ -1165,7 +1165,7 @@ mod tests {
         let session = PySession::from_json(DEFAULT_SESSION_TEMPLATE).expect("template parses");
         // The renderer's current schema; the committed presets are regenerated
         // on every bump, so this guards the binding against a stale template.
-        assert_eq!(session.schema_version().unwrap(), 6);
+        assert_eq!(session.schema_version().unwrap(), 7);
         assert!(session.latitude_deg().is_ok());
         assert!(session.jd_utc().is_ok());
         assert!(session.fov_deg().is_ok());
@@ -1196,7 +1196,7 @@ mod tests {
         assert!((reparsed.fov_deg().unwrap() - 60.0).abs() < 1e-9);
         // A field the binding never touches must survive verbatim.
         assert!(reparsed.value.get("eyepiece").is_some());
-        assert_eq!(reparsed.schema_version().unwrap(), 6);
+        assert_eq!(reparsed.schema_version().unwrap(), 7);
 
         // The session-derived observer must agree with a direct Observer at
         // the same lat/lon/JD, so queries from a loaded session reproduce the

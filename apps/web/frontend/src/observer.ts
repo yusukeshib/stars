@@ -108,6 +108,12 @@ export type EyepieceConfig = {
   fieldStopMm: number;
 };
 
+// V-50 output colour management. Kebab spellings match the Rust
+// `OutputColourSpace::as_str` / session `outputColourspace` field.
+export const OUTPUT_COLOURSPACES = ["srgb", "display-p3", "rec2020"] as const;
+export type OutputColourspace = (typeof OUTPUT_COLOURSPACES)[number];
+export const DEFAULT_OUTPUT_COLOURSPACE: OutputColourspace = "srgb";
+
 export const SKY_PROJECTIONS = ["perspective", "mollweide", "aitoff", "hammer"] as const;
 export type SkyProjection = (typeof SKY_PROJECTIONS)[number];
 
@@ -225,6 +231,9 @@ export const isAtmospherePreset = (s: unknown): s is AtmospherePreset =>
 
 export const isSkyProjection = (s: unknown): s is SkyProjection =>
   typeof s === "string" && (SKY_PROJECTIONS as readonly string[]).includes(s);
+
+export const isOutputColourspace = (s: unknown): s is OutputColourspace =>
+  typeof s === "string" && (OUTPUT_COLOURSPACES as readonly string[]).includes(s);
 
 export const isSkyViewpoint = (s: unknown): s is SkyViewpoint =>
   typeof s === "string" && (SKY_VIEWPOINTS as readonly string[]).includes(s);
