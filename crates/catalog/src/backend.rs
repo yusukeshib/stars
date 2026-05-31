@@ -263,6 +263,20 @@ impl CatalogBackendKind {
             Self::GaiaDr3 => "gaia-dr3",
         }
     }
+
+    /// Parse the kebab label a host / session snapshot stores back into a
+    /// backend kind. Accepts the canonical `as_kebab_str` labels plus the
+    /// friendlier `hyg` (= `hyg-csv`) and `gaia` (= `gaia-dr3`) aliases.
+    pub fn from_kebab_str(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "hyg" | "hyg-csv" => Some(Self::HygCsv),
+            "hyg-embedded" => Some(Self::HygEmbedded),
+            "hipparcos" | "hip" => Some(Self::Hipparcos),
+            "tycho2" | "tycho-2" | "tyc" => Some(Self::Tycho2),
+            "gaia-dr3" | "gaia" | "gaiadr3" => Some(Self::GaiaDr3),
+            _ => None,
+        }
+    }
 }
 
 /// Query shape used by current HYG loading and reserved for future paged / LOD
@@ -411,6 +425,31 @@ mod tests {
         assert_eq!(CatalogBackendKind::HygCsv.as_kebab_str(), "hyg-csv");
         assert_eq!(CatalogSource::HYG_CSV.name, "HYG");
         assert_eq!(CatalogSource::HYG_CSV.version, Some("4.2"));
+    }
+
+    #[test]
+    fn backend_kind_kebab_round_trips_and_aliases() {
+        for kind in [
+            CatalogBackendKind::HygCsv,
+            CatalogBackendKind::HygEmbedded,
+            CatalogBackendKind::Hipparcos,
+            CatalogBackendKind::Tycho2,
+            CatalogBackendKind::GaiaDr3,
+        ] {
+            assert_eq!(
+                CatalogBackendKind::from_kebab_str(kind.as_kebab_str()),
+                Some(kind)
+            );
+        }
+        assert_eq!(
+            CatalogBackendKind::from_kebab_str("hyg"),
+            Some(CatalogBackendKind::HygCsv)
+        );
+        assert_eq!(
+            CatalogBackendKind::from_kebab_str("gaia"),
+            Some(CatalogBackendKind::GaiaDr3)
+        );
+        assert_eq!(CatalogBackendKind::from_kebab_str("nope"), None);
     }
 
     #[test]

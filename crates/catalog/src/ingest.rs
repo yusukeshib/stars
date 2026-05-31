@@ -168,15 +168,52 @@ pub fn tycho_bv_from_vt_bt(vt: f64, bt: f64) -> f64 {
     0.850 * (bt - vt)
 }
 
-/// Coarse Johnson B−V approximation from the Gaia `BP−RP` colour, for
-/// *display chroma only* (the catalogue colour pipeline takes B−V). Gaia's own
-/// transformations (Riello et al. 2021) are defined the other way (synthetic
-/// Johnson from Gaia bands) and as polynomials in `BP−RP`; this single-slope
-/// inverse is intentionally approximate and is **not** used for any numerical
-/// output. Pinning the exact Riello polynomials is part of the `L-17`
-/// follow-up. The slope keeps the solar `BP−RP ≈ 0.82` near `B−V ≈ 0.65`.
+/// Johnson V from the Gaia DR3 `G` magnitude and the `BP−RP` colour, using the
+/// **exact Riello et al. 2021 (Gaia EDR3 / DR3) photometric relationship**
+/// (A&A 649, A3, Table 5.7, Johnson-Cousins row):
+///
+/// ```text
+/// G − V = −0.02704 + 0.01424·(BP−RP) − 0.2156·(BP−RP)² + 0.01426·(BP−RP)³
+/// ```
+///
+/// so `V = G − (G − V)`. The published 1-σ scatter is 0.030 mag and the
+/// relation is calibrated for `−0.5 ≲ BP−RP ≲ 5.0`; outside that range the
+/// colour is clamped to the calibration edge before evaluation so a stray
+/// faint-red row cannot produce a non-physical magnitude. Replaces the former
+/// "use G directly as the display magnitude" placeholder, which was ~0.15 mag
+/// off for solar-type stars and worse for red stars.
+pub fn gaia_v_from_g_bp_rp(g: f64, bp_rp: f64) -> f64 {
+    g - gaia_g_minus_v(bp_rp)
+}
+
+/// Riello 2021 Table 5.7 `G − V` cubic in `BP−RP` (calibration clamped to
+/// `[-0.5, 5.0]`).
+fn gaia_g_minus_v(bp_rp: f64) -> f64 {
+    let c = bp_rp.clamp(-0.5, 5.0);
+    -0.02704 + 0.01424 * c - 0.2156 * c * c + 0.01426 * c * c * c
+}
+
+/// Johnson B−V from the Gaia `BP−RP` colour, for the catalogue colour pipeline
+/// (B−V → T_eff → blackbody → sRGB).
+///
+/// Riello et al. 2021 publishes Gaia→Johnson relationships for `G − V`,
+/// `G − R`, and `G − I`, but **not** a Johnson `B` transform — Gaia carries no
+/// blue Johnson-equivalent band — so a directly-cited Gaia `B−V` does not
+/// exist. We therefore derive `B−V` from the two Riello relations that do span
+/// the Johnson system, `V − I = (G − I) − (G − V)`, and map the resulting
+/// `V − I` to `B − V` with the dwarf colour-colour relation of Caldwell et al.
+/// 1993 (`B−V ≈ 0.85·(V−I)` for `V−I ≲ 1.5`, the naked-eye regime). This is a
+/// *display-chroma* input, not an astrometric output; see `VALIDATION.md`.
 pub fn gaia_bv_from_bp_rp(bp_rp: f64) -> f64 {
-    0.79 * bp_rp
+    let v_minus_i = gaia_g_minus_i(bp_rp) - gaia_g_minus_v(bp_rp);
+    // Caldwell 1993 dwarf locus, clamped so very red rows stay monotonic.
+    0.85 * v_minus_i.clamp(-0.4, 3.0)
+}
+
+/// Riello 2021 Table 5.7 `G − I` quadratic in `BP−RP` (calibration clamped).
+fn gaia_g_minus_i(bp_rp: f64) -> f64 {
+    let c = bp_rp.clamp(-0.5, 5.0);
+    0.01753 + 0.76 * c - 0.0991 * c * c
 }
 
 // ---------------------------------------------------------------------------
@@ -411,10 +448,11 @@ impl CatalogBackend for Tycho2CsvBackend {
 ///
 /// Recognised columns: `source_id`/`Source`; `ra`/`RA_ICRS`/`RAdeg` and the
 /// declination equivalents (ICRS degrees); `parallax`/`Plx` (mas);
-/// `pmra`/`pmdec` (mas/yr); `phot_g_mean_mag`/`Gmag` (used directly as the
-/// display magnitude); `bp_rp`/`BP-RP` (mapped to an approximate B−V for
-/// display chroma only — see [`gaia_bv_from_bp_rp`]); optional `HIP` / `HD`
-/// cross-IDs from a cross-match join.
+/// `pmra`/`pmdec` (mas/yr); `phot_g_mean_mag`/`Gmag` and `bp_rp`/`BP-RP`
+/// (combined into a Johnson V via the Riello 2021 `G−V` relation — see
+/// [`gaia_v_from_g_bp_rp`] — and a B−V for display chroma via
+/// [`gaia_bv_from_bp_rp`]); optional `HIP` / `HD` cross-IDs from a cross-match
+/// join. When `bp_rp` is absent the raw `G` magnitude is used unchanged.
 pub fn parse_gaia_dr3_csv(data: &str) -> Vec<Star> {
     let mut reader = csv_reader(data);
     let Ok(header) = reader.headers() else {
@@ -444,9 +482,14 @@ pub fn parse_gaia_dr3_csv(data: &str) -> Vec<Star> {
         };
         let distance_pc =
             distance_from_parallax_mas(parse_f64(&record, plx_i)).unwrap_or(UNKNOWN_DISTANCE_PC);
-        let bv = parse_f64(&record, bprp_i)
-            .map(gaia_bv_from_bp_rp)
-            .unwrap_or(0.0);
+        let bp_rp = parse_f64(&record, bprp_i);
+        // Exact Riello 2021 G->V when a colour is present; otherwise fall back
+        // to the raw G magnitude (colourless rows cannot be transformed).
+        let v = match bp_rp {
+            Some(c) => gaia_v_from_g_bp_rp(gmag, c),
+            None => gmag,
+        };
+        let bv = bp_rp.map(gaia_bv_from_bp_rp).unwrap_or(0.0);
         let identifiers = CatalogIdentifiers::from_gaia_row(
             source_id,
             parse_u32(&record, hip_i),
@@ -459,7 +502,7 @@ pub fn parse_gaia_dr3_csv(data: &str) -> Vec<Star> {
             distance_pc,
             parse_f64(&record, pmra_i).unwrap_or(0.0),
             parse_f64(&record, pmde_i).unwrap_or(0.0),
-            gmag,
+            v,
             bv as f32,
         ));
     }
@@ -656,13 +699,42 @@ mod tests {
             star.identifiers.primary,
             Some(CatalogObjectId::GaiaDr3(4472832130942575872))
         );
-        assert!((star.magnitude - 8.2).abs() < 1e-3);
+        // G = 8.2, BP-RP = 0.82 -> Riello G-V = -0.1525 -> V = G + 0.1525.
+        assert!(
+            (star.magnitude - 8.3525).abs() < 1e-3,
+            "V={}",
+            star.magnitude
+        );
         // parallax 4 mas → 250 pc.
         assert!(
             (star.distance_pc - 250.0).abs() < 0.5,
             "dist={}",
             star.distance_pc
         );
+    }
+
+    #[test]
+    fn riello_g_minus_v_matches_published_solar_value() {
+        // Solar BP-RP ~= 0.82; Riello 2021 Table 5.7 gives G - V ~= -0.15,
+        // i.e. Gaia G is ~0.15 mag brighter than Johnson V for the Sun.
+        let g_minus_v = -gaia_g_minus_v(0.82);
+        // Stated as V - G here for readability of the published ~+0.15.
+        assert!((g_minus_v - 0.1525).abs() < 1e-3, "V-G(solar)={g_minus_v}");
+        // V from G is monotonic-ish and exact at the white-star anchor: a blue
+        // A0V (BP-RP ~ 0) has |G - V| < 0.03 (the published zero-point).
+        let v_a0 = gaia_v_from_g_bp_rp(5.0, 0.0);
+        assert!((v_a0 - 5.0).abs() < 0.03, "A0V V={v_a0}");
+    }
+
+    #[test]
+    fn riello_bv_is_monotonic_and_anchored() {
+        // B-V increases with BP-RP across the naked-eye colour range.
+        let blue = gaia_bv_from_bp_rp(-0.2);
+        let solar = gaia_bv_from_bp_rp(0.82);
+        let red = gaia_bv_from_bp_rp(1.8);
+        assert!(blue < solar && solar < red, "{blue} {solar} {red}");
+        // Solar BP-RP ~ 0.82 maps near the solar B-V ~ 0.65.
+        assert!((solar - 0.65).abs() < 0.2, "solar B-V={solar}");
     }
 
     #[test]

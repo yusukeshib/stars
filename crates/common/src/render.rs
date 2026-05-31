@@ -12,7 +12,8 @@ use anyhow::{Context, Result};
 use astronomy::Observer;
 use renderer::{Camera, Renderer, StarInstance};
 
-use crate::{load_star_instances_from_file_at, SessionScene};
+use crate::{load_star_instances_for_backend, SessionScene};
+use catalog::CatalogBackendKind;
 
 /// Render target format used by every native host. `Rgba8UnormSrgb` matches
 /// the CLI's previous local constant and the swap-chain format the desktop
@@ -206,7 +207,12 @@ pub async fn render_scene_from_catalog_path(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| default_catalog.as_ref().to_path_buf());
     let variable_jd = options.variable_magnitudes.then_some(scene.time.jd_utc);
-    let instances = load_star_instances_from_file_at(
+    // L-17: re-select the session's recorded backend; unknown / legacy labels
+    // fall back to HYG so older sessions still render.
+    let backend = CatalogBackendKind::from_kebab_str(&scene.catalog.backend)
+        .unwrap_or(CatalogBackendKind::HygCsv);
+    let instances = load_star_instances_for_backend(
+        backend,
         &catalog_path,
         scene.catalog.limiting_magnitude,
         variable_jd,

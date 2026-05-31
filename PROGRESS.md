@@ -3526,12 +3526,13 @@ References (pinned in ROADMAP `L-06`): Park, R. S. et al. 2021, AJ 161, 105
 (DE440); Acton, C. H. 1996, Planet. Space Sci. 44, 65 (SPICE); NAIF DAF / SPK
 Required Reading.
 
-## `L-17` Hipparcos / Tycho-2 / Gaia DR3 ingest — partial (catalog backends + cross-match)
+## `L-17` Hipparcos / Tycho-2 / Gaia DR3 ingest — shipped
 
-The large-catalog ingest path now exists behind the `L-16` `CatalogBackend`
-trait, so the engine can read Hipparcos, Tycho-2, and Gaia DR3 at their native
-precision tiers without rewriting host/render code. Host wiring and Gaia LOD
-streaming are the documented follow-up.
+The large-catalog ingest path exists behind the `L-16` `CatalogBackend`
+trait, so the engine reads Hipparcos, Tycho-2, and Gaia DR3 at their native
+precision tiers without rewriting host/render code. The follow-up — Gaia
+LOD / spatial-tile streaming, the exact Riello 2021 photometric transforms,
+and CLI / viewer host wiring — has now landed (see items 7–9 below).
 
 1. **What changed.** New `crates/catalog/src/ingest.rs` adds three backends:
    `HipparcosCsvBackend` (VizieR I/239), `Tycho2CsvBackend` (I/259), and
@@ -3568,16 +3569,64 @@ streaming are the documented follow-up.
    arcsecond; Tycho-2 VT/BT→V transform + packed TYC round-trip; Gaia DR3 row
    parse; HIP→TYC→Gaia identifier round-trip; magnitude filter + paging
    truncation; bright-star anchor HIP↔HD round-trip over the committed index.
-6. **Deferred (the `L-17` follow-up).** Gaia LOD / spatial-tile streaming of
-   the full 1.8 B-row source; bench coverage; the exact Riello et al. 2021
-   Gaia→Johnson photometric transforms (a single-slope `BP−RP`→`B−V`
-   approximation is used for display chroma only); and the CLI / viewer / web
-   host wiring + size-capped WASM web subset (kept out of this catalog-only
-   change to avoid colliding with parallel `L-18` work).
+6. **Tests / validation.** `catalog::ingest` (now 11 tests) and
+   `catalog::lod` (10 tests), see below.
+
+7. **Gaia LOD / spatial-tile streaming (follow-up, shipped).** New
+   `crates/catalog/src/lod.rs` cuts the sky into a fixed equirectangular grid
+   (`TileId`, 18×36 cells) and splits each cell into magnitude *tiers*
+   (`TIER_BOUNDS = [6, 9, 12, 16]`). Tier 0 is the bright all-sky base layer
+   and is always streamed; fainter tiers are streamed only for cells whose
+   centre is within `radius + cell-half-diagonal` of the view direction
+   (conservative cull — a cell is never wrongly dropped). Tiles are
+   **content-addressable**: a `LodIndex` maps each populated `TileId` to a
+   content hash, and a `BlobStore` (`MemoryBlobStore` for tests/fixtures,
+   `FsCasBlobStore` for the on-disk `<root>/<hash[..2]>/<hash>` layout) reads
+   the payload by hash. Tile payloads are Gaia DR3 CSV, decoded by the same
+   `parse_gaia_dr3_csv` ingest path, so streaming reuses the exact
+   photometric + identifier pipeline of the single-file backend.
+   `LodCatalog::stream(&query)` returns stars in stable tier→lat→lon order
+   plus `tiles_examined` / `tiles_loaded` cull bookkeeping. The CAS key is a
+   fast FNV-1a content hash (dedup/integrity inside the engine); committed
+   fixtures stay SHA-256-pinned in `data/manifest.toml`.
+8. **Riello 2021 photometric transforms (follow-up, shipped).** The Gaia
+   parser now derives Johnson **V** from `G` and `BP−RP` via the exact
+   Riello et al. 2021 (Gaia EDR3/DR3) Table 5.7 `G−V` cubic
+   (`gaia_v_from_g_bp_rp`) instead of using raw `G` as the magnitude (the old
+   path was ~0.15 mag off for solar-type stars). Display **B−V** is composed
+   from the Riello `G−V` and `G−I` relations (`V−I`) mapped to `B−V` by the
+   Caldwell 1993 dwarf locus; Gaia publishes no Johnson-B transform, so this
+   colour is documented as a display-chroma input, not an astrometric output
+   (`VALIDATION.md`).
+9. **Host wiring (follow-up, shipped).** `stars_host_common`'s
+   `load_star_instances_for_backend` + `catalog_snapshot_for` dispatch on a
+   `CatalogBackendKind`; the CLI and viewer expose `--catalog-backend`
+   (`hyg` | `hipparcos` | `tycho2` | `gaia-dr3`), the choice is recorded in
+   the JSON session's `catalog.backend`, and `render_scene_from_catalog_path`
+   re-selects it on replay (unknown/legacy labels fall back to HYG). The web
+   build keeps the embedded HYG subset (per the design doc's WASM-subset
+   policy); LOD streaming is the native / optional path.
+10. **Bench / scaling coverage.** `catalog::lod` includes a deterministic
+    scaling assertion (`lod_cull_does_not_blow_up_with_catalog_size`): growing
+    the faint layer ~9× leaves the per-frame *loaded* faint-tile count for a
+    fixed 5° FOV bounded (≤6), i.e. O(FOV) not O(catalogue). A wall-clock
+    criterion micro-bench is intentionally omitted (the CI image carries no
+    criterion harness; the scaling test is the CI-safe equivalent).
+11. **Where it lives (follow-up).** `crates/catalog/src/lod.rs` (new),
+    `crates/catalog/src/ingest.rs` (Riello transforms), `crates/catalog/src/
+    backend.rs` (`CatalogBackendKind::from_kebab_str`), `crates/catalog/src/
+    lib.rs` exports, `crates/common/src/lib.rs`
+    (`load_star_instances_for_backend`, `catalog_snapshot_for`,
+    `CatalogBackendArg`), `crates/common/src/render.rs` (backend dispatch),
+    `apps/cli/src/main.rs` + `apps/viewer/src/main.rs` (`--catalog-backend`).
+    No new committed data artifact (the LOD tests build synthetic in-memory /
+    temp-dir fixtures), so no manifest churn.
 
 References: Perryman 1997, A&A 323, L49 (Hipparcos); ESA 1997, SP-1200
 (VT/BT transform); Høg 2000, A&A 355, L27 (Tycho-2); Gaia Collaboration 2022,
-A&A 674, A1 (Gaia DR3).
+A&A 674, A1 (Gaia DR3); Riello et al. 2021, A&A 649, A3 (Gaia EDR3/DR3
+photometric relationships); Caldwell et al. 1993, SAAOC 15, 1 (dwarf
+colour-colour locus).
 
 ## `L-23` Guided education mode — shipped (CLI + viewer + web)
 

@@ -97,6 +97,34 @@ The first large-catalog implementation of this plan should stay native-only.
 WASM keeps the small embedded HYG subset until a separately generated,
 size-capped web subset is documented in the data manifest.
 
+### Implemented (`L-17` Gaia LOD streaming)
+
+`crates/catalog/src/lod.rs` realises items 1–4 of the plan above:
+
+- **Magnitude tiering** — `TIER_BOUNDS = [6, 9, 12, 16]`; tier 0 is the bright
+  all-sky base and is always streamed, fainter tiers stream per-FOV.
+- **Spatial indexing** — a fixed equirectangular grid (`TileId`,
+  `LAT_BANDS = 18` × `LON_BANDS = 36`). `LodCatalog::stream` selects a faint
+  cell when its centre is within `radius + TileId::max_half_diagonal_rad()`
+  of the view direction (conservative: never wrongly culled).
+- **Stable ordering** — streamed stars are sorted tier→lat→lon, then follow
+  the stored row order inside a tile, so notebook / session output is diffable.
+- **Content-addressable store** — `LodIndex` maps each populated `TileId` to a
+  content hash; a `BlobStore` (`MemoryBlobStore`, or the native
+  `FsCasBlobStore` with a `<root>/<hash[..2]>/<hash>` layout) returns payload
+  bytes by hash, so identical tiles dedupe. Tile payloads are Gaia DR3 CSV,
+  decoded by `parse_gaia_dr3_csv`, reusing the single-file Gaia photometric +
+  identifier path. The in-engine CAS key is a fast FNV-1a content hash;
+  provenance hashing of any *committed* tile fixture still uses SHA-256 in
+  `data/manifest.toml`.
+
+The `LodStream` result reports `tiles_examined` / `tiles_loaded`; the
+`lod_cull_does_not_blow_up_with_catalog_size` test pins that the loaded
+faint-tile count for a fixed FOV stays bounded as the index grows, i.e. the
+cull is O(visible sky) not O(catalogue). Renderer upload batching (plan item 5)
+remains future work: hosts currently materialise the streamed `Vec<Star>`
+through the existing `build_star_instance` path.
+
 ## WASM subset policy
 
 - Default web builds continue using the compact embedded HYG artifact.
@@ -108,9 +136,11 @@ size-capped web subset is documented in the data manifest.
 
 ## Follow-on roadmap items
 
-- `L-17` (legacy `P3-01`) should implement actual Hipparcos / Tycho-2 / Gaia DR3 ingest behind
-  this trait and update `DATA_SOURCES.md` plus the future machine-readable
-  manifest.
+- `L-17` (legacy `P3-01`) — **done**: Hipparcos / Tycho-2 / Gaia DR3 ingest
+  behind this trait, the Gaia content-addressable LOD streaming layer above,
+  the exact Riello 2021 `G→V` photometric transform, and CLI / viewer
+  `--catalog-backend` host wiring all shipped. `DATA_SOURCES.md` and
+  `data/manifest.toml` carry the catalogue fetch-service + cross-match rows.
 - `L-18` (legacy `P3-02`) should pass compact object IDs through renderer/host selection paths.
 - `L-19` (legacy `P3-03`) should build optional SIMBAD / VizieR links from preserved IDs without
   making external services part of deterministic rendering.

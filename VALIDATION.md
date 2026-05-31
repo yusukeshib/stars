@@ -517,11 +517,29 @@ Model limits (named approximations):
 
 Current implementation includes:
 
-- `CatalogBackend` / `CatalogQuery` / `CatalogPage` scaffolding for future large
+- `CatalogBackend` / `CatalogQuery` / `CatalogPage` scaffolding for large
   catalogs;
 - `HygCsvBackend` preserving HYG, HIP, and HD numeric identifiers CPU-side;
+- the `L-17` `HipparcosCsvBackend` / `Tycho2CsvBackend` / `GaiaDr3CsvBackend`
+  ingest backends and the `catalog::lod` Gaia content-addressable LOD /
+  spatial-tile streaming layer;
 - source-side magnitude and row-limit filtering distinct from renderer limiting
   magnitude.
+
+Photometric transforms:
+
+- **Tycho-2** V and B−V come from the ESA 1997 SP-1200 VT/BT relations and are
+  pinned by `catalog::ingest` tests.
+- **Gaia DR3** Johnson **V** is derived from `G` and `BP−RP` via the exact
+  Riello et al. 2021 (Gaia EDR3/DR3, A&A 649, A3, Table 5.7) `G−V` cubic
+  (`gaia_v_from_g_bp_rp`), pinned against the published solar `G−V ≈ -0.15`
+  and the A0V zero-point. **Limitation:** Gaia publishes no Johnson-B
+  transform, so a directly-cited Gaia `B−V` does not exist. The display
+  `B−V` is composed from the Riello `G−V` / `G−I` relations (`V−I`) mapped to
+  `B−V` by the Caldwell et al. 1993 dwarf colour-colour locus. It feeds the
+  display-chroma pipeline (B−V → T_eff → blackbody → sRGB) only and is **not**
+  an astrometric or absolute-photometric output; its test asserts
+  monotonicity and a near-solar anchor, not a sub-percent magnitude tolerance.
 
 Validation expectation:
 
@@ -532,10 +550,14 @@ Validation expectation:
 - Large-catalog ingest should add tests for tile/LOD determinism, page cursor
   stability, and filtering boundaries.
 
-Current limitation:
+Validation expectation (LOD):
 
-- Renderer buffers and host hover/copy flows do not yet expose preserved IDs;
-  that remains tracked by `L-18`.
+- LOD streaming is covered by `catalog::lod` tests: tier assignment, the
+  direction→cell round-trip, all-sky vs. faint-limit tile selection, the
+  narrow-FOV faint-cell cull, deterministic stream ordering with preserved
+  Gaia identifiers, content-hash dedup, and the
+  `lod_cull_does_not_blow_up_with_catalog_size` scaling assertion (loaded
+  faint tiles stay O(FOV), not O(catalogue)).
 
 ### Reproducible scenes and visual regression
 

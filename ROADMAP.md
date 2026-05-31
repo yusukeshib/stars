@@ -150,11 +150,14 @@ manifest-pinned curated TLE snapshot, an `iss-pass` preset, and CLI / viewer /
 web host controls. With both shipped, every `V-51`–`V-56` item is now done.
 
 The Library track is at "amateur-grade is shipped" — every numbered item has
-now landed; the only open work is two documented follow-ups inside
-otherwise-shipped items: DE440-class ephemerides (`L-06`: the SPK Chebyshev
-kernel reader has shipped; kernel ingest + Horizons cross-check remain) and
-large-catalog LOD streaming + host wiring (`L-17`: the Hipparcos / Tycho-2 /
-Gaia DR3 CSV backends + cross-match shipped). The variable-star library
+now landed; the only open work is one documented follow-up inside an
+otherwise-shipped item: DE440-class ephemerides (`L-06`: the SPK Chebyshev
+kernel reader has shipped; kernel ingest + Horizons cross-check remain).
+Large-catalog ingest (`L-17`) is now complete: the Hipparcos / Tycho-2 /
+Gaia DR3 CSV backends + cross-match shipped first, and the follow-up has
+landed too — Gaia content-addressable LOD / spatial-tile streaming, the exact
+Riello 2021 `G→V` photometric transform, and CLI / viewer `--catalog-backend`
+wiring (web keeps the embedded HYG subset). The variable-star library
 (`L-20`) is now
 complete: light-curve elements + phase-folded model + web panel + CLI Δm, and
 the renderer whole-scene brightness override (rendered Mira / Algol sprites
@@ -264,7 +267,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-14` | Public demo gallery | ✅ |
 | `L-15` | Data provenance manifest | ✅ |
 | `L-16` | Catalog backend scaling design | ✅ |
-| `L-17` | Hipparcos / Tycho-2 / Gaia DR3 ingest (backends + cross-match ✅; LOD streaming + host wiring ⬜) | ◑ |
+| `L-17` | Hipparcos / Tycho-2 / Gaia DR3 ingest (backends + cross-match + Gaia LOD streaming + Riello transforms + host wiring) | ✅ |
 | `L-18` | Identifier preservation through the renderer | ✅ |
 | `L-19` | SIMBAD / VizieR deep links | ✅ |
 | `L-20` | Variable star light curves | ✅ |
@@ -3210,22 +3213,44 @@ backends.
 
 ---
 
-### `L-17` Hipparcos / Tycho-2 / Gaia DR3 ingest — ◑ partial
+### `L-17` Hipparcos / Tycho-2 / Gaia DR3 ingest — ✅ done
 
 **Status.** The catalog-backend layer is implemented, tested, and behind the
-`L-16` trait. **Shipped:** `HipparcosCsvBackend`, `Tycho2CsvBackend`, and
-`GaiaDr3CsvBackend` (parse normalised VizieR / Gaia CSV exports by column
-name, preserve native + cross identifiers, derive V/B−V via the ESA 1997
-VT/BT transform for Tycho, page through `CatalogQuery`/`CatalogPage`); fetch
-scripts (`scripts/fetch-hipparcos.sh`, `fetch-tycho2.sh`,
-`fetch-gaia-dr3-subset.sh`); a committed HIP↔HD bright-star cross-match anchor
-index (`crates/catalog/data/bright_star_xmatch.csv`, generated from HYG);
-and manifest rows for all four artifacts. **Deferred (the `L-17` follow-up):**
-Gaia LOD / spatial-tile streaming of the full 1.8 B-row source, the
-bench coverage, the exact Riello et al. 2021 Gaia photometric transforms,
-and the CLI / viewer / web host wiring + WASM web subset (held out of this
-catalog-only change so it does not collide with the parallel `L-18` /
-identifier-through-renderer work).
+`L-16` trait. **Shipped (first pass):** `HipparcosCsvBackend`,
+`Tycho2CsvBackend`, and `GaiaDr3CsvBackend` (parse normalised VizieR / Gaia
+CSV exports by column name, preserve native + cross identifiers, derive V/B−V
+via the ESA 1997 VT/BT transform for Tycho, page through
+`CatalogQuery`/`CatalogPage`); fetch scripts (`scripts/fetch-hipparcos.sh`,
+`fetch-tycho2.sh`, `fetch-gaia-dr3-subset.sh`); a committed HIP↔HD bright-star
+cross-match anchor index (`crates/catalog/data/bright_star_xmatch.csv`,
+generated from HYG); and manifest rows for all four artifacts.
+
+**Shipped (follow-up — completes the item):**
+- **Gaia LOD / spatial-tile streaming** — `crates/catalog/src/lod.rs` cuts the
+  sky into a fixed equirectangular grid (`TileId`, 18×36 cells) split into
+  magnitude tiers (`TIER_BOUNDS = [6, 9, 12, 16]`). The bright tier-0 base is
+  always streamed; fainter tiers load only for cells intersecting the view
+  cone (conservative `radius + cell-half-diagonal` cull). Tiles are
+  content-addressable: a `LodIndex` maps each `TileId` to a content hash and a
+  `BlobStore` (`MemoryBlobStore` / `FsCasBlobStore`) reads payloads by hash;
+  tile payloads are Gaia CSV decoded by the same `parse_gaia_dr3_csv` path.
+  `LodCatalog::stream` returns stars in stable tier→lat→lon order plus
+  `tiles_loaded` cull bookkeeping.
+- **Exact Riello 2021 photometric transform** — the Gaia parser derives
+  Johnson V from `G` and `BP−RP` via the Riello et al. 2021 (Gaia EDR3/DR3)
+  Table 5.7 `G−V` cubic (`gaia_v_from_g_bp_rp`), replacing "use G as the
+  magnitude". Display B−V is composed from the Riello `G−V` / `G−I` relations
+  and the Caldwell 1993 dwarf locus (chroma only; Gaia publishes no Johnson-B
+  transform — documented in `VALIDATION.md`).
+- **Host wiring** — CLI / viewer `--catalog-backend` (`hyg` | `hipparcos` |
+  `tycho2` | `gaia-dr3`) via `stars_host_common::load_star_instances_for_backend`
+  + `catalog_snapshot_for`; the choice is recorded in `catalog.backend` and
+  re-selected on session replay. The web build keeps the embedded HYG subset
+  (design-doc WASM-subset policy); LOD streaming is the native / optional path.
+- **Bench / scaling coverage** — `lod_cull_does_not_blow_up_with_catalog_size`
+  pins the per-frame loaded faint-tile count for a fixed FOV bounded (O(FOV),
+  not O(catalogue)) as the index grows ~9×; a wall-clock criterion micro-bench
+  is intentionally omitted (no criterion harness in the CI image).
 
 **Item.** Pluggable catalog backend that supports Hipparcos (118 k stars),
 Tycho-2 (2.5 M), and Gaia DR3 (1.8 B) at increasing precision tiers while
@@ -3254,8 +3279,11 @@ documented zero-points.
 - Cross-catalog comparison: Sirius J2000 position from Hipparcos vs.
   HYG vs. Gaia DR3 within their stated tolerances.
 
-**Hosts wired.** CLI / viewer / web (web defaults to embedded HYG; LOD
-streaming optional behind a setting).
+**Hosts wired.** CLI / viewer `--catalog-backend` selects HYG / Hipparcos /
+Tycho-2 / Gaia DR3 and records it in the session; web keeps the embedded HYG
+subset (WASM-subset policy in `docs/catalog-backend-design.md`). The Gaia LOD
+content-addressable streaming layer (`catalog::lod`) is the native / optional
+path for the full source.
 
 ---
 

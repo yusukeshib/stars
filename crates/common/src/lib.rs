@@ -12,7 +12,10 @@ use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use astronomy::{FalchiAtlas, TimeScales};
-use catalog::{load_from_file, render_magnitude_at, CatalogObjectId, CatalogSource};
+use catalog::{
+    load_from_file, parse_gaia_dr3_csv, parse_hipparcos_csv, parse_tycho2_csv, render_magnitude_at,
+    CatalogObjectId, CatalogSource, Star,
+};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +30,7 @@ pub use goto::{resolve_goto_id, resolve_goto_query, GotoTarget};
 // L-19 CDS deep-link helpers. The pure URL builders live in `catalog` so the
 // WASM web binding can share the single source of truth; we re-export them on
 // the documented `stars_host_common` path for the native hosts.
-pub use catalog::{simbad_query_url, vizier_query_url, StarIdentifiers};
+pub use catalog::{simbad_query_url, vizier_query_url, CatalogBackendKind, StarIdentifiers};
 pub use comets::{curated_comet_elements, curated_comet_layer, CURATED_COMET_TEXT};
 pub use presets::*;
 pub use render::*;
@@ -144,6 +147,35 @@ impl From<OverlayPalette> for OverlayPaletteArg {
             OverlayPalette::Default => OverlayPaletteArg::Default,
             OverlayPalette::ColorblindSafe => OverlayPaletteArg::ColorblindSafe,
             OverlayPalette::HighContrast => OverlayPaletteArg::HighContrast,
+        }
+    }
+}
+
+/// `L-17` host catalog-backend selector. Mirrors [`CatalogBackendKind`] for
+/// `clap` parsing and (de)serialises kebab-case for the session JSON. `HygCsv`
+/// is the native default; the non-HYG backends read the normalised CSV export
+/// at `--catalog` (fetched by `scripts/fetch-*.sh`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CatalogBackendArg {
+    /// HYG v4.2 CSV (the merged Hipparcos / Tycho-2 / Gliese default).
+    #[default]
+    Hyg,
+    /// Hipparcos main catalogue (VizieR I/239), ~1 mas astrometry.
+    Hipparcos,
+    /// Tycho-2 (VizieR I/259), ~60 mas astrometry.
+    Tycho2,
+    /// Gaia DR3 (VizieR I/355 / Gaia archive), µas astrometry for bright stars.
+    GaiaDr3,
+}
+
+impl From<CatalogBackendArg> for CatalogBackendKind {
+    fn from(a: CatalogBackendArg) -> Self {
+        match a {
+            CatalogBackendArg::Hyg => CatalogBackendKind::HygCsv,
+            CatalogBackendArg::Hipparcos => CatalogBackendKind::Hipparcos,
+            CatalogBackendArg::Tycho2 => CatalogBackendKind::Tycho2,
+            CatalogBackendArg::GaiaDr3 => CatalogBackendKind::GaiaDr3,
         }
     }
 }
@@ -695,10 +727,24 @@ pub fn load_star_instances_from_file_at(
     limiting_magnitude: f32,
     variable_jd: Option<f64>,
 ) -> Result<Vec<StarInstance>> {
-    let path = path.as_ref();
-    let stars =
-        load_from_file(path).with_context(|| format!("Reading catalog at {}", path.display()))?;
-    Ok(stars
+    load_star_instances_for_backend(
+        CatalogBackendKind::HygCsv,
+        path,
+        limiting_magnitude,
+        variable_jd,
+    )
+}
+
+/// Convert a parsed catalogue `Star` slice into renderer-ready instances using
+/// the shared perceptual magnitude / colour pipeline and (optionally) the
+/// `L-20` variable-star brightness override. Centralised so every backend
+/// bridges `catalog` → `renderer` identically.
+fn stars_to_instances(
+    stars: &[Star],
+    limiting_magnitude: f32,
+    variable_jd: Option<f64>,
+) -> Vec<StarInstance> {
+    stars
         .iter()
         .map(|s| {
             let magnitude = match variable_jd {
@@ -718,7 +764,42 @@ pub fn load_star_instances_from_file_at(
                 s.identifiers.pick_handle(),
             )
         })
-        .collect())
+        .collect()
+}
+
+/// `L-17` host catalog selection: load a star catalogue with the chosen
+/// backend and bridge it to renderer instances. HYG (CSV) stays the native
+/// default; the Hipparcos / Tycho-2 / Gaia DR3 backends parse the normalised
+/// CSV export at `path` (fetched by `scripts/fetch-*.sh`). The embedded HYG
+/// backend is a WASM-only concept, so it falls back to the HYG CSV at `path`
+/// on native hosts.
+pub fn load_star_instances_for_backend(
+    backend: CatalogBackendKind,
+    path: impl AsRef<Path>,
+    limiting_magnitude: f32,
+    variable_jd: Option<f64>,
+) -> Result<Vec<StarInstance>> {
+    let path = path.as_ref();
+    let stars = match backend {
+        CatalogBackendKind::HygCsv | CatalogBackendKind::HygEmbedded => load_from_file(path)
+            .with_context(|| format!("Reading HYG catalog at {}", path.display()))?,
+        CatalogBackendKind::Hipparcos => {
+            let data = std::fs::read_to_string(path)
+                .with_context(|| format!("Reading Hipparcos CSV at {}", path.display()))?;
+            parse_hipparcos_csv(&data)
+        }
+        CatalogBackendKind::Tycho2 => {
+            let data = std::fs::read_to_string(path)
+                .with_context(|| format!("Reading Tycho-2 CSV at {}", path.display()))?;
+            parse_tycho2_csv(&data)
+        }
+        CatalogBackendKind::GaiaDr3 => {
+            let data = std::fs::read_to_string(path)
+                .with_context(|| format!("Reading Gaia DR3 CSV at {}", path.display()))?;
+            parse_gaia_dr3_csv(&data)
+        }
+    };
+    Ok(stars_to_instances(&stars, limiting_magnitude, variable_jd))
 }
 
 /// `L-18` interactive pick for native hosts: resolve a screen-space click to a
@@ -744,9 +825,25 @@ pub fn pick_star_label(
 
 /// Build the session catalog snapshot for the current HYG CSV backend.
 pub fn hyg_catalog_snapshot(path: impl AsRef<Path>, limiting_magnitude: f32) -> CatalogSnapshot {
-    let source = CatalogSource::HYG_CSV;
+    catalog_snapshot_for(CatalogBackendKind::HygCsv, path, limiting_magnitude)
+}
+
+/// Build the session catalog snapshot for any `L-17` backend kind, recording
+/// the source name / version so a reproduced session re-selects the same
+/// catalogue.
+pub fn catalog_snapshot_for(
+    backend: CatalogBackendKind,
+    path: impl AsRef<Path>,
+    limiting_magnitude: f32,
+) -> CatalogSnapshot {
+    let source = match backend {
+        CatalogBackendKind::HygCsv | CatalogBackendKind::HygEmbedded => CatalogSource::HYG_CSV,
+        CatalogBackendKind::Hipparcos => CatalogSource::HIPPARCOS,
+        CatalogBackendKind::Tycho2 => CatalogSource::TYCHO2,
+        CatalogBackendKind::GaiaDr3 => CatalogSource::GAIA_DR3,
+    };
     CatalogSnapshot {
-        backend: source.backend.as_kebab_str().to_string(),
+        backend: backend.as_kebab_str().to_string(),
         source: source.name.to_string(),
         version: source.version.map(str::to_string),
         path: Some(path.as_ref().display().to_string()),
