@@ -35,8 +35,8 @@ pub use renderer::OpticalDesign;
 pub use renderer::DEFAULT_SCREEN_LIMITING_MAGNITUDE;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation,
-    LightPollution, OutputColourSpace, OverlayConfig, OverlayKind, Scintillation, SkyProjection,
-    SkyViewpoint, StarInstance,
+    LightPollution, OutputColourSpace, OverlayConfig, OverlayKind, OverlayPalette, Scintillation,
+    SkyProjection, SkyViewpoint, StarInstance,
 };
 pub use satellites::{
     curated_satellite_layer, curated_satellite_tles, CURATED_TLE_TEXT,
@@ -102,6 +102,48 @@ impl From<OverlayArg> for OverlayKind {
             OverlayArg::ConstellationLabels => OverlayKind::ConstellationLabels,
             OverlayArg::CardinalLabels => OverlayKind::CardinalLabels,
             OverlayArg::DegreeLabels => OverlayKind::DegreeLabels,
+        }
+    }
+}
+
+/// CLI / session mirror of [`renderer::OverlayPalette`] (`L-24`). Derives
+/// [`ValueEnum`] for `clap` and (de)serialises as kebab-case for the session
+/// JSON and the WASM binding. Pinned to the renderer enum by
+/// [`overlay_palette_arg_round_trips`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OverlayPaletteArg {
+    /// Historical hue-per-layer colours; byte-identical default render.
+    #[default]
+    Default,
+    /// Okabe-Ito / Wong 2011 colour-universal qualitative palette.
+    ColorblindSafe,
+    /// Maximum-luminance high-contrast set (low-vision / forced-colors).
+    HighContrast,
+}
+
+impl std::fmt::Display for OverlayPaletteArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(OverlayPalette::from(*self).as_kebab_str())
+    }
+}
+
+impl From<OverlayPaletteArg> for OverlayPalette {
+    fn from(p: OverlayPaletteArg) -> Self {
+        match p {
+            OverlayPaletteArg::Default => OverlayPalette::Default,
+            OverlayPaletteArg::ColorblindSafe => OverlayPalette::ColorblindSafe,
+            OverlayPaletteArg::HighContrast => OverlayPalette::HighContrast,
+        }
+    }
+}
+
+impl From<OverlayPalette> for OverlayPaletteArg {
+    fn from(p: OverlayPalette) -> Self {
+        match p {
+            OverlayPalette::Default => OverlayPaletteArg::Default,
+            OverlayPalette::ColorblindSafe => OverlayPaletteArg::ColorblindSafe,
+            OverlayPalette::HighContrast => OverlayPaletteArg::HighContrast,
         }
     }
 }
@@ -291,6 +333,7 @@ pub fn overlay_config_from_args(
     grid_step_deg: f64,
     overlay_opacity: f32,
     deep_sky_magnitude_limit: f32,
+    palette: OverlayPaletteArg,
 ) -> OverlayConfig {
     let layers = if overlays_disabled {
         Vec::new()
@@ -302,6 +345,7 @@ pub fn overlay_config_from_args(
         grid_step_deg,
         opacity: overlay_opacity.clamp(0.0, 1.0),
         deep_sky_magnitude_limit,
+        palette: palette.into(),
     }
 }
 
@@ -949,17 +993,48 @@ mod tests {
     #[test]
     fn overlay_config_helper_applies_disable_and_opacity_rules() {
         let overlays = [OverlayArg::Horizon, OverlayArg::ConstellationLines];
-        let enabled = overlay_config_from_args(false, &overlays, 30.0, 2.0, 7.0);
+        let enabled = overlay_config_from_args(
+            false,
+            &overlays,
+            30.0,
+            2.0,
+            7.0,
+            OverlayPaletteArg::ColorblindSafe,
+        );
         assert_eq!(
             enabled.layers,
             vec![OverlayKind::Horizon, OverlayKind::ConstellationLines]
         );
         assert_eq!(enabled.grid_step_deg, 30.0);
         assert_eq!(enabled.opacity, 1.0);
+        assert_eq!(enabled.palette, OverlayPalette::ColorblindSafe);
 
-        let disabled = overlay_config_from_args(true, &overlays, 15.0, 0.5, 7.0);
+        let disabled =
+            overlay_config_from_args(true, &overlays, 15.0, 0.5, 7.0, OverlayPaletteArg::Default);
         assert!(disabled.layers.is_empty());
         assert_eq!(disabled.opacity, 0.5);
+        assert_eq!(disabled.palette, OverlayPalette::Default);
+    }
+
+    #[test]
+    fn overlay_palette_arg_round_trips() {
+        for (arg, kind) in [
+            (OverlayPaletteArg::Default, OverlayPalette::Default),
+            (
+                OverlayPaletteArg::ColorblindSafe,
+                OverlayPalette::ColorblindSafe,
+            ),
+            (
+                OverlayPaletteArg::HighContrast,
+                OverlayPalette::HighContrast,
+            ),
+        ] {
+            assert_eq!(OverlayPalette::from(arg), kind);
+            assert_eq!(OverlayPaletteArg::from(kind), arg);
+            // kebab spelling is shared with the renderer enum.
+            assert_eq!(arg.to_string(), kind.as_kebab_str());
+        }
+        assert_eq!(OverlayPaletteArg::default(), OverlayPaletteArg::Default);
     }
 
     #[test]

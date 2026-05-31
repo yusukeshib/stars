@@ -246,9 +246,14 @@ Hosts own platform lifecycle:
   `.sr-only`, reduced-motion / forced-colors), a keyboard-operable
   `StarCanvas` (arrow-key pan, `+`/`-` zoom), modal focus management +
   focus trap on the popovers, and the WAI-ARIA tabs pattern on the settings
-  panel. It is attribute-level only — no session-schema or renderer change —
-  so the renderer CVD-safe overlay palette and audio cues remain `L-24`
-  follow-ups.
+  panel. The two `L-24` follow-ups have landed: the CVD-safe overlay palette
+  (`OverlayConfig::palette` / `OverlayPalette`, recolouring the overlay line
+  layers onto the Okabe-Ito / Wong 2011 set — CPU-side overlay colours, so no
+  shader change, selectable in CLI / viewer / web), and an opt-in Web Audio
+  Az/Alt sonifier (`audio.ts`, frontend-only). The palette is a single
+  optional `palette` session field (skipped when `Default`, so no schema bump
+  and byte-identical presets); the audio cue is a device preference outside
+  the session schema.
 
 ### `bindings/python` (L-21, read-only)
 

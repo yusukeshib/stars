@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { StarView } from "stars-web";
+import { AzAltSonifier } from "../audio";
 import { useT } from "../i18n";
 import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type AuroraConfig, type CometsConfig, type EyepieceConfig, type MeteorsConfig, type Observer, type OutputColourspace, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type RecommendedPlan, type SatellitesConfig, type ScintillationConfig, type View } from "../observer";
 
@@ -23,6 +24,9 @@ type Props = {
   /// phase-folded magnitude for the session time. Off preserves catalogue
   /// magnitudes. A host-side view preference (not in the session schema).
   variableMagnitudes: boolean;
+  /// L-24 accessibility: when true, sonify the view-centre az/alt with a
+  /// panned tone (pan = azimuth, pitch = altitude). Default off.
+  audioCues: boolean;
   /// L-18 canvas pick: notified with the goto-record JSON of the star under a
   /// tap (or `"null"` for a miss) so the parent can open the info panel.
   onPick: (recordJson: string) => void;
@@ -72,6 +76,7 @@ export function StarCanvas({
   eyepiece,
   outputColourspace,
   variableMagnitudes,
+  audioCues,
   onPick,
   onDrag,
   onWheel,
@@ -138,8 +143,24 @@ export function StarCanvas({
       overlays.gridStepDeg,
       overlays.opacity,
       overlays.deepSkyMagnitudeLimit,
+      overlays.palette,
     );
   }, [overlays]);
+
+  // L-24 accessibility: sonify the view-centre az/alt while audio cues are on.
+  // The sonifier is created lazily and disposed on unmount; pan/pitch track the
+  // view, so keyboard panning is audible without reading the screen.
+  const sonifierRef = useRef<AzAltSonifier | null>(null);
+  if (sonifierRef.current === null && AzAltSonifier.isSupported()) {
+    sonifierRef.current = new AzAltSonifier();
+  }
+  useEffect(() => {
+    const sonifier = sonifierRef.current;
+    if (!sonifier) return;
+    sonifier.setEnabled(audioCues);
+    sonifier.update(view.azimuthDeg, view.altitudeDeg);
+  }, [audioCues, view.azimuthDeg, view.altitudeDeg]);
+  useEffect(() => () => sonifierRef.current?.dispose(), []);
 
   useEffect(() => {
     handleRef.current?.set_planets_enabled(planets.enabled);
@@ -247,7 +268,7 @@ export function StarCanvas({
       // Apply whatever overlay state is current right now -- could be the
       // initial defaults or something the user toggled during the wasm boot.
       const ov = overlaysRef.current;
-      handle.set_overlays(ov.layers, ov.gridStepDeg, ov.opacity, ov.deepSkyMagnitudeLimit);
+      handle.set_overlays(ov.layers, ov.gridStepDeg, ov.opacity, ov.deepSkyMagnitudeLimit, ov.palette);
       const at = atmosphereRef.current;
       handle.set_atmosphere_config(
         at.enabled,

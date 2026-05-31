@@ -17,8 +17,8 @@ use stars_host_common::{
     scene_preset_infos, scintillation_from_args, viewpoint_from_args, AtmosphereOverrides,
     AtmospherePresetArg, AuroraSeasonArg, CorrectionSnapshot, ExternalViewpointOverrides,
     EyepieceOverrides, LightPollutionOverrides, OpticalDesign, OutputColourspaceArg, OverlayArg,
-    ProjectionArg, RenderOptions, ScenePresetArg, ScintillationOverrides, SessionScene,
-    StarSession, ViewpointArg,
+    OverlayPaletteArg, ProjectionArg, RenderOptions, ScenePresetArg, ScintillationOverrides,
+    SessionScene, StarSession, ViewpointArg,
 };
 
 /// Resolve the V-45 optical design from the `--telescope-design` /
@@ -172,6 +172,13 @@ struct Args {
     /// `--overlays`.
     #[arg(long, default_value_t = renderer::DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT)]
     deep_sky_magnitude_limit: f32,
+
+    /// Colour palette for the structural overlay lines (L-24 accessibility).
+    /// `default` keeps the historical colours; `colorblind-safe` remaps every
+    /// line layer onto the Okabe-Ito / Wong 2011 colour-universal palette;
+    /// `high-contrast` lifts those hues toward maximum luminance.
+    #[arg(long, value_enum, default_value_t = OverlayPaletteArg::Default)]
+    overlay_palette: OverlayPaletteArg,
 
     /// Limiting apparent magnitude of the simulated observer. Stars fainter
     /// than this fade through the shader's discard cutoff. Increasing this
@@ -474,6 +481,7 @@ fn main() -> Result<()> {
             args.grid_step_deg,
             args.overlay_opacity,
             args.deep_sky_magnitude_limit,
+            args.overlay_palette,
         );
         let atmosphere = atmosphere_from_args(
             args.no_extinction,

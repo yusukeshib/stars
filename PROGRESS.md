@@ -3620,7 +3620,7 @@ reproducible scenes rather than ad-hoc panning.
    both files.
 7. **Hosts wired.** CLI, viewer, web.
 
-## `L-24` Accessibility pass — web WCAG 2.2 AA core shipped (◑)
+## `L-24` Accessibility pass — ✅ (web WCAG core + CVD overlay palette + Az/Alt audio cue; axe-core CI gate deferred)
 
 The web frontend now meets the WCAG 2.2 AA core that the `V-05` HUD note
 deferred here. No session-schema change and no new feature component — the
@@ -3662,6 +3662,51 @@ components, so it stays separable from the parallel `L-23` education work.
    the rest of the frontend test infrastructure.
 5. **Reference.** W3C WCAG 2.2; WAI-ARIA Authoring Practices (dialog + tabs);
    Wong 2011, Nature Methods 8, 441 (for the deferred CVD palette).
+
+### `L-24` follow-up — CVD-safe overlay palette + Az/Alt audio cues (flips L-24 to ✅)
+
+The two deferred sub-items have now shipped, so the row is `✅` (only the
+automated axe-core CI gate stays deferred, since the frontend still has no JS
+test harness).
+
+1. **CVD-safe overlay palette.** `renderer::OverlayPalette`
+   (`Default` / `ColorblindSafe` / `HighContrast`) on `OverlayConfig::palette`.
+   The overlay *line* colours are CPU-side uniforms (set in `overlay.rs`
+   `build_layer` → `palette_color`), so there is **no shader change** and the
+   shared `CameraUniform` is untouched. `Default` returns the historical
+   per-layer RGB byte-for-byte (pinned by `default_palette_is_byte_identical`);
+   `ColorblindSafe` / `HighContrast` remap the eleven structural line layers
+   (horizon, alt-az / equatorial grids, ecliptic, celestial / galactic
+   equator, meridian, constellation lines / boundaries, deep-sky markers) onto
+   the Okabe-Ito / Wong 2011 colour-universal qualitative palette. Object-
+   identity text labels keep their legibility-tuned hues (disambiguated by
+   glyph shape, so not the dichromacy failure mode the palette addresses).
+2. **Audio cues.** `apps/web/frontend/src/audio.ts` (`AzAltSonifier`) maps the
+   view-centre azimuth → stereo pan and altitude → pitch (220–880 Hz, musical
+   interpolation) with a quiet continuous tone that tracks keyboard panning.
+   Opt-in (default off), an ARIA-labelled checkbox; created lazily on enable to
+   satisfy the autoplay/user-gesture policy and disposed on unmount.
+3. **Where it lives.** `crates/renderer/src/overlay.rs` (+ `lib.rs` export);
+   `crates/common/src/lib.rs` (`OverlayPaletteArg`, `overlay_config_from_args`)
+   + `crates/common/src/session.rs` (`SessionOverlays.palette`, optional +
+   skipped when `Default`); `apps/cli` (`--overlay-palette`); `apps/viewer`
+   (`P` key + `--overlay-palette`); `apps/web/src/lib.rs`
+   (`set_overlays(..., palette)`) + frontend `observer.ts` / `OverlayToggles`
+   (palette dropdown) / `audio.ts` / `StarCanvas` (sonifier) / `StatusBar`
+   (audio toggle) / `i18n` (en + ja).
+4. **Schema / presets / manifest.** No schema bump: `palette` is an optional
+   session field skipped when `Default`, exactly like
+   `deepSkyMagnitudeLimit`, so the committed `docs/presets/sessions/*.json`
+   are byte-identical and `data/manifest.toml` is unchanged. The session
+   field name `palette` matches the web frontend's `OverlayConfig.palette`
+   for cross-host round-trip.
+5. **Tests.** `renderer::overlay`: `default_palette_is_byte_identical`,
+   `cvd_palettes_remap_and_stay_distinct`, `overlay_palette_kebab_round_trips`.
+   `stars-host-common`: `overlay_palette_arg_round_trips` and the extended
+   `overlay_config_helper_*` assertion. Frontend `tsc --noEmit`. `make ci`
+   green.
+6. **Reference.** Wong, B. 2011, Nature Methods 8, 441 (= Okabe & Ito 2008
+   colour-universal design palette); W3C WCAG 2.2; WAI-ARIA APG.
 
 ## `L-18` Identifier preservation through the renderer — ✅ (round-trip + CLI/web primary-ID; canvas pick added in the follow-up below)
 

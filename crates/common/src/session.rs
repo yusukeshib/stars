@@ -21,8 +21,8 @@ use crate::curated_satellite_layer;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AtmospherePresetArg, AuroraSeasonArg, OutputColourspaceArg, OverlayArg, ProjectionArg,
-    ViewpointArg,
+    AtmospherePresetArg, AuroraSeasonArg, OutputColourspaceArg, OverlayArg, OverlayPaletteArg,
+    ProjectionArg, ViewpointArg,
 };
 
 /// Current JSON session schema. Increment when a breaking semantic change is
@@ -318,6 +318,12 @@ pub struct SessionOverlays {
     /// absent, the renderer-side default is used at apply time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deep_sky_magnitude_limit: Option<f32>,
+    /// `L-24` CVD-safe overlay palette. Optional + skipped when `Default` so
+    /// sessions written before the field existed round-trip and the committed
+    /// presets stay byte-identical (no schema bump). Absent → `Default`.
+    /// Serialised as `palette` to match the web frontend's `OverlayConfig`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub palette: Option<OverlayPaletteArg>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -590,6 +596,12 @@ impl StarSession {
                 grid_step_deg: scene.overlays.grid_step_deg,
                 opacity: scene.overlays.opacity,
                 deep_sky_magnitude_limit: Some(scene.overlays.deep_sky_magnitude_limit),
+                // Skip the field entirely for the default palette so existing
+                // presets serialise byte-identically (no schema bump).
+                palette: match OverlayPaletteArg::from(scene.overlays.palette) {
+                    OverlayPaletteArg::Default => None,
+                    other => Some(other),
+                },
             },
             projection: SessionProjection {
                 projection: ProjectionArg::from(scene.projection),
@@ -682,6 +694,11 @@ impl StarSession {
                     }
                     None => OverlayConfig::default().deep_sky_magnitude_limit,
                 },
+                palette: self
+                    .overlays
+                    .palette
+                    .map(renderer::OverlayPalette::from)
+                    .unwrap_or(renderer::OverlayPalette::Default),
             },
             atmosphere_preset,
             atmosphere: self.atmosphere.to_atmosphere()?,
@@ -1054,6 +1071,7 @@ mod tests {
                 grid_step_deg: 15.0,
                 opacity: 0.6,
                 deep_sky_magnitude_limit: OverlayConfig::default().deep_sky_magnitude_limit,
+                palette: OverlayConfig::default().palette,
             },
             atmosphere_preset: AtmospherePreset::ClearRural,
             atmosphere: Atmosphere::CLEAR_RURAL,
