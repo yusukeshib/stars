@@ -5,6 +5,7 @@ mod color;
 mod coords;
 mod deepsky;
 mod doubles;
+mod ingest;
 mod links;
 pub mod search;
 
@@ -23,6 +24,11 @@ pub use deepsky::{
     NO_PHOTOMETRY_SENTINEL_MAG,
 };
 pub use doubles::{double_stars, resolve_doubles, DoubleStar};
+pub use ingest::{
+    bright_star_cross_ids, cross_id_by_hd, cross_id_by_hip, gaia_bv_from_bp_rp, pack_tyc,
+    parse_gaia_dr3_csv, parse_hipparcos_csv, parse_tycho2_csv, tycho_bv_from_vt_bt,
+    tycho_v_from_vt_bt, unpack_tyc, BrightStarCrossId,
+};
 pub use links::{simbad_query_url, vizier_query_url, StarIdentifiers};
 pub use search::{search, SearchId, SearchKind, SearchMatch, SEARCH_LIMIT_DEFAULT};
 
@@ -30,6 +36,8 @@ pub use search::{search, SearchId, SearchKind, SearchMatch, SEARCH_LIMIT_DEFAULT
 pub use backend::HygCsvBackend;
 #[cfg(feature = "filesystem")]
 pub use catalog::load_from_file;
+#[cfg(feature = "filesystem")]
+pub use ingest::{GaiaDr3CsvBackend, HipparcosCsvBackend, Tycho2CsvBackend};
 
 #[cfg(feature = "embedded")]
 pub use backend::HygEmbeddedBackend;

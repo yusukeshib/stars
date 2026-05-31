@@ -63,6 +63,45 @@ impl CatalogIdentifiers {
             gaia_dr3: None,
         }
     }
+
+    /// Identifiers for a Hipparcos main-catalogue row. The HIP number is the
+    /// backend's primary identifier; an HD cross-ID is preserved when present.
+    pub(crate) const fn from_hipparcos_row(hip: u32, hd: Option<u32>) -> Self {
+        Self {
+            primary: Some(CatalogObjectId::Hipparcos(hip)),
+            hyg: None,
+            hip: Some(hip),
+            hd,
+            tycho2: None,
+            gaia_dr3: None,
+        }
+    }
+
+    /// Identifiers for a Tycho-2 row. The packed TYC number is primary; the
+    /// optional Hipparcos cross-ID from the Tycho-2 `HIP` column is preserved.
+    pub(crate) const fn from_tycho2_row(tycho2: u64, hip: Option<u32>) -> Self {
+        Self {
+            primary: Some(CatalogObjectId::Tycho2(tycho2)),
+            hyg: None,
+            hip,
+            hd: None,
+            tycho2: Some(tycho2),
+            gaia_dr3: None,
+        }
+    }
+
+    /// Identifiers for a Gaia DR3 row. The `source_id` is primary; HIP / HD
+    /// cross-IDs are preserved when a cross-match column supplies them.
+    pub(crate) const fn from_gaia_row(gaia_dr3: u64, hip: Option<u32>, hd: Option<u32>) -> Self {
+        Self {
+            primary: Some(CatalogObjectId::GaiaDr3(gaia_dr3)),
+            hyg: None,
+            hip,
+            hd,
+            tycho2: None,
+            gaia_dr3: Some(gaia_dr3),
+        }
+    }
 }
 
 /// Stable backend/source identity carried by catalog snapshots and future
@@ -86,12 +125,37 @@ impl CatalogSource {
         name: "HYG",
         version: Some("4.2"),
     };
+
+    /// Hipparcos main catalogue (ESA 1997 / VizieR I/239), ≈1 mas astrometry.
+    pub const HIPPARCOS: Self = Self {
+        backend: CatalogBackendKind::Hipparcos,
+        name: "Hipparcos",
+        version: Some("I/239"),
+    };
+
+    /// Tycho-2 catalogue (Høg 2000 / VizieR I/259), ≈60 mas astrometry.
+    pub const TYCHO2: Self = Self {
+        backend: CatalogBackendKind::Tycho2,
+        name: "Tycho-2",
+        version: Some("I/259"),
+    };
+
+    /// Gaia DR3 source catalogue (Gaia Collaboration 2022 / VizieR I/355),
+    /// micro-arcsecond astrometry for bright stars.
+    pub const GAIA_DR3: Self = Self {
+        backend: CatalogBackendKind::GaiaDr3,
+        name: "Gaia DR3",
+        version: Some("I/355"),
+    };
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CatalogBackendKind {
     HygCsv,
     HygEmbedded,
+    Hipparcos,
+    Tycho2,
+    GaiaDr3,
 }
 
 impl CatalogBackendKind {
@@ -99,6 +163,9 @@ impl CatalogBackendKind {
         match self {
             Self::HygCsv => "hyg-csv",
             Self::HygEmbedded => "hyg-embedded",
+            Self::Hipparcos => "hipparcos",
+            Self::Tycho2 => "tycho2",
+            Self::GaiaDr3 => "gaia-dr3",
         }
     }
 }

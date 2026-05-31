@@ -3526,6 +3526,59 @@ References (pinned in ROADMAP `L-06`): Park, R. S. et al. 2021, AJ 161, 105
 (DE440); Acton, C. H. 1996, Planet. Space Sci. 44, 65 (SPICE); NAIF DAF / SPK
 Required Reading.
 
+## `L-17` Hipparcos / Tycho-2 / Gaia DR3 ingest — partial (catalog backends + cross-match)
+
+The large-catalog ingest path now exists behind the `L-16` `CatalogBackend`
+trait, so the engine can read Hipparcos, Tycho-2, and Gaia DR3 at their native
+precision tiers without rewriting host/render code. Host wiring and Gaia LOD
+streaming are the documented follow-up.
+
+1. **What changed.** New `crates/catalog/src/ingest.rs` adds three backends:
+   `HipparcosCsvBackend` (VizieR I/239), `Tycho2CsvBackend` (I/259), and
+   `GaiaDr3CsvBackend` (Gaia archive `gaiadr3.gaia_source` / I/355). Each
+   parses the *normalised CSV export* of its catalogue by column **name**
+   (robust to upstream column reordering), maps rows to the engine's canonical
+   `Star` fields, and preserves native + cross identifiers in
+   `CatalogIdentifiers` (HIP primary; TYC packed primary with HIP cross-ID;
+   Gaia `source_id` primary with optional HIP/HD). V and B−V for Tycho-2 are
+   derived from VT/BT via the ESA 1997 transformation; distance comes from the
+   parallax where the catalogue carries one. The backends reuse the existing
+   `CatalogQuery` magnitude filter and `CatalogPage` paging seam.
+2. **Why per-catalogue.** Each survey has its own astrometric zero-point and
+   precision (Hipparcos ≈1 mas, Tycho-2 ≈60 mas, Gaia DR3 ≈20 µas bright);
+   selecting one source at the backend level preserves those documented
+   zero-points instead of concatenating mismatched epochs.
+3. **Data.** The multi-million/billion-row archives are **not** committed. The
+   fetch scripts `scripts/fetch-hipparcos.sh` / `fetch-tycho2.sh` /
+   `fetch-gaia-dr3-subset.sh` pull normalised CSV on demand from the VizieR /
+   Gaia TAP endpoints (manifest `runtime-service` rows `hipparcos-i239-main`,
+   `tycho2-i259`, `gaia-dr3-i355`). The committed
+   `crates/catalog/data/bright_star_xmatch.csv` (manifest `generated`
+   `bright-star-xmatch`, regenerated from HYG by
+   `scripts/extract-bright-star-xmatch.py`) is a 177-row HIP↔HD anchor index
+   for the identifier round-trip tests.
+4. **Where it lives.** `crates/catalog/src/ingest.rs`,
+   `crates/catalog/src/backend.rs` (new `CatalogSource`/`CatalogBackendKind`
+   variants + `CatalogIdentifiers` constructors), `crates/catalog/src/lib.rs`
+   exports, `crates/catalog/data/bright_star_xmatch.csv`, the three fetch
+   scripts + the extract script, and `data/manifest.toml`.
+5. **Tests / validation.** `catalog::ingest` (9 tests): Hipparcos Sirius row
+   parse (HIP 32349 / HD 48915, parallax→distance, tangent proper motion);
+   cross-catalog Sirius position agreement Hipparcos vs HYG within an
+   arcsecond; Tycho-2 VT/BT→V transform + packed TYC round-trip; Gaia DR3 row
+   parse; HIP→TYC→Gaia identifier round-trip; magnitude filter + paging
+   truncation; bright-star anchor HIP↔HD round-trip over the committed index.
+6. **Deferred (the `L-17` follow-up).** Gaia LOD / spatial-tile streaming of
+   the full 1.8 B-row source; bench coverage; the exact Riello et al. 2021
+   Gaia→Johnson photometric transforms (a single-slope `BP−RP`→`B−V`
+   approximation is used for display chroma only); and the CLI / viewer / web
+   host wiring + size-capped WASM web subset (kept out of this catalog-only
+   change to avoid colliding with parallel `L-18` work).
+
+References: Perryman 1997, A&A 323, L49 (Hipparcos); ESA 1997, SP-1200
+(VT/BT transform); Høg 2000, A&A 355, L27 (Tycho-2); Gaia Collaboration 2022,
+A&A 674, A1 (Gaia DR3).
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

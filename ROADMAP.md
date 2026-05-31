@@ -151,10 +151,12 @@ web host controls. With both shipped, every `V-51`–`V-56` item is now done.
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`: the SPK Chebyshev kernel reader has shipped;
-kernel ingest + Horizons cross-check remain), large catalog ingest (`L-17`),
-variable-star library (`L-20`), and education / accessibility (`L-23`, `L-24`).
-The Python bindings (`L-21`) and headless server (`L-22`) have both shipped.
-Observation-planning polish
+kernel ingest + Horizons cross-check remain), variable-star library (`L-20`),
+and education / accessibility (`L-23`, `L-24`). The Python bindings (`L-21`)
+and headless server (`L-22`) have both shipped. Large-catalog ingest (`L-17`)
+has landed at the catalog-backend layer (Hipparcos / Tycho-2 / Gaia DR3 CSV
+backends + fetch scripts + identifier cross-match); LOD streaming and host
+wiring remain the `L-17` follow-up. Observation-planning polish
 (`L-09`) has now shipped: Moon-impact and visibility scoring, recommended-
 object ranking, favourites, and iCalendar export.
 
@@ -248,7 +250,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-14` | Public demo gallery | ✅ |
 | `L-15` | Data provenance manifest | ✅ |
 | `L-16` | Catalog backend scaling design | ✅ |
-| `L-17` | Hipparcos / Tycho-2 / Gaia DR3 ingest | ⬜ |
+| `L-17` | Hipparcos / Tycho-2 / Gaia DR3 ingest (backends + cross-match ✅; LOD streaming + host wiring ⬜) | ◑ |
 | `L-18` | Identifier preservation through the renderer | ⬜ |
 | `L-19` | SIMBAD / VizieR deep links | ✅ |
 | `L-20` | Variable star light curves | ⬜ |
@@ -3194,7 +3196,22 @@ backends.
 
 ---
 
-### `L-17` Hipparcos / Tycho-2 / Gaia DR3 ingest — ⬜
+### `L-17` Hipparcos / Tycho-2 / Gaia DR3 ingest — ◑ partial
+
+**Status.** The catalog-backend layer is implemented, tested, and behind the
+`L-16` trait. **Shipped:** `HipparcosCsvBackend`, `Tycho2CsvBackend`, and
+`GaiaDr3CsvBackend` (parse normalised VizieR / Gaia CSV exports by column
+name, preserve native + cross identifiers, derive V/B−V via the ESA 1997
+VT/BT transform for Tycho, page through `CatalogQuery`/`CatalogPage`); fetch
+scripts (`scripts/fetch-hipparcos.sh`, `fetch-tycho2.sh`,
+`fetch-gaia-dr3-subset.sh`); a committed HIP↔HD bright-star cross-match anchor
+index (`crates/catalog/data/bright_star_xmatch.csv`, generated from HYG);
+and manifest rows for all four artifacts. **Deferred (the `L-17` follow-up):**
+Gaia LOD / spatial-tile streaming of the full 1.8 B-row source, the
+bench coverage, the exact Riello et al. 2021 Gaia photometric transforms,
+and the CLI / viewer / web host wiring + WASM web subset (held out of this
+catalog-only change so it does not collide with the parallel `L-18` /
+identifier-through-renderer work).
 
 **Item.** Pluggable catalog backend that supports Hipparcos (118 k stars),
 Tycho-2 (2.5 M), and Gaia DR3 (1.8 B) at increasing precision tiers while

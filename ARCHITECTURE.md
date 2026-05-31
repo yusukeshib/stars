@@ -120,8 +120,18 @@ Owns star catalog ingestion, deep-sky catalogues, and catalog-space conversions:
 - `load_from_csv(&str)` and `load_from_file(path)` compatibility helpers;
 - `load_embedded()` behind the `embedded` feature;
 - HYG row filtering and conversion into `Star` records;
-- CPU-side `CatalogIdentifiers` for HYG / HIP / HD now, with Tycho-2 / Gaia DR3
-  slots reserved for later ingest;
+- large-catalog ingest (`L-17`) in `ingest.rs`: `HipparcosCsvBackend`,
+  `Tycho2CsvBackend`, and `GaiaDr3CsvBackend` parse normalised VizieR / Gaia
+  CSV exports by column name behind the same `CatalogBackend` trait, preserve
+  native + cross identifiers, derive Tycho V/B−V from VT/BT (ESA 1997), and
+  page through `CatalogQuery`/`CatalogPage`. The raw archives are fetched on
+  demand (`scripts/fetch-{hipparcos,tycho2,gaia-dr3-subset}.sh`, manifest
+  `runtime-service` rows) and never committed; a committed HIP↔HD bright-star
+  anchor index (`bright_star_xmatch.csv`, generated from HYG) backs the
+  identifier round-trip tests. Gaia LOD streaming and host wiring are the
+  `L-17` follow-up;
+- CPU-side `CatalogIdentifiers` for HYG / HIP / HD / Tycho-2 / Gaia DR3,
+  populated by the HYG and large-catalog backends;
 - the `DeepSkyCatalog` trait + embedded `MessierCatalog` and
   `NgcBrightCatalog` implementations consumed by the renderer's deep-sky
   overlay (`V-42`); the trait is the slot for the planned runtime
