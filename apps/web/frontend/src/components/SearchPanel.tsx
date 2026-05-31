@@ -30,6 +30,33 @@ export type GotoRecord = {
   magnitude: number | null;
   distance: { value: number; unit: string } | null;
   riseSetMs: { rise: number | null; transit: number | null; set: number | null } | null;
+  // L-19 CDS deep links. Null for solar-system bodies, which the CDS stellar
+  // archives do not catalogue.
+  simbadUrl: string | null;
+  vizierUrl: string | null;
+};
+
+/// L-19: opt-in flag for showing external CDS catalogue links in the info
+/// panel. Persisted on its own localStorage key (default off) so it is
+/// independent of the main session schema and never triggers a network call.
+const LINKS_PREF_KEY = "stars.externalLinks.v1";
+
+const loadExternalLinksPref = (): boolean => {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    return localStorage.getItem(LINKS_PREF_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+const saveExternalLinksPref = (enabled: boolean): void => {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(LINKS_PREF_KEY, enabled ? "1" : "0");
+  } catch {
+    // Ignore quota / private-mode failures; the toggle is non-essential.
+  }
 };
 
 type LookupResponse = { matches: SearchMatch[] };
@@ -245,6 +272,33 @@ const INFO_DD_STYLE: CSSProperties = {
   margin: 0,
 };
 
+const LINKS_BLOCK_STYLE: CSSProperties = {
+  marginTop: 10,
+  paddingTop: 10,
+  borderTop: "1px solid rgba(255,255,255,0.12)",
+};
+
+const LINKS_TOGGLE_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  fontSize: 11,
+  opacity: 0.75,
+  cursor: "pointer",
+};
+
+const LINKS_ROW_STYLE: CSSProperties = {
+  display: "flex",
+  gap: 10,
+  marginTop: 8,
+};
+
+const LINK_STYLE: CSSProperties = {
+  color: "#9ecbff",
+  fontSize: 12,
+  textDecoration: "none",
+};
+
 interface SearchPanelProps {
   /// Returns the lookup response JSON for the given query.
   onLookup: (query: string, limit: number) => string;
@@ -261,6 +315,7 @@ export function SearchPanel({ onLookup, onGoto, onApplyView }: SearchPanelProps)
   const [matches, setMatches] = useState<SearchMatch[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [selected, setSelected] = useState<GotoRecord | null>(null);
+  const [showLinks, setShowLinks] = useState<boolean>(loadExternalLinksPref);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Debounced lookup. Lookup runs purely in WASM and is O(N) over ~1.2k
@@ -402,6 +457,46 @@ export function SearchPanel({ onLookup, onGoto, onApplyView }: SearchPanelProps)
               </>
             )}
           </dl>
+          {(selected.simbadUrl !== null || selected.vizierUrl !== null) && (
+            <div style={LINKS_BLOCK_STYLE}>
+              <label style={LINKS_TOGGLE_STYLE}>
+                <input
+                  type="checkbox"
+                  checked={showLinks}
+                  onChange={(event) => {
+                    const next = event.target.checked;
+                    setShowLinks(next);
+                    saveExternalLinksPref(next);
+                  }}
+                />
+                External catalogue links
+              </label>
+              {showLinks && (
+                <div style={LINKS_ROW_STYLE}>
+                  {selected.simbadUrl !== null && (
+                    <a
+                      style={LINK_STYLE}
+                      href={selected.simbadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      SIMBAD ↗
+                    </a>
+                  )}
+                  {selected.vizierUrl !== null && (
+                    <a
+                      style={LINK_STYLE}
+                      href={selected.vizierUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      VizieR ↗
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

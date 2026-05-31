@@ -752,7 +752,6 @@ row to `data/manifest.toml`:
 - Hipparcos catalog;
 - Tycho-2 catalog;
 - Gaia DR3 catalog;
-- SIMBAD / VizieR identifier linking;
 - DE440 ephemeris data;
 - AAVSO variable-star light curves;
 - full OpenNGC ~14,000-entry NGC / IC catalog (runtime-loaded streaming

@@ -152,7 +152,14 @@ Hosts own platform lifecycle:
   every host gets the same ranking by calling `catalog::search(query, n)`;
   `goto_object` resolves the returned `SearchId` back to a topocentric
   apparent `(alt, az)` via the existing `apparent_*_topocentric` paths so
-  the info panel sees the same ephemeris the renderer does.
+  the info panel sees the same ephemeris the renderer does. The same
+  facade emits the `L-19` SIMBAD / VizieR deep links (`simbadUrl` /
+  `vizierUrl`): the pure URL builders live in `catalog::links`
+  (`simbad_query_url` / `vizier_query_url` over `StarIdentifiers`) so the
+  WASM binding and the native hosts share one source of truth, re-exported
+  on the `stars_host_common` path for CLI / viewer. These are inert
+  strings — no host or the renderer ever calls the network, keeping
+  deterministic renders offline.
 
 ### `bindings/python` (L-21, read-only)
 

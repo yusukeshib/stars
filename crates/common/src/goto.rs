@@ -20,8 +20,8 @@ use astronomy::{
 };
 use catalog::search::{named_star, SOLAR_SYSTEM_BODIES};
 use catalog::{
-    search as catalog_search, DeepSkyCatalog, DeepSkyId, DeepSkyObject, MessierCatalog,
-    NgcBrightCatalog, SearchId, SearchKind,
+    search as catalog_search, simbad_query_url, vizier_query_url, DeepSkyCatalog, DeepSkyId,
+    DeepSkyObject, MessierCatalog, NgcBrightCatalog, SearchId, SearchKind, StarIdentifiers,
 };
 use renderer::LocalView;
 
@@ -48,6 +48,11 @@ pub struct GotoTarget {
     pub magnitude: Option<f64>,
     /// Distance with its unit (`"pc"`, `"AU"`, or `"km"`), when known.
     pub distance: Option<(f64, &'static str)>,
+    /// L-19 SIMBAD lookup URL. `None` for solar-system bodies, which CDS
+    /// stellar archives do not catalogue.
+    pub simbad_url: Option<String>,
+    /// L-19 VizieR cone-search URL. `None` for solar-system bodies.
+    pub vizier_url: Option<String>,
 }
 
 impl GotoTarget {
@@ -130,6 +135,15 @@ pub fn resolve_goto_id(id: SearchId, observer: Observer) -> Option<GotoTarget> {
                 } else {
                     None
                 },
+                identifiers: Some(StarIdentifiers {
+                    hip: star.hip,
+                    hd: star.hd,
+                    hr: star.hr,
+                    proper_name: star.proper.clone(),
+                    catalog_designation: None,
+                    right_ascension_rad: star.right_ascension_rad,
+                    declination_rad: star.declination_rad,
+                }),
             }
         }
         SearchId::Messier(n) => {
@@ -202,6 +216,8 @@ pub fn resolve_goto_id(id: SearchId, observer: Observer) -> Option<GotoTarget> {
                 declination_rad: dec,
                 magnitude: mag,
                 distance: Some(dist),
+                // Solar-system bodies are not in the CDS stellar archives.
+                identifiers: None,
             }
         }
     };
@@ -214,6 +230,11 @@ pub fn resolve_goto_id(id: SearchId, observer: Observer) -> Option<GotoTarget> {
         observer.latitude_rad,
     );
 
+    let (simbad_url, vizier_url) = match fields.identifiers {
+        Some(ids) => (Some(simbad_query_url(&ids)), Some(vizier_query_url(&ids))),
+        None => (None, None),
+    };
+
     Some(GotoTarget {
         id: id.encode(),
         kind: fields.kind,
@@ -225,6 +246,8 @@ pub fn resolve_goto_id(id: SearchId, observer: Observer) -> Option<GotoTarget> {
         azimuth_rad: altaz.azimuth,
         magnitude: fields.magnitude,
         distance: fields.distance,
+        simbad_url,
+        vizier_url,
     })
 }
 
@@ -239,6 +262,8 @@ struct ResolvedFields {
     declination_rad: f64,
     magnitude: Option<f64>,
     distance: Option<(f64, &'static str)>,
+    /// CDS deep-link identifiers, `None` for solar-system bodies.
+    identifiers: Option<StarIdentifiers>,
 }
 
 fn deepsky_fields(id: &SearchId, object: DeepSkyObject) -> ResolvedFields {
@@ -259,6 +284,12 @@ fn deepsky_fields(id: &SearchId, object: DeepSkyObject) -> ResolvedFields {
         DeepSkyId::Ngc(n) => format!("NGC {n}"),
         DeepSkyId::Ic(n) => format!("IC {n}"),
     };
+    // SIMBAD resolves designations with a space between catalogue and number.
+    let designation = match object.id {
+        DeepSkyId::Messier(n) => format!("M {n}"),
+        DeepSkyId::Ngc(n) => format!("NGC {n}"),
+        DeepSkyId::Ic(n) => format!("IC {n}"),
+    };
     ResolvedFields {
         kind,
         display: label.clone(),
@@ -271,6 +302,12 @@ fn deepsky_fields(id: &SearchId, object: DeepSkyObject) -> ResolvedFields {
             None
         },
         distance: None,
+        identifiers: Some(StarIdentifiers {
+            catalog_designation: Some(designation),
+            right_ascension_rad: ra,
+            declination_rad: dec,
+            ..Default::default()
+        }),
     }
 }
 
@@ -383,6 +420,31 @@ mod tests {
         assert!(summary.contains("mag"), "summary={summary}");
         assert!(summary.contains("RA"), "summary={summary}");
         assert!(summary.contains("alt"), "summary={summary}");
+    }
+
+    #[test]
+    fn star_has_simbad_and_vizier_links() {
+        let target = resolve_goto_query("Sirius", tokyo()).expect("Sirius resolves");
+        let simbad = target.simbad_url.expect("star has SIMBAD link");
+        // Sirius = HIP 32349; identifier query takes priority over coordinates.
+        assert!(simbad.contains("sim-id?Ident=HIP+"), "simbad={simbad}");
+        let vizier = target.vizier_url.expect("star has VizieR link");
+        assert!(vizier.contains("VizieR-4?-c="), "vizier={vizier}");
+    }
+
+    #[test]
+    fn messier_link_uses_designation() {
+        let target = resolve_goto_query("M31", tokyo()).expect("M31 resolves");
+        let simbad = target.simbad_url.expect("deep-sky has SIMBAD link");
+        assert!(simbad.contains("sim-id?Ident=M+31"), "simbad={simbad}");
+        assert!(target.vizier_url.is_some());
+    }
+
+    #[test]
+    fn solar_system_has_no_cds_links() {
+        let target = resolve_goto_query("Saturn", tokyo()).expect("Saturn resolves");
+        assert!(target.simbad_url.is_none());
+        assert!(target.vizier_url.is_none());
     }
 
     #[test]

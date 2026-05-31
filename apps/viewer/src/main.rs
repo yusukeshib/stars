@@ -565,6 +565,18 @@ impl App {
 /// Window-title text used as the viewer's lightweight, renderer-free info
 /// panel. Shows the live search prompt while typing, otherwise the most
 /// recent GoTo target summary, falling back to the bare app name.
+/// L-19: log the resolved object's CDS deep links (stars / deep-sky only).
+/// Logging keeps the link in the metadata stream without a network call,
+/// matching the CLI's metadata exposure.
+fn log_deep_links(target: &stars_host_common::GotoTarget) {
+    if let Some(url) = &target.simbad_url {
+        log::info!("SIMBAD {url}");
+    }
+    if let Some(url) = &target.vizier_url {
+        log::info!("VizieR {url}");
+    }
+}
+
 fn compose_title(search_mode: bool, query: &str, info: Option<&str>) -> String {
     if search_mode {
         format!("Stars — search: {query}█  (Enter = GoTo, Esc = cancel)")
@@ -680,6 +692,7 @@ impl ApplicationHandler for App {
                     camera.view = target.local_view(camera.view.fov_y_rad);
                     let info = target.info_summary();
                     log::info!("GoTo {info}");
+                    log_deep_links(&target);
                     self.goto_info = Some(info);
                 }
                 Err(error) => log::warn!("GoTo: {error}"),
@@ -789,6 +802,7 @@ impl ApplicationHandler for App {
                                     gpu.camera.view = target.local_view(gpu.camera.view.fov_y_rad);
                                     let info = target.info_summary();
                                     log::info!("GoTo {info}");
+                                    log_deep_links(&target);
                                     self.goto_info = Some(info);
                                 }
                                 Err(error) => {

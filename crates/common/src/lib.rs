@@ -21,6 +21,10 @@ mod render;
 mod satellites;
 mod session;
 pub use goto::{resolve_goto_id, resolve_goto_query, GotoTarget};
+// L-19 CDS deep-link helpers. The pure URL builders live in `catalog` so the
+// WASM web binding can share the single source of truth; we re-export them on
+// the documented `stars_host_common` path for the native hosts.
+pub use catalog::{simbad_query_url, vizier_query_url, StarIdentifiers};
 pub use presets::*;
 pub use render::*;
 pub use renderer::DEFAULT_SCREEN_LIMITING_MAGNITUDE;

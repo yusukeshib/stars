@@ -37,8 +37,9 @@ Shipped:
   schema-versioned JSON sessions (`L-10`, `L-11`), deterministic scene
   presets (`L-12`), notebook reproducibility examples (`L-13`), catalog
   backend scaling scaffold (`L-16`), validation / demo gallery (`L-27`),
-  citation metadata (`L-25`), standards-compliance document (`L-26`), and
-  the data provenance manifest (`L-15`).
+  citation metadata (`L-25`), standards-compliance document (`L-26`),
+  the data provenance manifest (`L-15`), and SIMBAD / VizieR external
+  catalogue deep links from existing identifiers (`L-19`).
 
 Still open:
 
@@ -49,8 +50,8 @@ Still open:
   backend for the full ~14,000-entry OpenNGC catalogue on top of the
   embedded `V-42` subset shipped here.
 - **Library track** — DE440 ephemerides (`L-06`), large catalog ingest
-  (`L-17`), identifier preservation (`L-18`), SIMBAD / VizieR links
-  (`L-19`), variable-star light curves (`L-20`), Python bindings (`L-21`),
+  (`L-17`), identifier preservation (`L-18`),
+  variable-star light curves (`L-20`), Python bindings (`L-21`),
   headless server (`L-22`), guided education (`L-23`), accessibility
   (`L-24`), public demo gallery (`L-14`), observation-planning polish
   (`L-09`).
@@ -3026,6 +3027,66 @@ geostationary belt can be drawn for any observer / instant.
 References (also pinned in ROADMAP `V-55`): Vallado, D. A. et al. 2006,
 AIAA 2006-6753; Hoots, F. R. & Roehrich, R. L. 1980, Spacetrack Report #3;
 CelesTrak (celestrak.org); McCants (mmccants.org).
+
+---
+
+### L-19 SIMBAD / VizieR deep links
+
+The info panel / GoTo metadata now carries canonical CDS lookup URLs built
+from the identifiers an object already exposes — no new catalogue ingest
+and no identifier-preservation rework (`L-17` / `L-18` stay open). Nothing
+in this path makes a network call and the renderer is untouched, so
+deterministic renders remain offline and reproducible.
+
+Primary implementation areas:
+
+- `crates/catalog/src/links.rs`: `StarIdentifiers` (HIP / HD / HR /
+  proper name / catalogue designation + J2000 RA / Dec) plus the pure
+  builders `simbad_query_url(&StarIdentifiers) -> String` and
+  `vizier_query_url(&StarIdentifiers) -> String`. SIMBAD prefers an
+  identifier query (`sim-id?Ident=…`) in catalogue priority order
+  HIP → HD → HR → proper name → designation, and falls back to a J2000
+  cone search (`sim-coo?Coord=…&Radius=2&Radius.unit=arcmin`). VizieR
+  always uses the positional cone search
+  (`VizieR-4?-c=…&-c.rs=2`). A dependency-free percent-encoder keeps the
+  URLs `href`-safe (space → `+`, RFC-3986-unreserved pass-through). The
+  helper lives in `catalog` so the WASM web binding and the native hosts
+  share one source of truth.
+- `crates/common/src/lib.rs`: re-exports `simbad_query_url`,
+  `vizier_query_url`, and `StarIdentifiers` on the documented
+  `stars_host_common` path (the original `L-19` scope named
+  `crates/common`; the implementation sits in `catalog` only so the
+  WASM binding can reach it without pulling `clap` / `chrono`).
+- `crates/common/src/goto.rs`: `GotoTarget` gains `simbad_url` /
+  `vizier_url`, populated from the resolver's existing fields. Solar-
+  system bodies expose `None` because the CDS stellar archives do not
+  catalogue them.
+- `apps/web/src/lib.rs`: `goto_object` JSON now emits `simbadUrl` /
+  `vizierUrl` (null for solar-system bodies).
+- `apps/web/frontend/src/components/SearchPanel.tsx`: the info panel
+  renders the SIMBAD / VizieR links behind an opt-in checkbox persisted
+  on its own `localStorage` key (`stars.externalLinks.v1`, default off),
+  independent of the session schema. Links open in a new tab with
+  `rel="noopener noreferrer"`.
+- `apps/cli/src/main.rs` / `apps/viewer/src/main.rs`: echo the SIMBAD /
+  VizieR URLs in the GoTo metadata output (CLI `println!`, viewer
+  `log::info!`).
+
+Validation:
+
+- `catalog::links` (8 tests): identifier priority order, deep-sky
+  designation encoding (`M 31`), VizieR positional cone search, signed /
+  negative declination handling, RA wraparound, and the no-identifier
+  coordinate fallback all match the CDS URL specification.
+- `stars_host_common::goto` (3 tests): named star → HIP `sim-id` link,
+  Messier → designation `sim-id` link, solar-system → no links.
+- The web frontend ships no JS test harness, so link rendering is
+  covered by the Rust JSON-emission tests plus the `tsc --noEmit`
+  type-check in `make ci`; a `vitest` browser test is deferred with the
+  rest of frontend test-infra.
+
+Hosts wired: web (info panel links) / CLI (`--goto` metadata) / viewer
+(GoTo metadata log).
 
 ---
 
