@@ -94,3 +94,7 @@ jobs:
         working-directory: apps/web/frontend
       - run: bun run tsc --noEmit
         working-directory: apps/web/frontend
+      # L-24 automated accessibility gate: axe-core (WCAG 2.2 A/AA) over the
+      # interactive frontend components rendered in jsdom.
+      - run: bun run test
+        working-directory: apps/web/frontend

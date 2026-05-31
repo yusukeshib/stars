@@ -51,7 +51,10 @@ This currently covers:
 - `cargo test --workspace`;
 - `make manifest-check` (verifies `data/manifest.toml` SHA-256s);
 - `cargo check -p stars-web --target wasm32-unknown-unknown --manifest-path apps/web/Cargo.toml`;
-- frontend typecheck.
+- frontend typecheck;
+- frontend accessibility gate (`make frontend-a11y`): a vitest + jsdom
+  axe-core scan of the interactive web components for WCAG 2.2 A/AA
+  violations (`L-24`).
 
 If a change cannot reasonably pass one of these locally, explain why in the PR.
 
