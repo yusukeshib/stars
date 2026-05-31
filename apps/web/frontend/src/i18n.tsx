@@ -148,6 +148,13 @@ const en: Dictionary = {
   "card.telescope.eyepieceFocal": "Eyepiece focal length (mm)",
   "card.telescope.afov": "Apparent field (°)",
   "card.telescope.fieldStop": "Field stop (mm, 0 = AFOV estimate)",
+  "card.telescope.design": "Optical design",
+  "card.telescope.design.apo-refractor": "Apo refractor (clean Airy)",
+  "card.telescope.design.achromat-refractor": "Achromat refractor (colour fringe)",
+  "card.telescope.design.newtonian": "Newtonian (spikes)",
+  "card.telescope.design.schmidt-cassegrain": "Schmidt-Cassegrain",
+  "card.telescope.spiderVanes": "Spider vanes",
+  "card.telescope.otaRotation": "OTA rotation (°)",
   "card.telescope.summary":
     "{mag}× · {trueField}° true field · {plateScale}″/mm plate scale · {exitPupil} mm exit pupil",
 
@@ -366,6 +373,13 @@ const ja: Dictionary = {
   "card.telescope.eyepieceFocal": "接眼レンズ焦点距離 (mm)",
   "card.telescope.afov": "見かけ視野 (°)",
   "card.telescope.fieldStop": "視野絞り (mm, 0 = AFOV からの推定)",
+  "card.telescope.design": "光学設計",
+  "card.telescope.design.apo-refractor": "アポ屈折 (クリーンなエアリー)",
+  "card.telescope.design.achromat-refractor": "アクロマート屈折 (色収差)",
+  "card.telescope.design.newtonian": "ニュートン (光条)",
+  "card.telescope.design.schmidt-cassegrain": "シュミットカセグレン",
+  "card.telescope.spiderVanes": "スパイダー枚数",
+  "card.telescope.otaRotation": "鏡筒回転 (°)",
   "card.telescope.summary":
     "{mag}× · 実視野 {trueField}° · プレートスケール {plateScale}″/mm · 射出瞳 {exitPupil} mm",
 

@@ -13,9 +13,25 @@ use stars_host_common::{
     render_scene_from_catalog_path, resolve_goto_query, save_session, scene_from_preset,
     scene_preset_infos, scintillation_from_args, viewpoint_from_args, AtmosphereOverrides,
     AtmospherePresetArg, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides,
-    LightPollutionOverrides, OutputColourspaceArg, OverlayArg, ProjectionArg, RenderOptions,
-    ScenePresetArg, ScintillationOverrides, SessionScene, StarSession, ViewpointArg,
+    LightPollutionOverrides, OpticalDesign, OutputColourspaceArg, OverlayArg, ProjectionArg,
+    RenderOptions, ScenePresetArg, ScintillationOverrides, SessionScene, StarSession, ViewpointArg,
 };
+
+/// Resolve the V-45 optical design from the `--telescope-design` /
+/// `--spider-vanes` flags. A `--spider-vanes` count implies a Newtonian when
+/// no design (or a Newtonian design) is named.
+fn optical_design_from_args(
+    design: Option<&str>,
+    spider_vanes: Option<u8>,
+) -> Option<OpticalDesign> {
+    let base = design.and_then(OpticalDesign::from_kebab_str);
+    match (base, spider_vanes) {
+        (Some(OpticalDesign::Newtonian { .. }), Some(v)) | (None, Some(v)) => {
+            Some(OpticalDesign::Newtonian { spider_vanes: v })
+        }
+        (other, _) => other,
+    }
+}
 
 /// Render the night sky as seen from a given observer to a PNG.
 #[derive(Parser, Debug)]
@@ -266,6 +282,23 @@ struct Args {
     #[arg(long)]
     eyepiece_field_stop_mm: Option<f32>,
 
+    /// V-45 telescope optical design driving the eyepiece diffraction
+    /// artifacts: `apo-refractor` (clean Airy disc), `achromat-refractor`
+    /// (adds a colour fringe), `newtonian` (spider spikes + obstruction
+    /// rings), or `schmidt-cassegrain` (obstruction rings, no spikes).
+    #[arg(long, value_name = "DESIGN")]
+    telescope_design: Option<String>,
+
+    /// V-45 number of Newtonian spider vanes (overrides the design default).
+    /// Even counts give that many spikes; odd counts give twice as many.
+    #[arg(long)]
+    spider_vanes: Option<u8>,
+
+    /// V-45 OTA roll about the optical axis in degrees (rotates the spider
+    /// diffraction spikes with the tube).
+    #[arg(long)]
+    ota_rotation_deg: Option<f32>,
+
     /// Disable the diffuse-sky (integrated starlight + diffuse galactic
     /// light) skyglow pass. With the default (skyglow on), the sky
     /// background includes the analytic Leinert et al. 1998 model so the
@@ -417,6 +450,11 @@ fn main() -> Result<()> {
                     eyepiece_focal_length_mm: args.eyepiece_focal_length_mm,
                     apparent_fov_deg: args.eyepiece_apparent_fov_deg,
                     field_stop_mm: args.eyepiece_field_stop_mm,
+                    optical_design: optical_design_from_args(
+                        args.telescope_design.as_deref(),
+                        args.spider_vanes,
+                    ),
+                    ota_rotation_deg: args.ota_rotation_deg,
                 },
             ),
             catalog: hyg_catalog_snapshot(&args.catalog, args.limiting_magnitude),
@@ -472,6 +510,14 @@ fn main() -> Result<()> {
             scene.eyepiece.true_field_deg(),
             scene.eyepiece.plate_scale_arcsec_per_mm(),
             scene.eyepiece.exit_pupil_mm()
+        );
+        // V-45 instrument optics summary.
+        log::info!(
+            "Telescope optics: {} design, Airy radius {:.2} arcsec @550nm, {} spider vanes, OTA roll {:.0}°",
+            scene.eyepiece.optical_design.as_kebab_str(),
+            (scene.eyepiece.airy_radius_rad(550.0) as f64).to_degrees() * 3600.0,
+            scene.eyepiece.optical_design.spider_vanes(),
+            scene.eyepiece.ota_rotation_deg,
         );
     }
 

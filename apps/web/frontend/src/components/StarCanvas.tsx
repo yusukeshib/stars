@@ -127,6 +127,12 @@ export function StarCanvas({
       eyepiece.apparentFovDeg,
       eyepiece.fieldStopMm,
     );
+    // V-45 telescope-side optics (design / vanes / OTA roll).
+    handleRef.current?.set_telescope_optics(
+      eyepiece.opticalDesign,
+      eyepiece.spiderVanes,
+      eyepiece.otaRotationDeg,
+    );
   }, [eyepiece]);
 
   useEffect(() => {
@@ -220,6 +226,7 @@ export function StarCanvas({
         ep.apparentFovDeg,
         ep.fieldStopMm,
       );
+      handle.set_telescope_optics(ep.opticalDesign, ep.spiderVanes, ep.otaRotationDeg);
       handle.set_projection(projectionRef.current.projection);
       handle.set_viewpoint(projectionRef.current.viewpoint);
       handle.set_external_viewpoint(

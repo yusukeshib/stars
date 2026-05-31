@@ -117,8 +117,8 @@ remaining items are realism polish (`V-24` scintillation, `V-25`–`V-28`
 have all shipped), site-specific brightness (Bortle / SQM core shipped
 via `V-39`, including the `V-39-Atlas` Falchi 2016 World Atlas loader),
 niche visual
-features (`V-45`, `V-46`; `V-50` output colour management has shipped),
-and rare phenomena (`V-47`–`V-49`).
+features (`V-46`; `V-45` telescope-side optical artifacts and `V-50` output
+colour management have shipped), and rare phenomena (`V-47`–`V-49`).
 
 **High priority next:** the visual-richness gaps `V-51`–`V-56` (eclipses /
 occultations, planetary rings and moons, resolved star clusters, double
@@ -211,7 +211,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-42` | Deep-sky overlay (Messier + bright NGC / IC subset) | ✅ |
 | `V-43` | Telescope eyepiece simulation | ✅ |
 | `V-44` | Custom external viewpoint origin | ✅ |
-| `V-45` | **Telescope-side optical artifacts** | ⬜ |
+| `V-45` | **Telescope-side optical artifacts** | ✅ |
 | `V-46` | **Galactic structural model for external viewpoints** | ⬜ |
 | `V-47` | **Meteor shower display** | ⬜ |
 | `V-48` | **Aurora display** | ⬜ |
@@ -1426,7 +1426,7 @@ disc to the Drimmel-Spergel + Reid arm-trace model.
 
 ---
 
-### `V-45` Telescope-side optical artifacts — ⬜
+### `V-45` Telescope-side optical artifacts — ✅ done
 
 **Item.** Extend the eyepiece simulation (`V-43`) from a geometric
 magnification / FOV calculator into an optical model that reproduces the
@@ -1449,24 +1449,47 @@ exit-pupil geometry.
 - Suiter, H. R. 2008, *Star Testing Astronomical Telescopes*, 2nd ed.
 - Rutten, H. G. J., van Venrooij, M. A. M. 1988, *Telescope Optics*.
 
-**Implementation scope.**
-- `crates/renderer/src/eyepiece.rs`: `OpticalDesign { Refractor {
-  achromat: bool, focal_ratio }, Newtonian { spider_vanes: u8 },
-  SchmidtCassegrain { obstruction_pct } }`.
-- `crates/renderer/src/shaders/star.wgsl`: bright-star PSF becomes
-  Spencer (eye) ⊗ instrument (aperture-diffraction + obstruction +
-  spider) convolution evaluated analytically for representative
-  wavelengths.
-- Add spike-orientation control (so a Newtonian's spikes rotate with
-  the OTA), focal-length-driven Airy radius, and exit-pupil-relative
-  vignette.
+**Implementation.**
+- `crates/renderer/src/camera.rs` (the eyepiece model lives here, not a
+  separate `eyepiece.rs`): `OpticalDesign { Refractor { achromat: bool,
+  focal_ratio }, Newtonian { spider_vanes: u8 }, SchmidtCassegrain {
+  obstruction_pct } }` with `central_obstruction_ratio`, `spider_vanes`,
+  `achromat_focal_ratio`, and kebab parse/emit helpers. `EyepieceSimulation`
+  gains an `optical_design` and an `ota_rotation_deg` (appended at the end of
+  the struct), plus `airy_radius_rad(λ) = 1.22 λ/D` and a
+  `chromatic_fraction()` Conrady-style secondary-spectrum scale. Two
+  `instrument_optics*` rows are appended at the end of `CameraUniform` and
+  populated only when the eyepiece is active in a perspective Earth view
+  (`airy_radius_px`, obstruction ratio, vane count, spike angle, enabled,
+  chromatic fraction, vignette strength).
+- `crates/renderer/src/shaders/star.wgsl`: the bright-star PSF composites
+  the Spencer eye PSF with an instrument PSF — an obstructed-aperture Airy
+  pattern (`2J1(x)/x` via an Abramowitz & Stegun J1 approximation, annular
+  for the central obstruction), spider diffraction spikes (one bidirectional
+  ray per vane, so even vane counts give `n` arms and odd counts `2n`),
+  per-channel chromatic ring shift for achromats, and an exit-pupil-relative
+  cos⁴ vignette. Spikes rotate with `ota_rotation_deg`. Outside eyepiece
+  mode the branch is skipped and the PSF is bit-identical to the
+  naked-eye pipeline. `skyglow.wgsl` is untouched.
+- Hosts: CLI `--telescope-design` / `--spider-vanes` / `--ota-rotation-deg`;
+  viewer `O` (cycle design), `[` / `]` (roll OTA) keybinds plus the same
+  flags; web settings-panel design dropdown / vane / rotation controls,
+  the `set_telescope_optics` WASM binding, URL params, and localStorage.
 
 **Tests / validation.**
-- Unit: Airy radius at D=200 mm, λ=550 nm is 0.69″ within 1%.
-- Visual: render Vega at 200× through (a) a refractor, (b) a 4-vane
-  Newtonian, (c) an SCT; pinned PNGs in the validation gallery.
+- Unit: Airy radius at D=200 mm, λ=550 nm is 0.69″ within 1%
+  (`airy_radius_matches_born_and_wolf`); obstruction/vane mapping per
+  design; achromat chromatic fraction is zero for apochromats and larger
+  for faster achromats; the instrument uniform is disabled outside eyepiece
+  mode and the Airy pixel radius grows with magnification.
+- A naga WGSL parse + validate test (`shaders_parse_and_validate`) runs in
+  CPU-only CI, guarding the shader and the Rust↔WGSL `CameraUniform`
+  layout (CI has no GPU to validate at pipeline creation).
 
-**Hosts wired.** CLI / viewer / web (when eyepiece mode is active).
+**Hosts wired.** CLI / viewer / web (when eyepiece mode is active). The
+optical design is a live render control this cycle; persisting it in the
+shared JSON session schema is a documented follow-up (it can append
+optional fields without a schema bump).
 
 ---
 

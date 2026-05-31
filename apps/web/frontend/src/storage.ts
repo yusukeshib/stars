@@ -6,6 +6,7 @@ import {
   isOverlayLayer,
   isSkyProjection,
   isSkyViewpoint,
+  sanitizedOpticalDesign,
   DEFAULT_ATMOSPHERE_CONFIG,
   DEFAULT_EYEPIECE_CONFIG,
   DEFAULT_PROJECTION_CONFIG,
@@ -235,6 +236,15 @@ function parseEyepieceConfig(v: unknown): EyepieceConfig | null {
     fieldStopMm: inRange(o.fieldStopMm, EYEPIECE_FIELD_STOP_RANGE)
       ? o.fieldStopMm
       : DEFAULT_EYEPIECE_CONFIG.fieldStopMm,
+    // V-45 telescope-side optics.
+    opticalDesign: sanitizedOpticalDesign(o.opticalDesign),
+    spiderVanes: inRange(o.spiderVanes, [1, 8])
+      ? Math.round(o.spiderVanes as number)
+      : DEFAULT_EYEPIECE_CONFIG.spiderVanes,
+    otaRotationDeg:
+      typeof o.otaRotationDeg === "number" && Number.isFinite(o.otaRotationDeg)
+        ? o.otaRotationDeg
+        : DEFAULT_EYEPIECE_CONFIG.otaRotationDeg,
   };
 }
 

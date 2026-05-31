@@ -6,6 +6,7 @@ import {
   clampAltitude,
   clampFov,
   wrapAzimuth,
+  sanitizedOpticalDesign,
   DEFAULT_ATMOSPHERE_CONFIG,
   DEFAULT_SCINTILLATION_CONFIG,
   DEFAULT_EYEPIECE_CONFIG,
@@ -264,6 +265,9 @@ function loadSessionFromUrl(): UrlSession | null {
           eyepieceFocalLengthMm: numberParam(params, "eyepieceFocalMm", DEFAULT_EYEPIECE_CONFIG.eyepieceFocalLengthMm, 1, 100),
           apparentFovDeg: numberParam(params, "eyepieceAfovDeg", DEFAULT_EYEPIECE_CONFIG.apparentFovDeg, 1, 120),
           fieldStopMm: numberParam(params, "eyepieceFieldStopMm", DEFAULT_EYEPIECE_CONFIG.fieldStopMm, 0, 120),
+          opticalDesign: sanitizedOpticalDesign(params.get("telescopeDesign")),
+          spiderVanes: numberParam(params, "spiderVanes", DEFAULT_EYEPIECE_CONFIG.spiderVanes, 1, 8),
+          otaRotationDeg: numberParam(params, "otaRotationDeg", DEFAULT_EYEPIECE_CONFIG.otaRotationDeg, 0, 360),
         }
       : undefined,
     timeMs: Number.isFinite(jd) ? (jd - 2440587.5) * 86400000 : undefined,
@@ -316,6 +320,9 @@ function sessionUrl({ observer, view, overlays, atmosphere, planets, satellites,
   url.searchParams.set("eyepieceFocalMm", eyepiece.eyepieceFocalLengthMm.toFixed(1));
   url.searchParams.set("eyepieceAfovDeg", eyepiece.apparentFovDeg.toFixed(1));
   url.searchParams.set("eyepieceFieldStopMm", eyepiece.fieldStopMm.toFixed(1));
+  url.searchParams.set("telescopeDesign", eyepiece.opticalDesign);
+  url.searchParams.set("spiderVanes", String(eyepiece.spiderVanes));
+  url.searchParams.set("otaRotationDeg", eyepiece.otaRotationDeg.toFixed(0));
   return url.toString();
 }
 

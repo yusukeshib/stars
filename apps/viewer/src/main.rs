@@ -15,8 +15,8 @@ use stars_host_common::{
     parse_time_to_time_scales, resolve_goto_query, resolve_light_pollution, scene_from_preset,
     scene_preset_infos, scintillation_from_args, viewpoint_from_args, AtmosphereOverrides,
     AtmospherePresetArg, CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides,
-    EyepieceOverrides, LightPollutionOverrides, OutputColourspaceArg, OverlayArg, ProjectionArg,
-    ScenePresetArg, ScintillationOverrides, SessionScene, ViewpointArg,
+    EyepieceOverrides, LightPollutionOverrides, OpticalDesign, OutputColourspaceArg, OverlayArg,
+    ProjectionArg, ScenePresetArg, ScintillationOverrides, SessionScene, ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -37,6 +37,30 @@ const CLOCK_SPEED_REALTIME: f64 = 1.0;
 const CLOCK_SPEED_MINUTE_PER_SECOND: f64 = 60.0;
 const CLOCK_SPEED_HOUR_PER_SECOND: f64 = 3_600.0;
 const CLOCK_SPEED_DAY_PER_SECOND: f64 = 86_400.0;
+
+/// V-45: cycle through the telescope optical designs for the `O` keybind
+/// (apo refractor → achromat refractor → Newtonian → SCT → …), preserving
+/// representative parameters for each.
+fn next_optical_design(current: OpticalDesign) -> OpticalDesign {
+    match current {
+        OpticalDesign::Refractor {
+            achromat: false, ..
+        } => OpticalDesign::Refractor {
+            achromat: true,
+            focal_ratio: 10.0,
+        },
+        OpticalDesign::Refractor { achromat: true, .. } => {
+            OpticalDesign::Newtonian { spider_vanes: 4 }
+        }
+        OpticalDesign::Newtonian { .. } => OpticalDesign::SchmidtCassegrain {
+            obstruction_pct: 34.0,
+        },
+        OpticalDesign::SchmidtCassegrain { .. } => OpticalDesign::Refractor {
+            achromat: false,
+            focal_ratio: 7.0,
+        },
+    }
+}
 
 /// Interactive desktop viewer for the night sky.
 #[derive(Parser, Debug)]
@@ -234,6 +258,19 @@ struct Args {
     #[arg(long)]
     eyepiece_field_stop_mm: Option<f32>,
 
+    /// V-45 telescope optical design: `apo-refractor`, `achromat-refractor`,
+    /// `newtonian`, or `schmidt-cassegrain`. Press `O` to cycle at runtime.
+    #[arg(long, value_name = "DESIGN")]
+    telescope_design: Option<String>,
+
+    /// V-45 number of Newtonian spider vanes (implies a Newtonian design).
+    #[arg(long)]
+    spider_vanes: Option<u8>,
+
+    /// V-45 OTA roll about the optical axis in degrees (`[` / `]` to rotate).
+    #[arg(long)]
+    ota_rotation_deg: Option<f32>,
+
     /// Disable atmospheric scintillation (V-24).
     #[arg(long)]
     no_scintillation: bool,
@@ -342,6 +379,15 @@ fn main() -> Result<()> {
                     eyepiece_focal_length_mm: args.eyepiece_focal_length_mm,
                     apparent_fov_deg: args.eyepiece_apparent_fov_deg,
                     field_stop_mm: args.eyepiece_field_stop_mm,
+                    optical_design: args
+                        .telescope_design
+                        .as_deref()
+                        .and_then(OpticalDesign::from_kebab_str)
+                        .or_else(|| {
+                            args.spider_vanes
+                                .map(|v| OpticalDesign::Newtonian { spider_vanes: v })
+                        }),
+                    ota_rotation_deg: args.ota_rotation_deg,
                 },
             ),
             catalog: catalog_snapshot(&args.catalog, DEFAULT_SCREEN_LIMITING_MAGNITUDE),
@@ -860,6 +906,25 @@ impl ApplicationHandler for App {
                                     "off"
                                 }
                             );
+                        }
+                        Some(KeyCode::KeyO) => {
+                            // V-45: cycle the telescope optical design (only
+                            // visible while eyepiece mode is active).
+                            gpu.camera.eyepiece.optical_design =
+                                next_optical_design(gpu.camera.eyepiece.optical_design);
+                            log::info!(
+                                "telescope design: {}",
+                                gpu.camera.eyepiece.optical_design.as_kebab_str()
+                            );
+                        }
+                        Some(KeyCode::BracketRight) => {
+                            // V-45: roll the OTA +15° (rotates spider spikes).
+                            gpu.camera.eyepiece.ota_rotation_deg =
+                                (gpu.camera.eyepiece.ota_rotation_deg + 15.0).rem_euclid(360.0);
+                        }
+                        Some(KeyCode::BracketLeft) => {
+                            gpu.camera.eyepiece.ota_rotation_deg =
+                                (gpu.camera.eyepiece.ota_rotation_deg - 15.0).rem_euclid(360.0);
                         }
                         Some(KeyCode::Space) => self.sky_clock.toggle_pause(),
                         Some(KeyCode::Digit1) => self.sky_clock.set_speed(CLOCK_SPEED_REALTIME),

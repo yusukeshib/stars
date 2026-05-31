@@ -28,6 +28,7 @@ pub use goto::{resolve_goto_id, resolve_goto_query, GotoTarget};
 pub use catalog::{simbad_query_url, vizier_query_url, StarIdentifiers};
 pub use presets::*;
 pub use render::*;
+pub use renderer::OpticalDesign;
 pub use renderer::DEFAULT_SCREEN_LIMITING_MAGNITUDE;
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation,
@@ -294,6 +295,11 @@ pub struct EyepieceOverrides {
     pub eyepiece_focal_length_mm: Option<f32>,
     pub apparent_fov_deg: Option<f32>,
     pub field_stop_mm: Option<f32>,
+    /// V-45 optical-design family (`apo-refractor`, `achromat-refractor`,
+    /// `newtonian`, `schmidt-cassegrain`).
+    pub optical_design: Option<OpticalDesign>,
+    /// V-45 OTA roll about the optical axis, degrees (rotates spider spikes).
+    pub ota_rotation_deg: Option<f32>,
 }
 
 impl EyepieceOverrides {
@@ -303,6 +309,8 @@ impl EyepieceOverrides {
             || self.eyepiece_focal_length_mm.is_some()
             || self.apparent_fov_deg.is_some()
             || self.field_stop_mm.is_some()
+            || self.optical_design.is_some()
+            || self.ota_rotation_deg.is_some()
     }
 }
 
@@ -330,6 +338,12 @@ pub fn eyepiece_from_args(enabled: bool, overrides: EyepieceOverrides) -> Eyepie
     }
     if let Some(field_stop_mm) = overrides.field_stop_mm {
         eyepiece.field_stop_mm = field_stop_mm;
+    }
+    if let Some(optical_design) = overrides.optical_design {
+        eyepiece.optical_design = optical_design;
+    }
+    if let Some(ota_rotation_deg) = overrides.ota_rotation_deg {
+        eyepiece.ota_rotation_deg = ota_rotation_deg;
     }
     eyepiece
 }

@@ -14,6 +14,7 @@ import {
   isOverlayLayer,
   isSkyProjection,
   isSkyViewpoint,
+  sanitizedOpticalDesign,
   type AtmosphereConfig,
   type EyepieceConfig,
   type ExternalViewpointConfig,
@@ -345,5 +346,10 @@ function parseEyepiece(value: unknown): EyepieceConfig {
     eyepieceFocalLengthMm: inRange(v.eyepieceFocalLengthMm, 1, 100) ? v.eyepieceFocalLengthMm : DEFAULT_EYEPIECE_CONFIG.eyepieceFocalLengthMm,
     apparentFovDeg: inRange(v.apparentFovDeg, 1, 120) ? v.apparentFovDeg : DEFAULT_EYEPIECE_CONFIG.apparentFovDeg,
     fieldStopMm: inRange(v.fieldStopMm, 0, 120) ? v.fieldStopMm : DEFAULT_EYEPIECE_CONFIG.fieldStopMm,
+    // V-45 telescope-side optics. Not part of the shared Rust session schema
+    // this cycle, so absent values fall back to the defaults.
+    opticalDesign: sanitizedOpticalDesign(v.opticalDesign),
+    spiderVanes: inRange(v.spiderVanes, 1, 8) ? Math.round(v.spiderVanes) : DEFAULT_EYEPIECE_CONFIG.spiderVanes,
+    otaRotationDeg: typeof v.otaRotationDeg === "number" && Number.isFinite(v.otaRotationDeg) ? v.otaRotationDeg : DEFAULT_EYEPIECE_CONFIG.otaRotationDeg,
   };
 }

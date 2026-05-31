@@ -3183,6 +3183,61 @@ Hosts wired: web (info panel links) / CLI (`--goto` metadata) / viewer
    documented approximation), and the web canvas falls back to sRGB where
    wide-gamut presentation is unsupported.
 
+## `V-45` Telescope-side optical artifacts — shipped (CLI + viewer + web)
+
+The eyepiece simulation (`V-43`) is no longer just a magnification / FOV
+calculator: bright stars now show the diffraction artifacts an observer
+actually sees through a given telescope — the Airy disc and rings, spider
+diffraction spikes, the achromat colour fringe, and an exit-pupil vignette.
+
+1. **What changed.** A new `OpticalDesign` enum (`Refractor { achromat,
+   focal_ratio }`, `Newtonian { spider_vanes }`, `SchmidtCassegrain {
+   obstruction_pct }`) and an OTA roll angle were added to
+   `EyepieceSimulation`. The renderer derives the Airy radius (`1.22 λ/D`,
+   Born & Wolf §8.5), the linear central-obstruction ratio, the spider-vane
+   count, and the achromat secondary-spectrum fringe, packs them into two
+   `instrument_optics` `CameraUniform` rows (appended at the end of the
+   struct), and `shaders/star.wgsl` composites an instrument PSF on top of
+   the Spencer eye PSF: an obstructed-aperture Airy pattern (`2J1(x)/x` via
+   an Abramowitz & Stegun J1 approximation, annular for the obstruction),
+   bidirectional spider spikes that rotate with the OTA (even vane counts
+   give `n` arms, odd counts `2n`), a per-channel chromatic ring shift for
+   achromats, and a cos⁴ field vignette. The instrument path is gated on
+   eyepiece-active-in-perspective-Earth-view, so every other render stays
+   bit-identical to the naked-eye pipeline.
+
+2. **Why it counts as complete.** The Airy radius matches the Born & Wolf
+   reference to <1%, the diffraction pattern resolves only at high power
+   (the Airy pixel radius scales with magnification, as in a real
+   eyepiece), and the model is wired into all three hosts behind the
+   existing eyepiece toggle. A naga WGSL parse + validate test guards the
+   shader and the Rust↔WGSL `CameraUniform` layout in CPU-only CI.
+
+3. **Where it lives.** `crates/renderer/src/camera.rs` (`OpticalDesign`,
+   `EyepieceSimulation` extensions, `instrument_optics_uniforms`,
+   `CameraUniform` rows) + `crates/renderer/src/shaders/star.wgsl`
+   (Bessel J1, Airy, spikes, vignette composite); `crates/common`
+   (`EyepieceOverrides` design fields, `eyepiece_from_args`,
+   `OpticalDesign` re-export); `apps/cli` (`--telescope-design`,
+   `--spider-vanes`, `--ota-rotation-deg`); `apps/viewer` (`O` / `[` / `]`
+   keybinds + the same flags); `apps/web` (`set_telescope_optics` WASM
+   binding, settings-panel design / vane / rotation controls, URL params,
+   localStorage).
+
+4. **Tests / validation.** `renderer::camera` unit tests pin the Born &
+   Wolf Airy radius, the per-design obstruction / vane mapping, the
+   achromat chromatic fraction, the eyepiece-mode gate, and the
+   magnification→Airy-pixel scaling; `shaders_parse_and_validate` parses
+   and validates the WGSL with naga.
+
+5. **Hosts wired.** CLI, viewer, web (when eyepiece mode is active). The
+   optical design is a live render control this cycle; persisting it in the
+   shared JSON session schema is a documented follow-up (it can append
+   optional fields without a schema bump).
+
+References (also pinned in ROADMAP `V-45`): Born & Wolf 1999 §8.5;
+Conrady 1929; Suiter 2008; Rutten & van Venrooij 1988.
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

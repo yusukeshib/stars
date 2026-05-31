@@ -120,7 +120,7 @@ Owns GPU-facing rendering state:
 
 - `Renderer` lifecycle and render passes;
 - `Camera`, `LocalView`, `SkyProjection`, `SkyViewpoint`, `EyepieceSimulation`,
-  and GPU camera uniforms;
+  `OpticalDesign` (V-45 telescope-side optics), and GPU camera uniforms;
 - `StarInstance` and `build_star_instance`;
 - overlay geometry, text labels, and `OverlayKind` / `OverlayConfig`;
 - HDR target, skyglow pass, tonemap pass, star shader, text shader, and atmosphere uniforms.
@@ -383,7 +383,18 @@ The exact pass layout can change, but responsibilities should stay separated:
   the footprint rather than adding it as a post-process tint. The Sun and
   Moon disk masks in the skyglow pass apply the same per-channel offsets
   to reproduce the red lower limb / blue upper limb of a horizon-grazing
-  Sun or Moon.
+  Sun or Moon. When the eyepiece simulation is active in a perspective
+  Earth view (`V-45`), the fragment stage composites a telescope
+  *instrument* PSF on top of the Spencer eye PSF: an obstructed-aperture
+  Airy pattern (`2J1(x)/x`, annular for the central obstruction), spider
+  diffraction spikes that roll with the OTA, a per-channel chromatic ring
+  shift for achromats, and an exit-pupil cos⁴ vignette. The instrument
+  parameters (Airy radius in pixels, obstruction ratio, vane count, spike
+  angle, chromatic fraction, vignette) ride two `instrument_optics`
+  `CameraUniform` rows appended at the end of the struct and are zero
+  outside eyepiece mode, so the naked-eye PSF is unchanged. The pixel-level
+  Airy radius scales with magnification, so the diffraction pattern only
+  resolves at high power, as in a real eyepiece.
 - **Overlay pass**: reference circles, grids, constellation lines, boundaries,
   projection, and LDR text labels from the shared bitmap font atlas /
   label-placement pass.
