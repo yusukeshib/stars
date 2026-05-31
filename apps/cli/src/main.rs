@@ -603,6 +603,22 @@ fn main() -> Result<()> {
         if let Some(url) = &target.vizier_url {
             println!("VizieR {url}");
         }
+        // L-20: predicted variable-star light-curve state at the session time.
+        if let Some(v) = &target.variable {
+            println!(
+                "Variable {{\"name\":\"{}\",\"type\":\"{}\",\"periodDays\":{:.6},\"epochJd\":{:.4},\"magBright\":{:.2},\"magFaint\":{:.2},\"phase\":{:.4},\"currentMagnitude\":{:.2},\"deltaMagnitude\":{:.2},\"reference\":\"{}\"}}",
+                v.name,
+                v.kind,
+                v.period_days,
+                v.epoch_jd,
+                v.mag_bright,
+                v.mag_faint,
+                v.phase,
+                v.current_magnitude,
+                v.delta_magnitude,
+                v.reference,
+            );
+        }
     }
 
     log::info!(

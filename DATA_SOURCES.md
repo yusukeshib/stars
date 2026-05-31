@@ -354,6 +354,48 @@ Maintenance rules:
   keep the same column shape so the manifest re-hash works without
   schema churn.
 
+### Variable-star light-curve elements (`L-20`)
+
+Repository location:
+
+- `crates/catalog/data/variable_stars.csv`
+
+Used for:
+
+- `crates/catalog::variables` (light-curve element lookup + phase-folded
+  magnitude prediction), surfaced through `GotoTarget` (CLI `--goto` Δm
+  metadata) and `goto_object` (web info-panel light curve).
+
+Manifest id:
+
+- `vsx-variable-stars-bootstrap` in `data/manifest.toml`.
+
+Source:
+
+- AAVSO International Variable Star Index (VSX; Watson, C. L. 2006, SASS 25,
+  47), `https://www.aavso.org/vsx/`, and the General Catalogue of Variable
+  Stars (GCVS 5.1; Samus' et al. 2017, ARep 61, 80). Type, period `P`, epoch
+  `T0`, and bright/faint V magnitudes for six showpiece variables (Mira,
+  Algol, delta Cephei, Betelgeuse, chi Cygni, RR Lyrae). Hand-curated from the
+  published elements.
+
+License:
+
+- See upstream (AAVSO VSX / GCVS). Elements are factual catalogue data.
+
+Preprocessing / limitations:
+
+- Hand-curated (no script). The predicted magnitude is a first-order *visual*
+  model: a smoothed raised-cosine pulsation (maximum at phase 0, minimum at
+  0.5) for Mira / semiregular / Cepheid / RR Lyrae stars, and a raised-cosine
+  primary + shallow secondary eclipse for Algol-type (EA) binaries. It is not a
+  Fourier light-curve fit, so the predicted *shape* (asymmetric Cepheid /
+  RR Lyrae rise, true Mira amplitude variation) is illustrative; the
+  magnitude *range* and *phase* are accurate to the elements. Semiregular
+  periods (Betelgeuse) are not strictly periodic. Epochs are treated as plain
+  JD (HJD / light-time differences ≤ ~8 min are negligible against the
+  multi-day to multi-hundred-day periods).
+
 ### Washington Double Star showpiece table (`V-54`)
 
 Repository location:

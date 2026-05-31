@@ -20,8 +20,9 @@ use astronomy::{
 };
 use catalog::search::{named_star, SOLAR_SYSTEM_BODIES};
 use catalog::{
-    search as catalog_search, simbad_query_url, vizier_query_url, DeepSkyCatalog, DeepSkyId,
-    DeepSkyObject, MessierCatalog, NgcBrightCatalog, SearchId, SearchKind, StarIdentifiers,
+    search as catalog_search, simbad_query_url, variable_for, vizier_query_url, DeepSkyCatalog,
+    DeepSkyId, DeepSkyObject, MessierCatalog, NgcBrightCatalog, SearchId, SearchKind,
+    StarIdentifiers, VariableSummary,
 };
 use renderer::LocalView;
 
@@ -57,6 +58,9 @@ pub struct GotoTarget {
     pub simbad_url: Option<String>,
     /// L-19 VizieR cone-search URL. `None` for solar-system bodies.
     pub vizier_url: Option<String>,
+    /// L-20 variable-star light-curve state at the session time, when the
+    /// target is a known variable. `None` otherwise.
+    pub variable: Option<VariableSummary>,
 }
 
 impl GotoTarget {
@@ -93,6 +97,12 @@ impl GotoTarget {
         ));
         if let Some((value, unit)) = self.distance {
             parts.push(format!("{value:.3} {unit}"));
+        }
+        if let Some(v) = &self.variable {
+            parts.push(format!(
+                "var {} P={:.4}d V≈{:.2} Δm={:.2}",
+                v.kind, v.period_days, v.current_magnitude, v.delta_magnitude
+            ));
         }
         parts.join(" · ")
     }
@@ -148,6 +158,9 @@ pub fn resolve_goto_id(id: SearchId, observer: Observer) -> Option<GotoTarget> {
                     right_ascension_rad: star.right_ascension_rad,
                     declination_rad: star.declination_rad,
                 }),
+                // L-20: predicted variable-star state at the session time.
+                variable: variable_for(star.hip, star.hd, star.proper.as_deref())
+                    .map(|v| v.summary_at(observer.time.jd_utc)),
             }
         }
         SearchId::Messier(n) => {
@@ -222,6 +235,7 @@ pub fn resolve_goto_id(id: SearchId, observer: Observer) -> Option<GotoTarget> {
                 distance: Some(dist),
                 // Solar-system bodies are not in the CDS stellar archives.
                 identifiers: None,
+                variable: None,
             }
         }
     };
@@ -257,6 +271,7 @@ pub fn resolve_goto_id(id: SearchId, observer: Observer) -> Option<GotoTarget> {
         primary_id,
         simbad_url,
         vizier_url,
+        variable: fields.variable,
     })
 }
 
@@ -273,6 +288,8 @@ struct ResolvedFields {
     distance: Option<(f64, &'static str)>,
     /// CDS deep-link identifiers, `None` for solar-system bodies.
     identifiers: Option<StarIdentifiers>,
+    /// L-20 variable-star summary, `Some` only for known variable stars.
+    variable: Option<VariableSummary>,
 }
 
 fn deepsky_fields(id: &SearchId, object: DeepSkyObject) -> ResolvedFields {
@@ -317,6 +334,7 @@ fn deepsky_fields(id: &SearchId, object: DeepSkyObject) -> ResolvedFields {
             declination_rad: dec,
             ..Default::default()
         }),
+        variable: None,
     }
 }
 
@@ -454,6 +472,25 @@ mod tests {
         let target = resolve_goto_query("Saturn", tokyo()).expect("Saturn resolves");
         assert!(target.simbad_url.is_none());
         assert!(target.vizier_url.is_none());
+    }
+
+    #[test]
+    fn variable_star_surfaces_light_curve_state() {
+        // L-20: Algol is a known eclipsing variable; goto must attach its
+        // predicted light-curve state, and the summary line must mention it.
+        let target = resolve_goto_query("Algol", tokyo()).expect("Algol resolves");
+        let v = target.variable.as_ref().expect("Algol is a variable");
+        assert_eq!(v.kind, "algol");
+        assert!((v.period_days - 2.8673043).abs() < 1.0e-6);
+        assert!(v.current_magnitude >= v.mag_bright - 1.0e-6);
+        assert!(v.current_magnitude <= v.mag_faint + 1.0e-6);
+        assert!(target.info_summary().contains("var algol"));
+    }
+
+    #[test]
+    fn non_variable_star_has_no_light_curve() {
+        let target = resolve_goto_query("Sirius", tokyo()).expect("Sirius resolves");
+        assert!(target.variable.is_none());
     }
 
     #[test]
