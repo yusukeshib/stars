@@ -42,7 +42,8 @@ approximations, and deliberate non-goals.
 | Sun | VSOP87/FK5 geocentric Sun plus WGS84 topocentric parallax | Visual / planning quality; `L-06` tracks DE440-class ephemerides | `crates/astronomy/src/ephemeris.rs` |
 | Moon | Principal ELP2000-style lunar series plus WGS84 topocentric parallax | Visual Moon placement, phase, and moonlit sky; not final eclipse prediction | `crates/astronomy/src/ephemeris.rs` |
 | Planets | VSOP87D apparent ecliptic coordinates with one light-time iteration and approximate magnitudes | Useful for naked-eye rendering; not publication-grade astrometry | `crates/astronomy/src/ephemeris.rs` |
-| DE440 SPK reader (`L-06`) | DAF/SPK Chebyshev (Type 2/3) kernel reader with body-id center chaining; reads real JPL `de440.bsp` / `de440s.bsp` | Implemented and unit-tested against a synthetic spec-accurate SPK; **no kernel is committed** and it does not yet drive the apparent-place pipeline (default stays VSOP87/ELP2000). Kernel ingest + Horizons cross-check deferred (ROADMAP `L-06`). | `crates/astronomy/src/spk.rs` |
+| DE440 SPK reader (`L-06`) | DAF/SPK Chebyshev (Type 2/3) kernel reader with body-id center chaining; reads real JPL `de440.bsp` / `de440s.bsp` | Implemented and unit-tested against a synthetic spec-accurate SPK. | `crates/astronomy/src/spk.rs` |
+| DE440 apparent place (`L-06`, `de440` feature) | Light-time / planetary-aberration loop + first-order annual aberration + IAU 2006/2000B precession-nutation into the mean-equator-of-date frame, producing `SunApparent` / `MoonApparent` / `PlanetApparent` from a DE440 kernel | **Off by default** (`astronomy` crate `de440` cargo feature); **no kernel is committed**, so the default and WASM builds keep the VSOP87/ELP2000 visual tier. Driving the renderer hosts from a fetched kernel and the JPL Horizons sub-arcsecond cross-check remain deferred (ROADMAP `L-06`); the `#[ignore]`d `de440_cross_check_matches_analytic_series` test is the scaffold. | `crates/astronomy/src/ephemeris.rs` |
 | Earth shadow on Moon | Smooth geometric umbra aid | Visual eclipse aid only; not a contact-timing model | `crates/astronomy/src/ephemeris.rs` |
 | Eclipse / occultation geometry (`V-51a`–`d`) | Pair-wise `ApparentDisk` classifier, lens-area obscuration, P1–P4 contact-time bisection, analytic-mask renderer path covering Moon → Sun (`V-51c`) and Moon → stars / planets (`V-51d`) | Visual eclipse / occultation rendering and detection; sub-second IOTA / NASA-canon contact accuracy is gated on the `L-06` DE440 upgrade. Transits across the Sun (`V-51e`) and mutual planetary occultation (`V-51f`) are not yet wired. | `crates/astronomy/src/occultation.rs`, `crates/astronomy/src/planning.rs`, `crates/renderer/src/shaders/{skyglow,star}.wgsl` |
 | Airmass / extinction | Kasten-Young airmass and per-channel Hardie / Schaefer coefficients | Clear-site visual extinction, not site-calibrated spectroscopy | `crates/astronomy/src/photometry.rs` |
@@ -78,8 +79,12 @@ approximations, and deliberate non-goals.
 - No TCG/TCB, relativistic light deflection, stellar radial-velocity
   perspective acceleration, or full apparent-place reduction for arbitrary
   catalog stars.
-- No DE440 / SPICE kernel reader yet; current Sun/Moon/planet states are visual
-  approximations and should not be described as publication-grade ephemerides.
+- The DE440 path is wired but off by default: the `astronomy` crate's `de440`
+  cargo feature drives the apparent Sun/Moon/planet place from a JPL DE440
+  SPK kernel, but **no kernel is committed**, the renderer hosts are not yet
+  switched to it, and the JPL Horizons sub-arcsecond cross-check is deferred.
+  The default and WASM builds use the VSOP87/ELP2000 visual-tier series, which
+  should not be described as publication-grade ephemerides.
 - No terrain horizon, clouds, weather, or local light pollution beyond the
   `V-39` Bortle / SQM model. Output colour management (`V-50`) selects and
   tags sRGB / Display-P3 / Rec.2020 primaries, but there is no embedded ICC

@@ -3,6 +3,13 @@ name = "astronomy"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Wire the DAF/SPK Chebyshev reader (`spk`) into the apparent Sun/Moon/planet
+# pipeline as a publication-grade DE440 source. Off by default: DE440 kernels
+# are large external binaries (see `scripts/fetch-de440-subset.sh`) and the
+# default + WASM builds keep the analytic VSOP87 / ELP2000 series.
+de440 = []
+
 [dependencies]
 astro = "2"
 glam = { workspace = true }

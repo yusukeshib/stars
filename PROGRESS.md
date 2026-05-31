@@ -3526,6 +3526,50 @@ References (pinned in ROADMAP `L-06`): Park, R. S. et al. 2021, AJ 161, 105
 (DE440); Acton, C. H. 1996, Planet. Space Sci. 44, 65 (SPICE); NAIF DAF / SPK
 Required Reading.
 
+## `L-06` DE440 apparent-place wiring — partial (feature-gated; kernel-driven hosts + Horizons cross-check deferred)
+
+Second slice of the DE440 upgrade: the `SpkKernel` reader is now wired into
+the apparent Sun/Moon/planet pipeline behind a cargo feature, so a fetched
+DE440 kernel can drive publication-grade states while the default and WASM
+builds keep the analytic series.
+
+1. **What changed.** New off-by-default `de440` feature on the `astronomy`
+   crate. A feature-gated `ephemeris::de440` module adds
+   `apparent_sun_de440`, `apparent_moon_de440`, `apparent_planet_de440`
+   (+ `_topocentric` variants and `apparent_planets_de440_topocentric`),
+   re-exported from the crate root. Each takes an `&SpkKernel` and returns the
+   same `SunApparent` / `MoonApparent` / `PlanetApparent` structs as the
+   analytic path, computed via: a light-time / planetary-aberration iteration
+   on the barycentric geocentric vector, first-order annual aberration
+   (`corrections::annual_aberration` + `earth_velocity_over_c_j2000`), and the
+   IAU 2006/2000B precession-nutation rotation
+   (`corrections::precession_nutation_matrix`) into the mean-equator-of-date
+   frame the renderer already uses. The Moon phase / Earth-umbra aid (`V-36`)
+   was extracted into a shared `moon_phase_and_shadow` helper used by both the
+   analytic and DE440 Moon paths. Giant planets query their barycenter
+   (guaranteed present in the main DE440 kernel); inner-planet barycenters
+   coincide with their centers.
+2. **Why it is partial (◑, not ✅).** The feature is library-only: the CLI /
+   viewer renderer **hosts** are not yet switched to it, so on-screen output
+   is still the analytic VSOP87 / ELP2000 tier until a host opts in with a
+   fetched kernel. The JPL Horizons sub-arcsecond cross-check also needs the
+   external 32–110 MB kernel and is scaffolded but not pinned.
+3. **Where it lives.** `crates/astronomy/src/ephemeris.rs` (feature-gated
+   `de440` module + shared `moon_phase_and_shadow`), feature declared in
+   `crates/astronomy/Cargo.toml`, re-exports in
+   `crates/astronomy/src/lib.rs`.
+4. **Tests / validation.** Default build unchanged (239 passed). With
+   `--features de440`, an `#[ignore]`d cross-check
+   (`de440_cross_check_matches_analytic_series`) loads a kernel from
+   `STARS_DE440_KERNEL` and asserts DE440 Sun/Mars agree with VSOP87 within
+   30″ and the Moon with ELP2000 within 60″ — a real (non-fabricated)
+   validation of the parser → light-time → aberration → precession chain.
+   Tightening to pinned JPL Horizons RA/Dec constants is the remaining step.
+   No committed data → `make manifest-check` unchanged; the kernel is neither
+   committed nor a runtime service, so it has no manifest row (documented in
+   `DATA_SOURCES.md`).
+5. **Hosts wired.** None yet (library-only; host opt-in is the deferred step).
+
 ## `L-17` Hipparcos / Tycho-2 / Gaia DR3 ingest — shipped
 
 The large-catalog ingest path exists behind the `L-16` `CatalogBackend`
@@ -3918,3 +3962,23 @@ When new work lands, add a short entry here with:
 3. where the implementation lives;
 4. what tests or validation pin the behaviour;
 5. which hosts are wired, if applicable.
+
+## Worker log — L-06 DE440 apparent-place wiring (this task)
+
+- Added off-by-default `de440` cargo feature on `crates/astronomy`.
+- Wired `SpkKernel` into apparent Sun/Moon/planet via a feature-gated
+  `ephemeris::de440` module: `apparent_{sun,moon,planet}_de440[_topocentric]`
+  (+ `apparent_planets_de440_topocentric`), re-exported from the crate root.
+  Light-time/planetary-aberration loop + annual aberration + IAU 2006/2000B
+  precession-nutation into mean-equator-of-date; default/WASM keep VSOP87/ELP2000.
+- Extracted shared `moon_phase_and_shadow` helper (analytic + DE440 reuse).
+- Horizons cross-check scaffolded as `#[ignore]`d
+  `de440_cross_check_matches_analytic_series` (reads `STARS_DE440_KERNEL`).
+- Docs: ROADMAP `L-06` (stays ◑), PROGRESS.md, DATA_SOURCES.md,
+  docs/standards-compliance.md.
+- No manifest row: kernel is neither committed nor a runtime service
+  (manifest schema has no fetched-binary kind); documented rationale.
+- Validation: default `cargo test -p astronomy` 239 passed; `--features de440`
+  builds warning-clean and 239 passed (+1 ignored cross-check). `make ci` run.
+- Deferred (needs external kernel): switching CLI/viewer hosts to the feature,
+  and pinning JPL Horizons sub-arcsecond reference constants.

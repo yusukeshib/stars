@@ -50,6 +50,12 @@ pub use ephemeris::{
     apparent_sun, apparent_sun_topocentric, MoonApparent, Planet, PlanetApparent,
     SaturnRingApparent, SunApparent, SunMoonApparent,
 };
+#[cfg(feature = "de440")]
+pub use ephemeris::{
+    apparent_moon_de440, apparent_moon_de440_topocentric, apparent_planet_de440,
+    apparent_planet_de440_topocentric, apparent_planets_de440_topocentric, apparent_sun_de440,
+    apparent_sun_de440_topocentric,
+};
 pub use galaxy::{
     dust_extinction_az, milky_way_luminosity_density, spiral_arm_enhancement, SpiralArm, R_SUN_PC,
     SPIRAL_ARMS, Z_SUN_PC,
