@@ -19,6 +19,10 @@ extension-module = ["pyo3/extension-module"]
 [dependencies]
 pyo3 = { version = "0.22", features = ["abi3-py39"] }
 astronomy = { path = "../../crates/astronomy" }
+# `glam` (workspace-pinned) is needed only to build the date-equatorial unit
+# direction for `find_lunar_star_occultation`; it is the same version the
+# `astronomy` crate uses, so no extra version surface is introduced.
+glam = { workspace = true }
 catalog = { path = "../../crates/catalog", default-features = false, features = ["embedded"] }
 # `serde_json` carries the session JSON round-trip without dragging in the
 # host `stars-host-common` crate (clap / chrono / wgpu), keeping the binding

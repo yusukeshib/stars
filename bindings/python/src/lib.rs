@@ -24,14 +24,19 @@
 #![allow(clippy::useless_conversion)]
 
 use astronomy::{
-    apparent_galilean_moons_topocentric, apparent_planets_topocentric, apparent_titan_topocentric,
+    active_occluders as astro_active_occluders, apparent_galilean_moons_topocentric,
+    apparent_planets_topocentric, apparent_titan_topocentric,
     body_altitude_rad as astro_body_altitude_rad, equatorial_to_horizontal,
-    evening_plan as astro_evening_plan, jd_utc_to_unix_ms as astro_jd_utc_to_unix_ms,
+    evening_plan as astro_evening_plan, find_lunar_occultation as astro_find_lunar_occultation,
+    find_mutual_planetary_occultation as astro_find_mutual_planetary_occultation,
+    find_planet_transit as astro_find_planet_transit,
+    find_solar_eclipse as astro_find_solar_eclipse, jd_utc_to_unix_ms as astro_jd_utc_to_unix_ms,
     julian_date_from_unix_seconds, rise_transit_set as astro_rise_transit_set,
     twilight_band as astro_twilight_band, twilight_indicators as astro_twilight_indicators, AltAz,
-    EveningPlan, GalileanMoon, GalileanMoonApparent, MoonApparent, Observer, Planet,
-    PlanetApparent, PlanningBody, RiseTransitSet, SunApparent, SunMoonApparent, TimeScales,
-    TitanApparent, TwilightIndicator,
+    ContactTimes, EveningPlan, GalileanMoon, GalileanMoonApparent, LunarOccultationEvent,
+    LunarOccultedBody, MoonApparent, MutualPlanetaryOccultationEvent, Observer, Occluder,
+    OccluderTarget, Planet, PlanetApparent, PlanetTransitEvent, PlanningBody, RiseTransitSet,
+    SolarEclipseEvent, SunApparent, SunMoonApparent, TimeScales, TitanApparent, TwilightIndicator,
 };
 use catalog::{load_embedded, Star};
 use pyo3::exceptions::{PyIOError, PyIndexError, PyValueError};
@@ -778,6 +783,308 @@ impl PySession {
 }
 
 // ---------------------------------------------------------------------------
+// Occultations & eclipses (V-51 planning surface)
+// ---------------------------------------------------------------------------
+
+/// Canonical P1..P4 contact times (UTC Julian Dates) for an occultation or
+/// eclipse, mirroring [`astronomy::ContactTimes`].
+///
+/// Each contact is `None` when that phase does not occur for the event (e.g.
+/// `p2` / `p3` are `None` for a purely partial solar eclipse; for a lunar
+/// occultation of a point-source star `p1 ≈ p2` and `p3 ≈ p4` because external
+/// and internal contact coincide).
+#[pyclass(name = "ContactTimes", module = "stars_py", frozen)]
+#[derive(Clone, Copy)]
+pub struct PyContactTimes {
+    inner: ContactTimes,
+}
+
+#[pymethods]
+impl PyContactTimes {
+    /// First exterior contact (ingress begins), UTC Julian Date or `None`.
+    #[getter]
+    fn p1(&self) -> Option<f64> {
+        self.inner.p1
+    }
+    /// First interior contact (fully entered), UTC Julian Date or `None`.
+    #[getter]
+    fn p2(&self) -> Option<f64> {
+        self.inner.p2
+    }
+    /// Last interior contact (egress begins), UTC Julian Date or `None`.
+    #[getter]
+    fn p3(&self) -> Option<f64> {
+        self.inner.p3
+    }
+    /// Last exterior contact (egress ends), UTC Julian Date or `None`.
+    #[getter]
+    fn p4(&self) -> Option<f64> {
+        self.inner.p4
+    }
+
+    /// `(p1, p2, p3, p4)` as a tuple of `Optional[float]`.
+    fn as_tuple(&self) -> (Option<f64>, Option<f64>, Option<f64>, Option<f64>) {
+        (self.inner.p1, self.inner.p2, self.inner.p3, self.inner.p4)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ContactTimes(p1={:?}, p2={:?}, p3={:?}, p4={:?})",
+            self.inner.p1, self.inner.p2, self.inner.p3, self.inner.p4
+        )
+    }
+}
+
+/// A lunar occultation of a planet or star located inside a planning window,
+/// mirroring [`astronomy::LunarOccultationEvent`].
+#[pyclass(name = "LunarOccultation", module = "stars_py", frozen)]
+#[derive(Clone, Copy)]
+pub struct PyLunarOccultation {
+    inner: LunarOccultationEvent,
+}
+
+#[pymethods]
+impl PyLunarOccultation {
+    /// Deepest geometry reached in the window: one of `"partial"`,
+    /// `"annular-or-transit"`, or `"total"`.
+    #[getter]
+    fn kind(&self) -> &'static str {
+        self.inner.kind.as_kebab_str()
+    }
+    /// Minimum Moon–body angular separation (radians) inside the window.
+    #[getter]
+    fn min_separation_rad(&self) -> f64 {
+        self.inner.min_separation_rad
+    }
+    /// UTC Julian Date of minimum separation (peak phase).
+    #[getter]
+    fn peak_jd_utc(&self) -> f64 {
+        self.inner.peak_jd_utc
+    }
+    /// P1..P4 contact times.
+    #[getter]
+    fn contacts(&self) -> PyContactTimes {
+        PyContactTimes {
+            inner: self.inner.contacts,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "LunarOccultation(kind={:?}, peak_jd_utc={:.6}, min_separation_rad={:.6e})",
+            self.inner.kind.as_kebab_str(),
+            self.inner.peak_jd_utc,
+            self.inner.min_separation_rad
+        )
+    }
+}
+
+/// A solar eclipse circumstance for the observer inside a planning window,
+/// mirroring [`astronomy::SolarEclipseEvent`].
+#[pyclass(name = "SolarEclipse", module = "stars_py", frozen)]
+#[derive(Clone, Copy)]
+pub struct PySolarEclipse {
+    inner: SolarEclipseEvent,
+}
+
+#[pymethods]
+impl PySolarEclipse {
+    /// Deepest phase reached anywhere in the window: one of `"partial"`,
+    /// `"annular"`, or `"total"`.
+    #[getter]
+    fn kind(&self) -> &'static str {
+        self.inner.kind.as_kebab_str()
+    }
+    /// Peak obscuration fraction in `[0, 1]`.
+    #[getter]
+    fn peak_obscuration(&self) -> f32 {
+        self.inner.peak_obscuration
+    }
+    /// UTC Julian Date of peak obscuration.
+    #[getter]
+    fn peak_jd_utc(&self) -> f64 {
+        self.inner.peak_jd_utc
+    }
+    /// P1..P4 contact times (`p2`/`p3` are `None` for a partial event).
+    #[getter]
+    fn contacts(&self) -> PyContactTimes {
+        PyContactTimes {
+            inner: self.inner.contacts,
+        }
+    }
+    /// `True` for a central (annular or total) eclipse.
+    fn is_central(&self) -> bool {
+        self.inner.is_central()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "SolarEclipse(kind={:?}, peak_obscuration={:.4}, peak_jd_utc={:.6})",
+            self.inner.kind.as_kebab_str(),
+            self.inner.peak_obscuration,
+            self.inner.peak_jd_utc
+        )
+    }
+}
+
+/// A Mercury / Venus transit of the solar disk, mirroring
+/// [`astronomy::PlanetTransitEvent`].
+#[pyclass(name = "PlanetTransit", module = "stars_py", frozen)]
+#[derive(Clone, Copy)]
+pub struct PyPlanetTransit {
+    inner: PlanetTransitEvent,
+}
+
+#[pymethods]
+impl PyPlanetTransit {
+    /// The transiting inner planet (`"mercury"` or `"venus"`).
+    #[getter]
+    fn planet(&self) -> &'static str {
+        planet_name(self.inner.planet)
+    }
+    /// Geometry label at peak (always `"annular-or-transit"`).
+    #[getter]
+    fn kind(&self) -> &'static str {
+        self.inner.kind.as_kebab_str()
+    }
+    /// Peak obscuration fraction `(r_planet / r_sun)²` in `[0, 1]`.
+    #[getter]
+    fn peak_obscuration(&self) -> f32 {
+        self.inner.peak_obscuration
+    }
+    /// UTC Julian Date of minimum apparent separation.
+    #[getter]
+    fn peak_jd_utc(&self) -> f64 {
+        self.inner.peak_jd_utc
+    }
+    /// P1..P4 contact times (exterior P1/P4, interior P2/P3).
+    #[getter]
+    fn contacts(&self) -> PyContactTimes {
+        PyContactTimes {
+            inner: self.inner.contacts,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PlanetTransit(planet={:?}, peak_obscuration={:.2e}, peak_jd_utc={:.6})",
+            planet_name(self.inner.planet),
+            self.inner.peak_obscuration,
+            self.inner.peak_jd_utc
+        )
+    }
+}
+
+/// A mutual planet-on-planet occultation, mirroring
+/// [`astronomy::MutualPlanetaryOccultationEvent`].
+#[pyclass(name = "MutualPlanetaryOccultation", module = "stars_py", frozen)]
+#[derive(Clone, Copy)]
+pub struct PyMutualOccultation {
+    inner: MutualPlanetaryOccultationEvent,
+}
+
+#[pymethods]
+impl PyMutualOccultation {
+    /// Planet whose disk is in front at peak (closer to the observer).
+    #[getter]
+    fn front(&self) -> &'static str {
+        planet_name(self.inner.front)
+    }
+    /// Planet whose disk is occulted at peak (farther from the observer).
+    #[getter]
+    fn back(&self) -> &'static str {
+        planet_name(self.inner.back)
+    }
+    /// Deepest geometry reached: `"partial"`, `"annular-or-transit"`, or
+    /// `"total"`.
+    #[getter]
+    fn kind(&self) -> &'static str {
+        self.inner.kind.as_kebab_str()
+    }
+    /// Minimum apparent separation between the two planet centres (radians).
+    #[getter]
+    fn min_separation_rad(&self) -> f64 {
+        self.inner.min_separation_rad
+    }
+    /// Peak obscuration fraction of the back disk in `[0, 1]`.
+    #[getter]
+    fn peak_obscuration(&self) -> f32 {
+        self.inner.peak_obscuration
+    }
+    /// UTC Julian Date of minimum separation.
+    #[getter]
+    fn peak_jd_utc(&self) -> f64 {
+        self.inner.peak_jd_utc
+    }
+    /// P1..P4 contact times (`p2`/`p3` `None` for a grazing partial event).
+    #[getter]
+    fn contacts(&self) -> PyContactTimes {
+        PyContactTimes {
+            inner: self.inner.contacts,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "MutualPlanetaryOccultation(front={:?}, back={:?}, kind={:?}, peak_jd_utc={:.6})",
+            planet_name(self.inner.front),
+            planet_name(self.inner.back),
+            self.inner.kind.as_kebab_str(),
+            self.inner.peak_jd_utc
+        )
+    }
+}
+
+/// One active occluder for the observer at the instant of their `Observer`
+/// time, mirroring an entry of [`astronomy::ActiveOccluders`]. This is the
+/// per-frame geometry the renderer feeds into its occlusion uniform.
+#[pyclass(name = "Occluder", module = "stars_py", frozen)]
+#[derive(Clone, Copy)]
+pub struct PyOccluder {
+    inner: Occluder,
+}
+
+#[pymethods]
+impl PyOccluder {
+    /// What is being occulted: `"sun"`, `"moon"`, a planet name, or
+    /// `"stars"` (the catalog-star cull entry).
+    #[getter]
+    fn target(&self) -> String {
+        occluder_target_name(self.inner.target)
+    }
+    /// Geometry label: `"partial"`, `"annular-or-transit"`, or `"total"`.
+    #[getter]
+    fn kind(&self) -> &'static str {
+        self.inner.kind.as_kebab_str()
+    }
+    /// Fraction of the target disk obscured by the front body, `[0, 1]`.
+    #[getter]
+    fn obscuration(&self) -> f64 {
+        self.inner.obscuration
+    }
+    /// Angular radius of the occulting (front) disk, radians.
+    #[getter]
+    fn front_radius_rad(&self) -> f64 {
+        self.inner.front_radius_rad
+    }
+    /// Equatorial unit direction to the occulting (front) body, `(x, y, z)`.
+    #[getter]
+    fn front_dir_eq(&self) -> (f64, f64, f64) {
+        let d = self.inner.front_dir_eq;
+        (d[0], d[1], d[2])
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Occluder(target={:?}, kind={:?}, obscuration={:.4})",
+            occluder_target_name(self.inner.target),
+            self.inner.kind.as_kebab_str(),
+            self.inner.obscuration
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Module-level free functions
 // ---------------------------------------------------------------------------
 
@@ -899,6 +1206,131 @@ fn evening_plan(observer: &PyObserver) -> PyEveningPlan {
     }
 }
 
+/// All occluders active for the observer at the instant of their `Observer`
+/// time — the per-frame Moon-on-Sun / Moon-on-planet / mutual-planet / star
+/// occlusion geometry the renderer consumes (V-51). Returns an empty list
+/// when nothing is being occulted (aside from the always-emitted star-cull
+/// entry the renderer relies on).
+///
+/// >>> occ = stars_py.active_occluders(observer)
+/// >>> [(o.target, o.kind, round(o.obscuration, 3)) for o in occ]
+#[pyfunction]
+fn active_occluders(observer: &PyObserver) -> Vec<PyOccluder> {
+    astro_active_occluders(observer.inner)
+        .as_slice()
+        .iter()
+        .map(|&inner| PyOccluder { inner })
+        .collect()
+}
+
+/// Find a lunar occultation of a **planet** inside the `[start_jd_utc,
+/// end_jd_utc)` UTC window, or `None` if none occurs. `body` is a planet name
+/// (`"mercury"`..`"neptune"`); use [`find_lunar_star_occultation`] for stars.
+///
+/// >>> ev = stars_py.find_lunar_occultation(obs, "venus", jd0, jd0 + 1.0)
+/// >>> if ev: print(ev.kind, ev.peak_jd_utc, ev.contacts.as_tuple())
+#[pyfunction]
+fn find_lunar_occultation(
+    observer: &PyObserver,
+    body: &str,
+    start_jd_utc: f64,
+    end_jd_utc: f64,
+) -> PyResult<Option<PyLunarOccultation>> {
+    let planet = planet_from_name(body)?;
+    Ok(astro_find_lunar_occultation(
+        observer.inner,
+        LunarOccultedBody::Planet(planet),
+        start_jd_utc,
+        end_jd_utc,
+    )
+    .map(|inner| PyLunarOccultation { inner }))
+}
+
+/// Find a lunar occultation of a **star** given its unit direction in the
+/// date (mean-equator-of-date) equatorial frame, inside the `[start, end)`
+/// UTC window. `dir_eq` is an `(x, y, z)` unit vector; this is the advanced
+/// entry point used by the renderer's star-cull path. For catalogue stars
+/// expressed as J2000 RA/Dec, precess to date first.
+#[pyfunction]
+fn find_lunar_star_occultation(
+    observer: &PyObserver,
+    dir_eq: (f64, f64, f64),
+    start_jd_utc: f64,
+    end_jd_utc: f64,
+) -> Option<PyLunarOccultation> {
+    let dir = glam::Vec3::new(dir_eq.0 as f32, dir_eq.1 as f32, dir_eq.2 as f32).normalize();
+    astro_find_lunar_occultation(
+        observer.inner,
+        LunarOccultedBody::Star { dir_date_eq: dir },
+        start_jd_utc,
+        end_jd_utc,
+    )
+    .map(|inner| PyLunarOccultation { inner })
+}
+
+/// Find a solar eclipse visible from the observer inside the `[start_jd_utc,
+/// end_jd_utc)` UTC window, or `None`. Reports the deepest phase, peak
+/// obscuration, and the P1..P4 contact times.
+///
+/// >>> ev = stars_py.find_solar_eclipse(obs, jd0, jd0 + 1.0)
+/// >>> if ev: print(ev.kind, ev.is_central(), ev.peak_obscuration)
+#[pyfunction]
+fn find_solar_eclipse(
+    observer: &PyObserver,
+    start_jd_utc: f64,
+    end_jd_utc: f64,
+) -> Option<PySolarEclipse> {
+    astro_find_solar_eclipse(observer.inner, start_jd_utc, end_jd_utc)
+        .map(|inner| PySolarEclipse { inner })
+}
+
+/// Find a Mercury or Venus transit of the Sun inside the `[start_jd_utc,
+/// end_jd_utc)` UTC window, or `None`. `planet` must be `"mercury"` or
+/// `"venus"` (the only inner planets that can transit); any other name raises
+/// `ValueError`.
+#[pyfunction]
+fn find_planet_transit(
+    observer: &PyObserver,
+    planet: &str,
+    start_jd_utc: f64,
+    end_jd_utc: f64,
+) -> PyResult<Option<PyPlanetTransit>> {
+    let planet = planet_from_name(planet)?;
+    if !matches!(planet, Planet::Mercury | Planet::Venus) {
+        return Err(PyValueError::new_err(
+            "only mercury and venus can transit the Sun",
+        ));
+    }
+    Ok(
+        astro_find_planet_transit(observer.inner, planet, start_jd_utc, end_jd_utc)
+            .map(|inner| PyPlanetTransit { inner }),
+    )
+}
+
+/// Find a mutual occultation between two planets inside the `[start_jd_utc,
+/// end_jd_utc)` UTC window, or `None`. `planet_a` and `planet_b` are planet
+/// names and must differ.
+#[pyfunction]
+fn find_mutual_planetary_occultation(
+    observer: &PyObserver,
+    planet_a: &str,
+    planet_b: &str,
+    start_jd_utc: f64,
+    end_jd_utc: f64,
+) -> PyResult<Option<PyMutualOccultation>> {
+    let a = planet_from_name(planet_a)?;
+    let b = planet_from_name(planet_b)?;
+    if a == b {
+        return Err(PyValueError::new_err(
+            "planet_a and planet_b must be different planets",
+        ));
+    }
+    Ok(
+        astro_find_mutual_planetary_occultation(observer.inner, a, b, start_jd_utc, end_jd_utc)
+            .map(|inner| PyMutualOccultation { inner }),
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -921,6 +1353,40 @@ fn planning_body_from_name(name: &str) -> PyResult<PlanningBody> {
             )))
         }
     })
+}
+
+/// Resolve a planet name to [`Planet`]. Rejects `"sun"` / `"moon"` and unknown
+/// names with a Python `ValueError`.
+fn planet_from_name(name: &str) -> PyResult<Planet> {
+    Ok(match name.to_ascii_lowercase().as_str() {
+        "mercury" => Planet::Mercury,
+        "venus" => Planet::Venus,
+        "mars" => Planet::Mars,
+        "jupiter" => Planet::Jupiter,
+        "saturn" => Planet::Saturn,
+        "uranus" => Planet::Uranus,
+        "neptune" => Planet::Neptune,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown planet {other:?}; expected one of mercury, venus, mars, jupiter, \
+                 saturn, uranus, neptune"
+            )))
+        }
+    })
+}
+
+/// Human-readable label for an [`OccluderTarget`] (`"sun"`, `"moon"`, a planet
+/// name, or `"stars"`).
+fn occluder_target_name(target: OccluderTarget) -> String {
+    match target {
+        OccluderTarget::Sun => "sun".to_string(),
+        OccluderTarget::Moon => "moon".to_string(),
+        OccluderTarget::Stars => "stars".to_string(),
+        OccluderTarget::Planet(i) => Planet::ALL
+            .get(i as usize)
+            .map(|p| planet_name(*p).to_string())
+            .unwrap_or_else(|| format!("planet[{i}]")),
+    }
 }
 
 /// Read a finite `f64` at `value[section][key]`, erroring (rather than
@@ -1037,6 +1503,12 @@ fn stars_py(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySession>()?;
     m.add_class::<PyStarCatalog>()?;
     m.add_class::<PyStar>()?;
+    m.add_class::<PyContactTimes>()?;
+    m.add_class::<PyLunarOccultation>()?;
+    m.add_class::<PySolarEclipse>()?;
+    m.add_class::<PyPlanetTransit>()?;
+    m.add_class::<PyMutualOccultation>()?;
+    m.add_class::<PyOccluder>()?;
     m.add_function(wrap_pyfunction!(apparent_sun_moon, m)?)?;
     m.add_function(wrap_pyfunction!(apparent_planets, m)?)?;
     m.add_function(wrap_pyfunction!(apparent_galilean_moons, m)?)?;
@@ -1049,6 +1521,12 @@ fn stars_py(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rise_transit_set, m)?)?;
     m.add_function(wrap_pyfunction!(twilight_indicators, m)?)?;
     m.add_function(wrap_pyfunction!(evening_plan, m)?)?;
+    m.add_function(wrap_pyfunction!(active_occluders, m)?)?;
+    m.add_function(wrap_pyfunction!(find_lunar_occultation, m)?)?;
+    m.add_function(wrap_pyfunction!(find_lunar_star_occultation, m)?)?;
+    m.add_function(wrap_pyfunction!(find_solar_eclipse, m)?)?;
+    m.add_function(wrap_pyfunction!(find_planet_transit, m)?)?;
+    m.add_function(wrap_pyfunction!(find_mutual_planetary_occultation, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
@@ -1205,6 +1683,78 @@ mod tests {
         let direct = PyObserver::new(-31.27, 149.07, 2461300.25);
         assert!((from_session.latitude_deg() - direct.latitude_deg()).abs() < 1e-9);
         assert!((from_session.jd_tt() - direct.jd_tt()).abs() < 1e-9);
+    }
+
+    /// The occultation/eclipse finders must accept the documented body names,
+    /// never panic on an empty window, and reject bad names with a Python
+    /// `ValueError` rather than a panic. The window is intentionally a single
+    /// instant so the search degenerates to a no-event probe — the contract
+    /// under test is the binding's argument handling and Option mapping, not
+    /// the astronomy crate's event detection (pinned in its own tests).
+    #[test]
+    fn occultation_finders_validate_and_map_options() {
+        let obs = PyObserver::new(35.68, 139.69, 2461239.9375);
+        // Degenerate window: end <= start → the astronomy layer returns None.
+        assert!(
+            find_lunar_occultation(&obs, "venus", 2461239.9375, 2461239.9375)
+                .unwrap()
+                .is_none()
+        );
+        assert!(find_solar_eclipse(&obs, 2461239.9375, 2461239.9375).is_none());
+        assert!(
+            find_planet_transit(&obs, "mercury", 2461239.9375, 2461239.9375)
+                .unwrap()
+                .is_none()
+        );
+        assert!(find_mutual_planetary_occultation(
+            &obs,
+            "venus",
+            "mars",
+            2461239.9375,
+            2461239.9375
+        )
+        .unwrap()
+        .is_none());
+
+        // Name validation: planet finders reject sun/moon/unknown.
+        assert!(find_lunar_occultation(&obs, "moon", 2461239.5, 2461240.5).is_err());
+        assert!(find_planet_transit(&obs, "mars", 2461239.5, 2461240.5).is_err());
+        assert!(
+            find_mutual_planetary_occultation(&obs, "venus", "venus", 2461239.5, 2461240.5)
+                .is_err(),
+            "identical planets must be rejected"
+        );
+
+        // The star-occultation entry point accepts a direction tuple and
+        // never panics on a degenerate window.
+        assert!(
+            find_lunar_star_occultation(&obs, (1.0, 0.0, 0.0), 2461239.9375, 2461239.9375)
+                .is_none()
+        );
+    }
+
+    /// `active_occluders` must return a bounded, well-formed list (never
+    /// panicking) whose entries carry resolvable target labels — the contract
+    /// a notebook iterating the per-frame occlusion geometry relies on.
+    #[test]
+    fn active_occluders_are_bounded_and_labelled() {
+        let obs = PyObserver::new(35.68, 139.69, 2461239.9375);
+        let occluders = active_occluders(&obs);
+        assert!(
+            occluders.len() <= astronomy::MAX_OCCLUDERS,
+            "occluder count must not exceed the renderer's uniform bound"
+        );
+        for occ in &occluders {
+            // Target label must be one of the documented strings.
+            let target = occ.target();
+            assert!(
+                matches!(target.as_str(), "sun" | "moon" | "stars")
+                    || planet_from_name(&target).is_ok(),
+                "unexpected occluder target label {target:?}"
+            );
+            assert!((0.0..=1.0).contains(&occ.obscuration()));
+            assert!(occ.front_radius_rad() >= 0.0);
+        }
     }
 
     /// `from_observer` must carry the observer's exact stored time scales into
