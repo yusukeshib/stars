@@ -3663,7 +3663,7 @@ components, so it stays separable from the parallel `L-23` education work.
 5. **Reference.** W3C WCAG 2.2; WAI-ARIA Authoring Practices (dialog + tabs);
    Wong 2011, Nature Methods 8, 441 (for the deferred CVD palette).
 
-## `L-18` Identifier preservation through the renderer — ◑ (round-trip + CLI/web primary-ID; canvas pick deferred)
+## `L-18` Identifier preservation through the renderer — ✅ (round-trip + CLI/web primary-ID; canvas pick added in the follow-up below)
 
 Catalogue identity now survives from the catalog through the renderer instance
 buffer and back to the hosts, so a star can be referenced by its canonical ID
@@ -3703,7 +3703,7 @@ object info panel consume.
    decoder, matching the `L-17` cross-ID outputs end to end.
 5. **Hosts wired.** CLI `--goto` metadata, web info-panel click-to-copy.
 
-## `L-20` Variable star light curves — ◑ (elements + light-curve model + web panel + CLI Δm shipped; renderer override deferred)
+## `L-20` Variable star light curves — ✅ (elements + light-curve model + web panel + CLI Δm; renderer override added in the follow-up below)
 
 Known variable stars now carry standardised light-curve elements and a
 phase-folded magnitude prediction, surfaced in the web info panel as an inline
@@ -3746,6 +3746,58 @@ light curve and in the CLI GoTo metadata as the predicted Δm.
    `DATA_SOURCES.md` records the model limitations.
 6. **Hosts wired.** Web (info-panel light curve), CLI (`--goto` Δm metadata);
    viewer follows with the deferred renderer override.
+
+## `L-18` canvas pick + `L-20` renderer override — shipped (completes both to ✅)
+
+The two coupled follow-ups the `L-18` and `L-20` PRs deferred now ship
+together, on the shared plumbing they both needed: a screen→sky inverse plus
+per-star identity / time-varying magnitude reaching the instance buffer.
+
+1. **L-18 interactive canvas pick.** `renderer::Camera::screen_ray_equatorial`
+   inverts the perspective `view_proj` so a viewport pixel maps to a J2000
+   equatorial ray (precession/nutation + projection inverted exactly; the
+   per-star PM / aberration ≤ 20.5″ / refraction ≤ ~34′-near-horizon terms sit
+   under the few-arcminute `pick_nearest` tolerance and are documented, not
+   inverted). Web: a canvas tap (distinguished from a pan drag by movement +
+   duration) calls `StarView::pick_star(x, y)`, which feeds the ray to
+   `pick_nearest`, resolves the nearest instance's `L-18` pick handle, and
+   returns the same goto-record JSON the search panel already renders — so the
+   tap opens the existing info panel (without re-slewing the camera). Viewer: a
+   left-click release that barely moved calls `stars_host_common::pick_star_label`
+   and shows the canonical primary id in the title bar. CLI is unaffected.
+2. **L-20 renderer brightness override.** `catalog::render_magnitude_at` is the
+   single source of truth that returns a star's variable-aware magnitude at a
+   session JD (phase-folded `predicted_magnitude` for matched variables, the
+   catalogue magnitude otherwise). It is applied at instance-build time on the
+   host CPU — `load_star_instances_from_file_at` (CLI / viewer / server) and the
+   web WASM builder — so a rendered Mira / Algol sprite dims and brightens with
+   the clock with **no shader change**. Off by default (catalogue purity);
+   opt-in via CLI / viewer `--variable-magnitudes` and the web settings toggle
+   (which rebuilds instances as the clock moves, bucketed to ~30 min so the
+   per-frame `set_observer` stays cheap).
+3. **Where it lives.** `crates/renderer/src/camera.rs`
+   (`screen_ray_equatorial`), `crates/renderer/src/renderer.rs`
+   (`update_instances`), `crates/catalog/src/variables.rs`
+   (`render_magnitude_at`), `crates/common/src/lib.rs`
+   (`load_star_instances_from_file_at`, `pick_star_label`),
+   `crates/common/src/render.rs` (`RenderOptions::variable_magnitudes`),
+   `apps/cli`, `apps/viewer`, `apps/server`, and `apps/web` (`pick_star` /
+   `set_variable_magnitudes` + the frontend canvas-tap, info-panel route, and
+   settings checkbox).
+4. **Tests / validation.** `renderer` (2 new): `screen_ray_equatorial`
+   round-trips a grid of pixels through `view_proj` to sub-pixel and
+   `pick_nearest` selects the on-ray star; non-perspective viewpoints + a
+   degenerate viewport return `None`. `catalog` (1 new):
+   `render_magnitude_override_dims_variable_at_minimum` pins Algol at primary
+   minimum (V = 3.39), back to maximum a quarter-period later, and a
+   non-variable star unchanged. The web frontend `tsc --noEmit` and the WASM
+   `cargo check` cover the host wiring. `make ci` green.
+5. **Conflict-avoidance.** No session-schema bump (the variable toggle is a
+   host-side view preference, persisted only in web `localStorage`). No new
+   `StarInstance` / `CameraUniform` field — the override reuses the existing
+   instance magnitude, and the pick reuses the existing `L-18` pick handle.
+
+References: see `L-18` and `L-20` in ROADMAP.md.
 
 ## Documentation progress
 

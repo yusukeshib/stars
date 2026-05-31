@@ -140,7 +140,12 @@ Owns star catalog ingestion, deep-sky catalogues, and catalog-space conversions:
   `StarInstance` (a CPU-side pick handle, not a GPU vertex attribute) and
   `renderer::pick_nearest` resolves an equatorial ray to the nearest instance,
   so an on-screen star maps back to its catalogue identity. The CLI `--goto`
-  metadata and the web info panel surface the canonical primary ID;
+  metadata and the web info panel surface the canonical primary ID; an
+  interactive pick closes the loop: `Camera::screen_ray_equatorial` inverts the
+  perspective `view_proj` (a click/tap pixel → J2000 ray), `pick_nearest`
+  selects the star, and the resolved pick handle becomes a label
+  (`stars_host_common::pick_star_label`, viewer title bar) or the existing
+  goto-record info panel (`StarView::pick_star`, web canvas tap);
 - the `DeepSkyCatalog` trait + embedded `MessierCatalog` and
   `NgcBrightCatalog` implementations consumed by the renderer's deep-sky
   overlay (`V-42`); the trait is the slot for the planned runtime
@@ -156,7 +161,13 @@ Owns star catalog ingestion, deep-sky catalogues, and catalog-space conversions:
   (`variable_stars.csv`), and `VariableStar::{predicted_magnitude,
   delta_magnitude, light_curve_samples, summary_at}` phase-fold those elements
   to the session time. This is a side table, not a `Star` field — hosts look a
-  star up only when its info panel is opened (CLI GoTo metadata, web panel);
+  star up only when its info panel is opened (CLI GoTo metadata, web panel).
+  `variables::render_magnitude_at` is the shared override the instance builders
+  (`stars_host_common::load_star_instances_from_file_at` and the web WASM
+  builder) call so a rendered Mira / Algol sprite dims / brightens with the
+  session epoch; it is opt-in (CLI / viewer `--variable-magnitudes`, web
+  toggle) and writes into the existing instance magnitude, leaving the shader
+  untouched and catalogue magnitudes intact when off;
 - B−V colour conversion and RA/Dec-to-Cartesian helpers.
 
 Catalog stars are renderer-independent. They should not know about `wgpu`,

@@ -13,7 +13,7 @@ use renderer::{
 use stars_host_common::{
     atmosphere_from_args, aurora_from_args, curated_comet_layer, curated_satellite_layer,
     eyepiece_from_args, first_night_tour, light_pollution_from_args, load_session,
-    load_star_instances_from_file, overlay_config_from_args, parse_time_to_time_scales,
+    load_star_instances_from_file_at, overlay_config_from_args, parse_time_to_time_scales,
     resolve_goto_query, resolve_light_pollution, scene_from_preset, scene_preset_infos,
     scintillation_from_args, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
     AuroraSeasonArg, CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides,
@@ -234,6 +234,12 @@ struct Args {
     /// Frame-integration exposure (seconds) for satellite motion streaks.
     #[arg(long, default_value_t = 0.0)]
     satellite_exposure_seconds: f32,
+
+    /// L-20: render known variable stars (Mira / Algol / …) at their
+    /// phase-folded magnitude for the session time, so they dim / brighten
+    /// with the clock. Default off preserves the static catalogue magnitudes.
+    #[arg(long)]
+    variable_magnitudes: bool,
 
     /// Enable the V-47 meteor-shower layer (deterministic shower + sporadic
     /// stream). Toggle at runtime with the `M` key.
@@ -466,7 +472,14 @@ fn main() -> Result<()> {
         .as_deref()
         .map(PathBuf::from)
         .unwrap_or_else(|| args.catalog.clone());
-    let instances = load_star_instances_from_file(&catalog_path, scene.catalog.limiting_magnitude)?;
+    // L-20: when `--variable-magnitudes` is set, render known variables at
+    // their phase-folded magnitude for the scene's session time.
+    let variable_jd = args.variable_magnitudes.then_some(scene.time.jd_utc);
+    let instances = load_star_instances_from_file_at(
+        &catalog_path,
+        scene.catalog.limiting_magnitude,
+        variable_jd,
+    )?;
     log::info!("Loaded {} stars", instances.len());
 
     if scene.eyepiece.enabled {
@@ -579,6 +592,11 @@ struct App {
     sky_clock: SkyClock,
     mouse_pressed: bool,
     last_mouse: Option<(f64, f64)>,
+    /// L-18 canvas pick: latest cursor position (updated on every move) and
+    /// the press position, so a left-click release with little movement is
+    /// treated as a pick rather than a pan.
+    cursor_pos: Option<(f64, f64)>,
+    press_pos: Option<(f64, f64)>,
     /// V-56 GoTo query supplied via `--goto`, applied once the camera exists.
     pending_goto: Option<String>,
     /// V-56 interactive search: `true` while the title-bar prompt is open.
@@ -717,6 +735,8 @@ impl App {
             sky_clock: SkyClock::new(start_jd),
             mouse_pressed: false,
             last_mouse: None,
+            cursor_pos: None,
+            press_pos: None,
             pending_goto,
             search_mode: false,
             search_query: String::new(),
@@ -920,20 +940,52 @@ impl ApplicationHandler for App {
                 ..
             } => {
                 self.mouse_pressed = state == ElementState::Pressed;
-                if !self.mouse_pressed {
+                if self.mouse_pressed {
+                    // L-18: remember where the press began so the release can
+                    // tell a pick click from a pan drag.
+                    self.press_pos = self.cursor_pos;
+                } else {
                     self.last_mouse = None;
+                    // L-18 canvas pick: a left-click release that barely moved
+                    // resolves the star under the cursor and shows its
+                    // canonical primary id in the title bar.
+                    if let (Some((px, py)), Some((sx, sy))) = (self.cursor_pos, self.press_pos) {
+                        if (px - sx).hypot(py - sy) <= 5.0 {
+                            match stars_host_common::pick_star_label(
+                                &gpu.camera,
+                                &self.stars,
+                                px as f32,
+                                py as f32,
+                                gpu.size.width as f32,
+                                gpu.size.height as f32,
+                                0.6_f32.to_radians(),
+                            ) {
+                                Some(label) => {
+                                    log::info!("picked {label}");
+                                    self.goto_info = Some(format!("picked {label}"));
+                                }
+                                None => self.goto_info = None,
+                            }
+                        }
+                    }
+                    self.press_pos = None;
                 }
             }
 
-            WindowEvent::CursorMoved { position, .. } if self.mouse_pressed => {
-                if let Some((lx, ly)) = self.last_mouse {
-                    // Pixel drag scaled by current FOV so it feels consistent at any zoom.
-                    let scale = gpu.camera.effective_fov_y_rad() / gpu.size.height as f32;
-                    let daz = -(position.x - lx) as f32 * scale;
-                    let dalt = (position.y - ly) as f32 * scale;
-                    gpu.camera.rotate_view(daz, dalt);
+            WindowEvent::CursorMoved { position, .. } => {
+                // L-18: track the cursor on every move (pressed or not) so a
+                // pick click can read its release position.
+                self.cursor_pos = Some((position.x, position.y));
+                if self.mouse_pressed {
+                    if let Some((lx, ly)) = self.last_mouse {
+                        // Pixel drag scaled by current FOV so it feels consistent at any zoom.
+                        let scale = gpu.camera.effective_fov_y_rad() / gpu.size.height as f32;
+                        let daz = -(position.x - lx) as f32 * scale;
+                        let dalt = (position.y - ly) as f32 * scale;
+                        gpu.camera.rotate_view(daz, dalt);
+                    }
+                    self.last_mouse = Some((position.x, position.y));
                 }
-                self.last_mouse = Some((position.x, position.y));
             }
 
             WindowEvent::MouseWheel { delta, .. } => {

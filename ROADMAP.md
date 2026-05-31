@@ -149,20 +149,22 @@ Earth-shadow / magnitude pipeline, a renderer satellite point/streak layer, a
 manifest-pinned curated TLE snapshot, an `iss-pass` preset, and CLI / viewer /
 web host controls. With both shipped, every `V-51`–`V-56` item is now done.
 
-The Library track is at "amateur-grade is shipped" — the remaining items are
-DE440-class ephemerides (`L-06`: the SPK Chebyshev kernel reader has shipped;
-kernel ingest + Horizons cross-check remain). The variable-star library
-(`L-20`) has now shipped its light-curve elements + phase-folded model + web
-panel + CLI Δm; the renderer whole-scene brightness override remains the
-`L-20` follow-up. The Python bindings (`L-21`) and headless server (`L-22`)
-have both shipped. Large-catalog ingest (`L-17`) has landed at the
-catalog-backend layer (Hipparcos / Tycho-2 / Gaia DR3 CSV backends + fetch
-scripts + identifier cross-match); LOD streaming and host wiring remain the
-`L-17` follow-up. Identifier preservation (`L-18`) now survives the renderer
-instance buffer on every host (CSV / embedded / WASM) and the canonical
-primary ID is surfaced in the CLI `--goto` metadata and the web info panel
-(click-to-copy); the interactive canvas-pick UI remains the `L-18` follow-up.
-Observation-planning polish (`L-09`) has now shipped: Moon-impact and
+The Library track is at "amateur-grade is shipped" — every numbered item has
+now landed; the only open work is three documented follow-ups inside
+otherwise-shipped items: DE440-class ephemerides (`L-06`: the SPK Chebyshev
+kernel reader has shipped; kernel ingest + Horizons cross-check remain),
+large-catalog LOD streaming + host wiring (`L-17`: the Hipparcos / Tycho-2 /
+Gaia DR3 CSV backends + cross-match shipped), and the `L-24` colour-vision
+overlay palette + audio cues. The variable-star library (`L-20`) is now
+complete: light-curve elements + phase-folded model + web panel + CLI Δm, and
+the renderer whole-scene brightness override (rendered Mira / Algol sprites
+dim and brighten with the session epoch, opt-in). Identifier preservation
+(`L-18`) is complete: identifiers survive the renderer instance buffer on
+every host (CSV / embedded / WASM), the canonical primary ID shows in the CLI
+`--goto` metadata and the web info panel, and an interactive canvas tap (web)
+/ click (viewer) now resolves the star under the cursor to its catalogue
+identity. The Python bindings (`L-21`) and headless server (`L-22`) have both
+shipped. Observation-planning polish (`L-09`) has now shipped: Moon-impact and
 visibility scoring, recommended-object ranking, favourites, and iCalendar
 export. Guided education mode (`L-23`) has now shipped: a deterministic,
 cross-host "first night" guided tour. The `L-24` accessibility pass has
@@ -261,9 +263,9 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-15` | Data provenance manifest | ✅ |
 | `L-16` | Catalog backend scaling design | ✅ |
 | `L-17` | Hipparcos / Tycho-2 / Gaia DR3 ingest (backends + cross-match ✅; LOD streaming + host wiring ⬜) | ◑ |
-| `L-18` | Identifier preservation through the renderer (catalog→instance round-trip + CLI/web primary-ID ✅; interactive canvas-pick UI ⬜) | ◑ |
+| `L-18` | Identifier preservation through the renderer | ✅ |
 | `L-19` | SIMBAD / VizieR deep links | ✅ |
-| `L-20` | Variable star light curves (elements + light-curve model + web panel + CLI Δm ✅; renderer brightness override ⬜) | ◑ |
+| `L-20` | Variable star light curves | ✅ |
 | `L-21` | Python bindings (PyO3) | ✅ |
 | `L-22` | Headless server mode | ✅ |
 | `L-23` | Guided education mode | ✅ |
@@ -3255,7 +3257,7 @@ streaming optional behind a setting).
 
 ---
 
-### `L-18` Identifier preservation — ◑ (catalog→instance round-trip + CLI/web primary-ID shipped; interactive canvas pick deferred)
+### `L-18` Identifier preservation — ✅ done
 
 **Item.** Pass Hipparcos / HD / TYC / Gaia source_id through the renderer
 so hover, click-to-copy, session reproducibility, SIMBAD / VizieR deep
@@ -3280,10 +3282,14 @@ source_id u64).
 - `apps/*`: the canonical primary ID is surfaced in the CLI `--goto` metadata
   (`ID HIP 32349`) and the web info panel as a click-to-copy chip; `GotoTarget`
   /the web goto JSON expose `primary_id`/`primaryId`. ✅
-- **Deferred (◑):** the interactive *canvas-click* pick UI (screen ray →
-  apparent-place inverse → `pick_nearest` → info panel) and the session
-  "primary ID family" preference. The data + `pick_nearest` primitive are in
-  place; only the screen-space inverse + click wiring remain.
+- **Interactive canvas pick ✅:** `Camera::screen_ray_equatorial` inverts the
+  perspective `view_proj` so a click/tap maps to a J2000 equatorial ray, fed
+  to `pick_nearest`; the resolved instance's pick handle becomes a canonical
+  primary-id label. Web taps open the existing info panel for the picked
+  star (`StarView::pick_star` → goto-record JSON); the viewer shows the id in
+  the title bar (`stars_host_common::pick_star_label`). CLI has no canvas, so
+  it is unaffected. The optional session "primary ID family" preference is a
+  cosmetic follow-up tracked here, not a gap in identifier preservation.
 
 **Tests / validation.**
 - Unit: Sirius identifiers round-trip end-to-end across CSV / embedded /
@@ -3294,7 +3300,7 @@ source_id u64).
   the `L-17` cross-ID test outputs.
 
 **Hosts wired.** CLI `--goto` metadata ✅ / web info-panel click-to-copy ✅ /
-interactive canvas pick + viewer hover ⬜ (follow-up).
+interactive web canvas-tap pick ✅ / viewer click pick → title-bar id ✅.
 
 ---
 
@@ -3348,7 +3354,7 @@ the GoTo metadata output.
 
 ---
 
-### `L-20` Variable star light curves — ◑ (elements + light-curve model + web panel + CLI Δm shipped; renderer brightness override deferred)
+### `L-20` Variable star light curves — ✅ done
 
 **Item.** Side-panel light curve for a hovered variable star, with
 source, epoch, and uncertainty caveats. Renderer brightness optionally
@@ -3384,17 +3390,20 @@ type / period / range / epoch and the VSX / GCVS reference. CLI `--goto`
 emits the predicted state (`Variable {…}` JSON line with `phase`,
 `currentMagnitude`, `deltaMagnitude`). Viewer follows.
 
-**Status (◑).** Shipped: `crates/catalog/src/variables.rs` — a six-star
+**Status (✅).** Shipped: `crates/catalog/src/variables.rs` — a six-star
 showpiece elements table (`crates/catalog/data/variable_stars.csv`, pinned in
 `data/manifest.toml`) with phase-folded `predicted_magnitude` /
 `delta_magnitude` / `light_curve_samples`, surfaced through `GotoTarget` (CLI)
 and `goto_object` (web panel) with pinned tests (Algol primary-minimum Δm =
-1.27, Mira phase folding, range invariants). **Deferred:** the
-`crates/renderer/src/vertex.rs` whole-scene `current_magnitude_override`
-(rendered Mira / Algol sprites dimming with the session epoch) — it needs the
-variable's identifiers threaded through the per-star instance buffer, so it is
-held to ride on the `L-18` identifier-through-renderer path rather than
-duplicate that plumbing here.
+1.27, Mira phase folding, range invariants). The renderer brightness override
+now also ships: `catalog::render_magnitude_at` is applied at instance-build
+time (`load_star_instances_from_file_at` for native + the web WASM builder),
+so a rendered Mira / Algol sprite dims and brightens with the session epoch.
+Off by default to preserve catalogue purity; opt in via the CLI
+`--variable-magnitudes` flag, the viewer `--variable-magnitudes` flag, or the
+web settings toggle (which tracks the live clock). A pinned test
+(`render_magnitude_override_dims_variable_at_minimum`) anchors Algol at its
+primary minimum (V = 3.39) while a non-variable star passes through unchanged.
 
 ---
 

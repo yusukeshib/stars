@@ -6,7 +6,7 @@ use astronomy::{
     Observer, Planet, SolarEclipseKind, SunMoonApparent, MAX_OCCLUDERS,
 };
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec3, Vec4};
 
 use crate::vertex::{limiting_magnitude_to_zeropoint, NAKED_EYE_LIMITING_MAGNITUDE};
 
@@ -1589,6 +1589,57 @@ impl Camera {
     /// View-projection for local ENU-frame geometry.
     pub(crate) fn view_proj_local(&self) -> Mat4 {
         self.projection_matrix() * self.view_matrix_local()
+    }
+
+    /// `L-18` interactive canvas pick: map a viewport pixel (origin top-left,
+    /// `+x` right, `+y` down) to a **J2000 equatorial unit ray** from the
+    /// observer — the inverse of the perspective star projection
+    /// ([`Self::view_proj`]). Returns `None` for the all-sky and external
+    /// galactic viewpoints, whose projections are non-linear / parsec-scale
+    /// rather than the perspective equatorial matrix this inverts.
+    ///
+    /// The inversion is exact for the precession/nutation + perspective stack
+    /// the matrix encodes (and the no-atmosphere star path is drawn with
+    /// exactly this matrix). The per-star apparent-place terms the shader
+    /// applies *after* the catalogue direction — proper motion, annual
+    /// aberration (≤ 20.5″), and atmospheric refraction (≤ ~34′, and only
+    /// within a few degrees of the horizon) — are deliberately not inverted
+    /// here: each sits well under the few-arcminute naked-eye pick tolerance
+    /// [`crate::pick_nearest`] is designed for, so the geometric ray still
+    /// resolves to the same catalogue star. (This is the same simplification
+    /// `pick_nearest` documents; feed this ray straight into it.)
+    pub fn screen_ray_equatorial(
+        &self,
+        px: f32,
+        py: f32,
+        width: f32,
+        height: f32,
+    ) -> Option<[f32; 3]> {
+        if self.viewpoint.is_external() || self.projection.is_full_sky() {
+            return None;
+        }
+        if !(width > 0.0 && height > 0.0 && px.is_finite() && py.is_finite()) {
+            return None;
+        }
+        let inv = self.view_proj().inverse();
+        let ndc_x = (2.0 * px / width - 1.0).clamp(-1.0, 1.0);
+        let ndc_y = (1.0 - 2.0 * py / height).clamp(-1.0, 1.0);
+        // glam `perspective_rh` maps clip depth to `[0, 1]` (wgpu convention):
+        // near plane `z = 0`, far plane `z = 1`. The eye sits at the equatorial
+        // origin (`look_at_rh` from `Vec3::ZERO`), so both unprojected points
+        // lie on the pick ray and `far − near` is its outward direction.
+        let unproject = |z: f32| -> Vec3 {
+            let p = inv * Vec4::new(ndc_x, ndc_y, z, 1.0);
+            let w = if p.w.abs() > 1e-9 { p.w } else { 1e-9 };
+            Vec3::new(p.x / w, p.y / w, p.z / w)
+        };
+        let dir = unproject(1.0) - unproject(0.0);
+        let len = dir.length();
+        if !len.is_finite() || len < 1e-9 {
+            return None;
+        }
+        let d = dir / len;
+        Some([d.x, d.y, d.z])
     }
 
     pub(crate) fn overlay_matrix_equatorial(&self) -> Mat4 {
@@ -3388,6 +3439,98 @@ mod tests {
     /// shaders with naga. This catches WGSL syntax errors and, crucially,
     /// any drift between the Rust `CameraUniform` layout and the WGSL
     /// `CameraUniform` view introduced by the V-45 instrument-optics fields.
+    /// L-18 canvas pick: `screen_ray_equatorial` is the exact inverse of the
+    /// perspective `view_proj` star projection. For a grid of viewport pixels
+    /// the unprojected J2000 ray, re-projected forward through `view_proj`,
+    /// must land back on the originating pixel to sub-pixel accuracy; and a
+    /// star instance placed at that ray must be selected by `pick_nearest`.
+    #[test]
+    fn screen_ray_equatorial_round_trips_through_view_proj() {
+        let observer = Observer::from_degrees_with_time(
+            35.68,
+            139.69,
+            astronomy::TimeScales::from_utc_julian_date(2_460_000.5),
+        );
+        let cam = Camera::new(
+            observer,
+            LocalView {
+                azimuth_rad: 1.2,
+                altitude_rad: 0.6,
+                fov_y_rad: std::f32::consts::FRAC_PI_3,
+            },
+            16.0 / 9.0,
+        );
+        let (w, h) = (1600.0_f32, 900.0_f32);
+        let view_proj = cam.view_proj();
+        // Centre plus four off-centre samples (all comfortably inside the FoV).
+        for &(px, py) in &[
+            (800.0_f32, 450.0_f32),
+            (560.0, 300.0),
+            (1040.0, 300.0),
+            (560.0, 600.0),
+            (1040.0, 600.0),
+        ] {
+            let ray = cam
+                .screen_ray_equatorial(px, py, w, h)
+                .expect("perspective Earth view yields a ray");
+            // Unit ray.
+            let n = (ray[0] * ray[0] + ray[1] * ray[1] + ray[2] * ray[2]).sqrt();
+            assert!((n - 1.0).abs() < 1e-4, "ray not unit: {n}");
+            // Forward-project the ray and confirm it returns to the pixel.
+            let clip = view_proj * Vec4::new(ray[0], ray[1], ray[2], 1.0);
+            assert!(clip.w > 0.0, "ray must be in front of the camera");
+            let ndc_x = clip.x / clip.w;
+            let ndc_y = clip.y / clip.w;
+            let px2 = (ndc_x + 1.0) * 0.5 * w;
+            let py2 = (1.0 - ndc_y) * 0.5 * h;
+            assert!(
+                (px2 - px).abs() < 0.5 && (py2 - py).abs() < 0.5,
+                "pixel round-trip ({px},{py}) -> ({px2},{py2})"
+            );
+            // A star instance sitting on the ray is the nearest pick.
+            let inst = crate::build_star_instance(
+                ray,
+                [0.0; 3],
+                [1.0; 3],
+                1.0,
+                NAKED_EYE_LIMITING_MAGNITUDE,
+                10.0,
+                (2, 12345),
+            );
+            assert_eq!(
+                crate::pick_nearest(&[inst], ray, 0.5_f32.to_radians()),
+                Some(0),
+                "pick_nearest must select the on-ray instance"
+            );
+        }
+    }
+
+    /// The pick inverse is only defined for the perspective Earth view; the
+    /// all-sky projections and the external galactic viewpoint return `None`.
+    #[test]
+    fn screen_ray_equatorial_none_for_nonperspective() {
+        let observer = Observer::from_degrees_with_time(
+            35.68,
+            139.69,
+            astronomy::TimeScales::from_utc_julian_date(2_460_000.5),
+        );
+        let mut cam = Camera::new(observer, LocalView::default(), 16.0 / 9.0);
+        cam.projection = SkyProjection::Mollweide;
+        assert!(cam
+            .screen_ray_equatorial(800.0, 450.0, 1600.0, 900.0)
+            .is_none());
+        cam.projection = SkyProjection::Perspective;
+        cam.viewpoint = SkyViewpoint::GalacticNorth;
+        assert!(cam
+            .screen_ray_equatorial(800.0, 450.0, 1600.0, 900.0)
+            .is_none());
+        // Degenerate viewport is rejected safely.
+        cam.viewpoint = SkyViewpoint::Earth;
+        assert!(cam
+            .screen_ray_equatorial(800.0, 450.0, 0.0, 900.0)
+            .is_none());
+    }
+
     #[test]
     fn shaders_parse_and_validate() {
         use naga::valid::{Capabilities, ValidationFlags, Validator};

@@ -139,6 +139,7 @@ const en: Dictionary = {
   "card.view.auroraKp": "Geomagnetic Kp (0–9)",
   "card.view.auroraSeason": "Season",
   "card.view.comets": "Comets (Halley / Hale-Bopp / C2023 A3)",
+  "card.view.variableMagnitudes": "Variable-star brightness (Mira / Algol at session time)",
   "card.view.viewpoint": "Viewpoint",
   "card.view.screenProjection": "Screen projection",
   "card.view.helper":
@@ -379,6 +380,7 @@ const ja: Dictionary = {
   "card.view.auroraKp": "地磁気 Kp（0〜9）",
   "card.view.auroraSeason": "季節",
   "card.view.comets": "彗星（ハレー / ヘール・ボップ / C2023 A3）",
+  "card.view.variableMagnitudes": "変光星の明るさ（ミラ / アルゴルを観測時刻で）",
   "card.view.viewpoint": "視点",
   "card.view.screenProjection": "画面投影",
   "card.view.helper":
