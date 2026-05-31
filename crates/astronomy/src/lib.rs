@@ -8,6 +8,7 @@
 
 pub mod atmosphere;
 pub mod aurora;
+pub mod comets;
 pub mod corrections;
 mod ephemeris;
 pub mod galaxy;
@@ -30,6 +31,10 @@ pub use aurora::{
     aurora_intensity, aurora_view, auroral_oval_boundary, bearing_to_geomagnetic_pole_rad,
     emission_apparent_altitude_rad, geomagnetic_latitude_deg, AuroraSeason, AuroraView,
     AURORA_GREEN_HEIGHT_KM, AURORA_N2_HEIGHT_KM, AURORA_RED_HEIGHT_KM,
+};
+pub use comets::{
+    apparent_comet, apparent_comet_topocentric, parse_comet_elements, CometApparent, CometElements,
+    REPRESENTATIVE_DUST_BETA,
 };
 pub use corrections::{
     annual_aberration, earth_velocity_over_c_j2000, edlen_refractivity_standard_air,

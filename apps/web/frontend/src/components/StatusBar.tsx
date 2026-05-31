@@ -24,6 +24,7 @@ import {
   type OverlayConfig,
   type PlanetsConfig,
   type SatellitesConfig,
+  type CometsConfig,
   type PlanningTable,
   type OutputColourspace,
   type ProjectionConfig,
@@ -53,6 +54,7 @@ type Props = {
   satellites: SatellitesConfig;
   meteors: MeteorsConfig;
   aurora: AuroraConfig;
+  comets: CometsConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   outputColourspace: OutputColourspace;
@@ -67,6 +69,7 @@ type Props = {
   onSetSatellites: (next: SatellitesConfig) => void;
   onSetMeteors: (next: MeteorsConfig) => void;
   onSetAurora: (next: AuroraConfig) => void;
+  onSetComets: (next: CometsConfig) => void;
   onSetProjection: (next: ProjectionConfig) => void;
   onSetEyepiece: (next: EyepieceConfig) => void;
   onSetOutputColourspace: (next: OutputColourspace) => void;
@@ -164,6 +167,7 @@ export function StatusBar({
   satellites,
   meteors,
   aurora,
+  comets,
   projection,
   eyepiece,
   outputColourspace,
@@ -178,6 +182,7 @@ export function StatusBar({
   onSetSatellites,
   onSetMeteors,
   onSetAurora,
+  onSetComets,
   onSetProjection,
   onSetEyepiece,
   onSetOutputColourspace,
@@ -469,6 +474,7 @@ export function StatusBar({
             satellites={satellites}
             meteors={meteors}
             aurora={aurora}
+            comets={comets}
             projection={projection}
             eyepiece={eyepiece}
             outputColourspace={outputColourspace}
@@ -481,6 +487,7 @@ export function StatusBar({
             onSetSatellites={onSetSatellites}
             onSetMeteors={onSetMeteors}
             onSetAurora={onSetAurora}
+            onSetComets={onSetComets}
             onSetProjection={onSetProjection}
             onSetEyepiece={onSetEyepiece}
             onSetOutputColourspace={onSetOutputColourspace}
@@ -657,6 +664,7 @@ type SettingsPanelProps = Pick<
   | "satellites"
   | "meteors"
   | "aurora"
+  | "comets"
   | "projection"
   | "eyepiece"
   | "outputColourspace"
@@ -669,6 +677,7 @@ type SettingsPanelProps = Pick<
   | "onSetSatellites"
   | "onSetMeteors"
   | "onSetAurora"
+  | "onSetComets"
   | "onSetProjection"
   | "onSetEyepiece"
   | "onSetOutputColourspace"
@@ -686,6 +695,7 @@ function SettingsPanel({
   satellites,
   meteors,
   aurora,
+  comets,
   projection,
   eyepiece,
   outputColourspace,
@@ -698,6 +708,7 @@ function SettingsPanel({
   onSetSatellites,
   onSetMeteors,
   onSetAurora,
+  onSetComets,
   onSetProjection,
   onSetEyepiece,
   onSetOutputColourspace,
@@ -867,6 +878,15 @@ function SettingsPanel({
                   </option>
                 ))}
               </select>
+            </label>
+            <label style={checkboxRowStyle}>
+              <input
+                type="checkbox"
+                checked={comets.enabled}
+                onChange={(e) => onSetComets({ enabled: e.target.checked })}
+                style={{ accentColor: "#8fb1ff" }}
+              />
+              {t("card.view.comets")}
             </label>
           </SettingCard>
 

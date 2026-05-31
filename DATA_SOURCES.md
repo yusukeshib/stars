@@ -521,6 +521,62 @@ Determinism / fallback:
   unset (or a location is outside coverage) `Atlas2016` keeps the rural
   Bortle-1 floor, so committed scene presets stay byte-stable.
 
+## Comet orbital elements (V-49)
+
+### Curated JPL SBDB osculating-element snapshot
+
+Repository location:
+
+- `crates/common/data/comets/elements.csv`
+
+Used for:
+
+- the V-49 comet layer (two-body Keplerian propagation + coma / tail
+  rendering) in `astronomy::comets`, embedded via `include_str!` into
+  `crates/common/src/comets.rs` and `apps/web/src/lib.rs`.
+
+Manifest id:
+
+- `jpl-sbdb-comet-elements-2025-01` in `data/manifest.toml`.
+
+Source / version / license:
+
+- JPL Small-Body Database (`https://ssd.jpl.nasa.gov/sbdb.cgi`), retrieved
+  2025-01 for the listed objects. Heliocentric osculating Keplerian elements
+  (`q`, `e`, `i`, `ω`, `Ω`, `Tp`) referred to the J2000.0 ecliptic in the
+  Marsden / Minor Planet Center convention.
+- A curated representative set: 1P/Halley (1986 apparition), C/1995 O1
+  (Hale-Bopp), and C/2023 A3 (Tsuchinshan-ATLAS).
+- License: NASA/JPL SSD/CNEOS data is in the public domain.
+
+References:
+
+- Finson, M. L. & Probstein, R. F. 1968, ApJ 154, 327 (dust-tail dynamics).
+- Marsden, B. G. & Williams, G. V., MPC orbital-element format.
+- Bobrovnikoff, N. T. 1942, ApJ 95, 71; Bowell, E. et al. 1989 (comet
+  magnitude-law conventions).
+
+Magnitude-law coefficients:
+
+- Each row carries representative Bobrovnikoff-Bowell `(M1, K1)` total-magnitude
+  coefficients (`m1 = M1 + 5 log₁₀ Δ + K1 log₁₀ r`) for naked-eye rendering —
+  not authoritative photometry.
+
+Maintenance rule:
+
+- Two-body propagation from a single osculating-element set is accurate only
+  near each element epoch (planetary perturbations and the N-body upgrade are
+  tracked under `L-06`). The snapshot is for deterministic demonstration /
+  validation, not precision ephemerides. Refresh the `sha256` + `retrieved`
+  date in `data/manifest.toml` and this file when updating, then run
+  `make manifest-check`.
+
+Implementation areas:
+
+- `crates/astronomy/src/comets.rs`
+- `crates/common/src/comets.rs`
+- `crates/renderer/src/camera.rs`, `crates/renderer/src/shaders/skyglow.wgsl`
+
 ## Runtime web services
 
 ### OpenStreetMap Nominatim search API

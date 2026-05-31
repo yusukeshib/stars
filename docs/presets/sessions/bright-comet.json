@@ -3,28 +3,28 @@
   "appVersion": "0.1.0",
   "createdBy": "stars-cli",
   "observer": {
-    "latitudeDeg": 35.68,
-    "longitudeDeg": 139.69
+    "latitudeDeg": 40.0,
+    "longitudeDeg": 0.0
   },
   "time": {
-    "jdUtc": 2456084.5618055556,
-    "jdUt1": 2456084.5618055556,
-    "jdTai": 2456084.5621990743,
-    "jdTt": 2456084.5625715745,
-    "jdTdb": 2456084.5625715833,
-    "taiMinusUtcSeconds": 34.0,
+    "jdUtc": 2460601.28125,
+    "jdUt1": 2460601.28125,
+    "jdTai": 2460601.2816782407,
+    "jdTt": 2460601.282050741,
+    "jdTdb": 2460601.2820507223,
+    "taiMinusUtcSeconds": 37.0,
     "dut1Seconds": 0.0
   },
   "view": {
-    "azimuthDeg": 125.40000915527344,
-    "altitudeDeg": 69.80000305175781,
-    "fovDeg": 2.0
+    "azimuthDeg": 257.0,
+    "altitudeDeg": 17.0,
+    "fovDeg": 40.0
   },
   "overlays": {
     "layers": [
       "horizon",
       "cardinal-labels",
-      "degree-labels"
+      "constellation-lines"
     ],
     "gridStepDeg": 15.0,
     "opacity": 0.6,
@@ -110,6 +110,6 @@
     "season": "equinox"
   },
   "comets": {
-    "enabled": false
+    "enabled": true
   }
 }

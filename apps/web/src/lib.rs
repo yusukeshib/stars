@@ -16,8 +16,8 @@ use catalog::search::{
     named_star, search as catalog_search, SearchId, SearchKind, SearchMatch, SOLAR_SYSTEM_BODIES,
 };
 use renderer::{
-    build_star_instance, Atmosphere, AtmospherePreset, Camera, ExternalViewpoint,
-    AuroraLayer, EyepieceSimulation, LightPollution, LocalView, MeteorLayer, OpticalDesign,
+    build_star_instance, Atmosphere, AtmospherePreset, AuroraLayer, Camera, CometLayer,
+    ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView, MeteorLayer, OpticalDesign,
     OutputColourSpace, OverlayConfig, OverlayKind, Renderer, SatelliteLayer, Scintillation,
     SkyProjection, SkyViewpoint, StarInstance,
     DEFAULT_SCREEN_LIMITING_MAGNITUDE,
@@ -29,6 +29,13 @@ use renderer::{
 /// `crates/common/data/satellites/curated_tle.txt`.
 const CURATED_TLE_TEXT: &str =
     include_str!("../../../crates/common/data/satellites/curated_tle.txt");
+
+/// V-49 curated, manifest-pinned comet osculating-element snapshot, embedded
+/// at build time (provenance: `data/manifest.toml` id
+/// `jpl-sbdb-comet-elements-2025-01`). Shared verbatim with the native hosts'
+/// `crates/common/data/comets/elements.csv`.
+const CURATED_COMET_TEXT: &str =
+    include_str!("../../../crates/common/data/comets/elements.csv");
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -625,6 +632,16 @@ impl StarView {
         };
     }
 
+    /// V-49: enable / disable the comet layer from the curated JPL SBDB
+    /// osculating-element snapshot (Halley, Hale-Bopp, C/2023 A3).
+    pub fn set_comets(&self, enabled: bool) {
+        let comets = if enabled {
+            astronomy::parse_comet_elements(CURATED_COMET_TEXT)
+        } else {
+            Vec::new()
+        };
+        self.state.borrow_mut().camera.comets = CometLayer { enabled, comets };
+    }
 
     /// Update the telescope eyepiece simulator. When enabled, the renderer
     /// overrides the perspective FoV with the true field from these optics.

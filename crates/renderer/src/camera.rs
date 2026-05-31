@@ -410,6 +410,22 @@ pub(crate) struct CameraUniform {
     /// in `[0, 1]` scales the emission radiance. Both `0.0` reproduces the
     /// pre-V-48 dark-sky composition bit-for-bit.
     pub aurora_params: [f32; 4],
+    /// V-49 comet nucleus: `xyz` is the apparent J2000-equatorial unit
+    /// direction toward the nucleus; `w` is the apparent total magnitude.
+    /// Padded rows past `comet_params.x` stay zero and are never sampled.
+    pub comet_dir_mag: CometUniform,
+    /// V-49 comet ion tail: `xyz` is the unit J2000-equatorial sky direction of
+    /// the ion-tail tip (prolonged anti-solar radius vector projected into the
+    /// sky); `w` is the coma angular radius in radians.
+    pub comet_ion_tip: CometUniform,
+    /// V-49 comet dust tail: `xyz` is the unit J2000-equatorial sky direction
+    /// of the dust-tail tip (β = 0.6 syndyne); `w` is the tail angular length
+    /// in radians (shared by both tails for the streak falloff).
+    pub comet_dust_tip: CometUniform,
+    /// V-49 comet header: `[count, enabled, reserved, reserved]`. `count <=
+    /// MAX_COMETS` as an `f32`; `enabled` is `1.0` when the comet layer should
+    /// render.
+    pub comet_params: [f32; 4],
 }
 
 /// Lower bound of the V-51c totality smoothstep on obscuration.
@@ -440,6 +456,12 @@ pub(crate) type SatelliteUniform = [[f32; 4]; MAX_SATELLITES];
 /// `shaders/skyglow.wgsl`.
 pub const MAX_METEORS: usize = 64;
 pub(crate) type MeteorUniform = [[f32; 4]; MAX_METEORS * 2];
+
+/// V-49: maximum number of comets rendered per frame. The shipped curated
+/// snapshot has a handful of historic / current bright comets; the cap bounds
+/// the uniform block and the WGSL iteration in `shaders/skyglow.wgsl`.
+pub const MAX_COMETS: usize = 4;
+pub(crate) type CometUniform = [[f32; 4]; MAX_COMETS];
 
 pub(crate) const PLANET_UNIFORM_COUNT: usize = 7;
 pub(crate) type PlanetEqRadiusUniform = [[f32; 4]; PLANET_UNIFORM_COUNT];
@@ -1116,6 +1138,20 @@ fn apparent_disk_direction_j2000(
         .normalize_or_zero()
 }
 
+/// V-49: sky direction of a comet tail tip. Steps from the nucleus sky
+/// direction `nucleus` toward the tangential projection of the tail's 3-D
+/// space direction `tail_space_dir` by `length_rad` along the great circle.
+/// Falls back to the nucleus when the tail direction is parallel to the line
+/// of sight (degenerate projection).
+fn tail_tip(nucleus: Vec3, tail_space_dir: Vec3, length_rad: f32) -> Vec3 {
+    let n = nucleus.normalize_or_zero();
+    let tangential = (tail_space_dir - n * tail_space_dir.dot(n)).normalize_or_zero();
+    if tangential.length_squared() < 1e-8 {
+        return n;
+    }
+    (n * length_rad.cos() + tangential * length_rad.sin()).normalize_or_zero()
+}
+
 fn finite_vec3(value: [f32; 3], fallback: [f32; 3]) -> Vec3 {
     if value.iter().all(|v| v.is_finite()) {
         Vec3::from_array(value)
@@ -1249,6 +1285,10 @@ pub struct Camera {
     /// V-48 aurora layer. Off by default so the dark-sky composition stays
     /// identical to the pre-V-48 pipeline; hosts opt in and supply a Kp index.
     pub aurora: AuroraLayer,
+    /// V-49 comet layer. Off / empty by default so the dark-sky composition
+    /// stays identical to the pre-V-49 pipeline; hosts opt in and supply the
+    /// curated (or custom) osculating-element set.
+    pub comets: CometLayer,
 }
 
 /// V-47 host-tier meteor-shower layer configuration carried on [`Camera`].
@@ -1308,6 +1348,19 @@ impl Default for AuroraLayer {
     }
 }
 
+/// V-49 host-tier comet layer carried on [`Camera`].
+///
+/// The renderer propagates each [`astronomy::CometElements`] with two-body
+/// Keplerian motion every frame and renders the bright, above-horizon members
+/// as a coma plus anti-solar ion tail and β = 0.6 dust syndyne.
+#[derive(Debug, Clone, Default)]
+pub struct CometLayer {
+    /// Master on/off. Off by default.
+    pub enabled: bool,
+    /// Osculating element sets to propagate and render.
+    pub comets: Vec<astronomy::CometElements>,
+}
+
 /// V-55 host-tier satellite layer configuration carried on [`Camera`].
 ///
 /// The renderer propagates each [`astronomy::Tle`] with SGP4 every frame and
@@ -1344,6 +1397,7 @@ impl Camera {
             output_colourspace: crate::colourspace::OutputColourSpace::default(),
             meteors: MeteorLayer::default(),
             aurora: AuroraLayer::default(),
+            comets: CometLayer::default(),
         }
     }
 
@@ -1974,6 +2028,81 @@ impl Camera {
         (segments, params)
     }
 
+    /// V-49: propagate the comet layer with two-body Keplerian motion and pack
+    /// per-comet nucleus directions, magnitudes, coma radii, and ion / dust
+    /// tail-tip sky directions. Returns all-zero / disabled when the layer is
+    /// off, empty, or an external viewpoint is active.
+    pub(crate) fn comet_uniforms(&self) -> (CometUniform, CometUniform, CometUniform, [f32; 4]) {
+        let mut dir_mag = [[0.0; 4]; MAX_COMETS];
+        let mut ion_tip = [[0.0; 4]; MAX_COMETS];
+        let mut dust_tip = [[0.0; 4]; MAX_COMETS];
+        if !self.comets.enabled || self.comets.comets.is_empty() || self.viewpoint.is_external() {
+            return (dir_mag, ion_tip, dust_tip, [0.0, 0.0, 0.0, 0.0]);
+        }
+
+        let pressure_hpa = if self.atmosphere.pressure_hpa.is_finite() {
+            self.atmosphere.pressure_hpa.clamp(0.0, 1100.0)
+        } else {
+            Atmosphere::DEFAULT.pressure_hpa
+        };
+        let temperature_c = if self.atmosphere.temperature_c.is_finite() {
+            self.atmosphere.temperature_c.clamp(-80.0, 60.0)
+        } else {
+            Atmosphere::DEFAULT.temperature_c
+        };
+        let refract = self.atmosphere.sunlit_scattering;
+        let date_to_local = self.equatorial_to_horizontal();
+        let local_to_date = date_to_local.transpose();
+        let date_to_j2000 = self.j2000_to_date().transpose();
+
+        // Comet states are already in the J2000 equatorial frame, so only the
+        // (optional) refraction bend is applied through the of-date frame; the
+        // surrounding J2000↔date rotations cancel for an unrefracted direction.
+        let to_apparent = |dir: Vec3| -> Vec3 {
+            apparent_disk_direction_j2000(
+                dir,
+                refract,
+                pressure_hpa,
+                temperature_c,
+                date_to_local,
+                local_to_date,
+                date_to_j2000,
+            )
+        };
+
+        let mut count = 0usize;
+        for elements in &self.comets.comets {
+            if count >= MAX_COMETS {
+                break;
+            }
+            let app = astronomy::apparent_comet_topocentric(self.observer, elements);
+            if !app.magnitude.is_finite() {
+                continue;
+            }
+            let nucleus = to_apparent(app.nucleus_dir());
+            // Coma angular radius: a representative few-arcminute disk that
+            // grows for brighter comets, with a small floor so faint comets
+            // still render a stellar core. Surface brightness ∝ 1/ρ is applied
+            // in the shader.
+            let coma_radius_rad =
+                ((9.0 - app.magnitude as f32).clamp(1.0, 12.0) * 0.5).to_radians() / 60.0 * 30.0;
+            // Tail angular length grows with brightness (brighter → longer).
+            let tail_len_rad = ((12.0 - 2.0 * app.magnitude as f32).clamp(1.0, 30.0)).to_radians();
+            // Project the 3-D anti-solar / syndyne directions into the sky
+            // tangent plane at the nucleus and step along them by the tail
+            // length to get each tail-tip sky direction.
+            let ion_tip_dir = tail_tip(nucleus, to_apparent(app.ion_tail_dir), tail_len_rad);
+            let dust_tip_dir = tail_tip(nucleus, to_apparent(app.dust_tail_dir), tail_len_rad);
+            dir_mag[count] = [nucleus.x, nucleus.y, nucleus.z, app.magnitude as f32];
+            ion_tip[count] = [ion_tip_dir.x, ion_tip_dir.y, ion_tip_dir.z, coma_radius_rad];
+            dust_tip[count] = [dust_tip_dir.x, dust_tip_dir.y, dust_tip_dir.z, tail_len_rad];
+            count += 1;
+        }
+
+        let params = [count as f32, if count > 0 { 1.0 } else { 0.0 }, 0.0, 0.0];
+        (dir_mag, ion_tip, dust_tip, params)
+    }
+
     pub(crate) fn uniform_with_planets(
         &self,
         width: u32,
@@ -1985,6 +2114,7 @@ impl Camera {
         let (instrument_optics_1, instrument_optics2) = self.instrument_optics_uniforms(height);
         let (meteor_segments, meteor_params) = self.meteor_uniforms();
         let (aurora_geometry, aurora_params) = self.aurora_uniforms();
+        let (comet_dir_mag, comet_ion_tip, comet_dust_tip, comet_params) = self.comet_uniforms();
         let observer_altitude_m = if self.atmosphere.observer_altitude_m.is_finite() {
             self.atmosphere.observer_altitude_m.max(0.0)
         } else {
@@ -2329,6 +2459,10 @@ impl Camera {
             meteor_params,
             aurora_geometry,
             aurora_params,
+            comet_dir_mag,
+            comet_ion_tip,
+            comet_dust_tip,
+            comet_params,
         }
     }
 

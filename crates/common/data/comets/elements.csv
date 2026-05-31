@@ -1,0 +1,29 @@
+# Curated comet osculating-element snapshot for the V-49 comet layer.
+#
+# Source: JPL Small-Body Database (SBDB), https://ssd.jpl.nasa.gov/sbdb.cgi
+#   retrieved 2025-01 for the listed objects. Elements are heliocentric
+#   osculating Keplerian elements referred to the J2000.0 ecliptic and equinox,
+#   in the Marsden / Minor Planet Center convention. Public-domain US
+#   Government data (NASA/JPL). See DATA_SOURCES.md and data/manifest.toml
+#   (id "jpl-sbdb-comet-elements-2025-01").
+#
+# Two-body Keplerian propagation from the time of perihelion passage Tp is
+# accurate to ~arcminutes near each element epoch; the N-body upgrade is
+# tracked under L-06. Coma photometry uses the Bobrovnikoff-Bowell magnitude
+# law m1 = M1 + 5 log10(delta) + K1 log10(r). The M1 / K1 values are
+# representative visual-total-magnitude coefficients for naked-eye rendering.
+#
+# Columns:
+#   name              display name
+#   q_au              perihelion distance (AU)
+#   e                 eccentricity
+#   i_deg             inclination to the J2000 ecliptic (deg)
+#   arg_peri_deg      argument of perihelion omega (deg)
+#   long_node_deg     longitude of ascending node Omega (deg)
+#   tp_jd_tt          time of perihelion passage (TT Julian Date)
+#   m1                absolute total magnitude M1
+#   k1                activity slope K1 (= 2.5 n)
+name,q_au,e,i_deg,arg_peri_deg,long_node_deg,tp_jd_tt,m1,k1
+1P/Halley,0.587104,0.967143,162.2422,111.8657,58.8601,2446470.95891,5.5,10.0
+C/1995 O1 (Hale-Bopp),0.914141,0.995086,89.4274,130.5959,282.4707,2450539.635,-1.0,8.0
+C/2023 A3 (Tsuchinshan-ATLAS),0.391436,1.000064,139.1106,308.4901,21.5601,2460581.27,5.0,10.0

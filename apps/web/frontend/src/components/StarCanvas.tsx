@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { StarView } from "stars-web";
-import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type AuroraConfig, type EyepieceConfig, type MeteorsConfig, type Observer, type OutputColourspace, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type RecommendedPlan, type SatellitesConfig, type ScintillationConfig, type View } from "../observer";
+import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type AuroraConfig, type CometsConfig, type EyepieceConfig, type MeteorsConfig, type Observer, type OutputColourspace, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type RecommendedPlan, type SatellitesConfig, type ScintillationConfig, type View } from "../observer";
 
 type Props = {
   observer: Observer;
@@ -14,6 +14,7 @@ type Props = {
   satellites: SatellitesConfig;
   meteors: MeteorsConfig;
   aurora: AuroraConfig;
+  comets: CometsConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   outputColourspace: OutputColourspace;
@@ -56,6 +57,7 @@ export function StarCanvas({
   satellites,
   meteors,
   aurora,
+  comets,
   projection,
   eyepiece,
   outputColourspace,
@@ -86,6 +88,7 @@ export function StarCanvas({
   const satellitesRef = useRef(satellites);
   const meteorsRef = useRef(meteors);
   const auroraRef = useRef(aurora);
+  const cometsRef = useRef(comets);
   const projectionRef = useRef(projection);
   const eyepieceRef = useRef(eyepiece);
   const outputColourspaceRef = useRef(outputColourspace);
@@ -99,6 +102,7 @@ export function StarCanvas({
   satellitesRef.current = satellites;
   meteorsRef.current = meteors;
   auroraRef.current = aurora;
+  cometsRef.current = comets;
   projectionRef.current = projection;
   eyepieceRef.current = eyepiece;
   outputColourspaceRef.current = outputColourspace;
@@ -138,6 +142,10 @@ export function StarCanvas({
   useEffect(() => {
     handleRef.current?.set_aurora(aurora.enabled, aurora.kp, aurora.season);
   }, [aurora]);
+
+  useEffect(() => {
+    handleRef.current?.set_comets(comets.enabled);
+  }, [comets]);
 
   useEffect(() => {
     handleRef.current?.set_eyepiece_simulation(
@@ -240,6 +248,7 @@ export function StarCanvas({
       handle.set_satellites(sat.enabled, sat.exposureSeconds);
       const au = auroraRef.current;
       handle.set_aurora(au.enabled, au.kp, au.season);
+      handle.set_comets(cometsRef.current.enabled);
       const ep = eyepieceRef.current;
       handle.set_eyepiece_simulation(
         ep.enabled,

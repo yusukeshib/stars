@@ -104,5 +104,13 @@
     "atmosphericRefraction": true,
     "topocentricSolarSystem": true
   },
-  "outputColourspace": "srgb"
+  "outputColourspace": "srgb",
+  "aurora": {
+    "enabled": false,
+    "kp": 0.0,
+    "season": "equinox"
+  },
+  "comets": {
+    "enabled": false
+  }
 }

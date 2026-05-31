@@ -12,7 +12,7 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use astronomy::TimeScales;
 use renderer::{
-    Atmosphere, AtmospherePreset, AuroraLayer, ExternalViewpoint, EyepieceSimulation,
+    Atmosphere, AtmospherePreset, AuroraLayer, CometLayer, ExternalViewpoint, EyepieceSimulation,
     LightPollution, LocalView, MeteorLayer, OutputColourSpace, OverlayConfig, OverlayKind,
     SatelliteLayer, Scintillation, SkyProjection, SkyViewpoint,
 };
@@ -77,6 +77,11 @@ pub struct StarSession {
     /// additive and does not require a schema bump.
     #[serde(default)]
     pub aurora: SessionAurora,
+    /// V-49 comet layer. `#[serde(default)]` (defaults to disabled) so the
+    /// field is backward-compatible: sessions written before it existed still
+    /// deserialize and render identically. No schema-version bump is required.
+    #[serde(default)]
+    pub comets: SessionComets,
 }
 
 /// Native rendering-ready scene derived from a [`StarSession`].
@@ -107,6 +112,9 @@ pub struct SessionScene {
     pub meteors: MeteorLayer,
     /// V-48 aurora layer (engine-ready).
     pub aurora: AuroraLayer,
+    /// V-49 comet layer (engine-ready, with curated osculating elements loaded
+    /// when enabled).
+    pub comets: CometLayer,
 }
 
 /// Serialized V-48 aurora-layer settings.
@@ -151,6 +159,33 @@ impl SessionAurora {
             },
             season: self.season.into(),
         }
+    }
+}
+
+/// Serialized V-49 comet-layer settings. Like the satellite layer, the element
+/// set itself is *not* stored in the session — when `enabled`, the host loads
+/// the curated, manifest-pinned snapshot so sessions stay small and
+/// deterministic.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionComets {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+impl From<&CometLayer> for SessionComets {
+    fn from(layer: &CometLayer) -> Self {
+        Self {
+            enabled: layer.enabled,
+        }
+    }
+}
+
+impl SessionComets {
+    /// Build an engine-ready [`CometLayer`], loading the curated element
+    /// snapshot when enabled.
+    pub fn to_comet_layer(self) -> CometLayer {
+        crate::curated_comet_layer(self.enabled)
     }
 }
 
@@ -574,6 +609,7 @@ impl StarSession {
             output_colourspace: OutputColourspaceArg::from(scene.output_colourspace),
             meteors: SessionMeteors::from(&scene.meteors),
             aurora: SessionAurora::from(&scene.aurora),
+            comets: SessionComets::from(&scene.comets),
         }
     }
 
@@ -653,6 +689,7 @@ impl StarSession {
             scintillation: self.scintillation.to_scintillation()?,
             planets_enabled: self.planets.enabled,
             satellites: self.satellites.to_satellite_layer(),
+            comets: self.comets.to_comet_layer(),
             projection: self.projection.projection.into(),
             viewpoint: self.projection.viewpoint.into(),
             external_viewpoint: self.projection.external.to_external_viewpoint()?,
@@ -1024,6 +1061,7 @@ mod tests {
             scintillation: Scintillation::default(),
             planets_enabled: true,
             satellites: curated_satellite_layer(true, 1.5),
+            comets: crate::curated_comet_layer(true),
             projection: SkyProjection::Perspective,
             viewpoint: SkyViewpoint::Earth,
             external_viewpoint: ExternalViewpoint::GALACTIC_NORTH,
