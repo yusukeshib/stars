@@ -8,7 +8,8 @@ use astronomy::{
 };
 use catalog::load_embedded;
 use catalog::{
-    DeepSkyCatalog, DeepSkyId, DeepSkyObject, MessierCatalog, NgcBrightCatalog,
+    simbad_query_url, vizier_query_url, DeepSkyCatalog, DeepSkyId, DeepSkyObject, MessierCatalog,
+    NgcBrightCatalog, StarIdentifiers,
 };
 use catalog::search::{
     named_star, search as catalog_search, SearchId, SearchKind, SearchMatch, SOLAR_SYSTEM_BODIES,
@@ -107,12 +108,25 @@ struct GotoRecord {
     magnitude: Option<f64>,
     distance: Option<(f64, &'static str)>,
     planning: Option<PlanningBody>,
+    /// L-19 SIMBAD lookup URL. `None` for solar-system bodies.
+    simbad_url: Option<String>,
+    /// L-19 VizieR cone-search URL. `None` for solar-system bodies.
+    vizier_url: Option<String>,
 }
 
 fn resolve(id: SearchId, observer: Observer) -> Option<GotoRecord> {
     match id {
         SearchId::NamedStar(idx) => {
             let star = named_star(SearchId::NamedStar(idx))?;
+            let ids = StarIdentifiers {
+                hip: star.hip,
+                hd: star.hd,
+                hr: star.hr,
+                proper_name: star.proper.clone(),
+                catalog_designation: None,
+                right_ascension_rad: star.right_ascension_rad,
+                declination_rad: star.declination_rad,
+            };
             Some(GotoRecord {
                 id: SearchId::NamedStar(idx).encode(),
                 kind: SearchKind::Star,
@@ -132,6 +146,8 @@ fn resolve(id: SearchId, observer: Observer) -> Option<GotoRecord> {
                     None
                 },
                 planning: None,
+                simbad_url: Some(simbad_query_url(&ids)),
+                vizier_url: Some(vizier_query_url(&ids)),
             })
         }
         SearchId::Messier(n) => {
@@ -217,7 +233,9 @@ fn resolve(id: SearchId, observer: Observer) -> Option<GotoRecord> {
                 magnitude,
                 distance: Some(distance),
                 planning: Some(planning),
-
+                // Solar-system bodies are not in the CDS stellar archives.
+                simbad_url: None,
+                vizier_url: None,
             })
         }
     }
@@ -241,6 +259,18 @@ fn deepsky_goto(id: SearchId, object: DeepSkyObject) -> GotoRecord {
         DeepSkyId::Ngc(n) => format!("NGC {n}"),
         DeepSkyId::Ic(n) => format!("IC {n}"),
     };
+    // SIMBAD resolves designations with a space between catalogue and number.
+    let designation = match object.id {
+        DeepSkyId::Messier(n) => format!("M {n}"),
+        DeepSkyId::Ngc(n) => format!("NGC {n}"),
+        DeepSkyId::Ic(n) => format!("IC {n}"),
+    };
+    let ids = StarIdentifiers {
+        catalog_designation: Some(designation),
+        right_ascension_rad: ra,
+        declination_rad: dec,
+        ..Default::default()
+    };
     GotoRecord {
         id: id.encode(),
         kind,
@@ -248,6 +278,8 @@ fn deepsky_goto(id: SearchId, object: DeepSkyObject) -> GotoRecord {
         aka: label,
         right_ascension_rad: ra,
         declination_rad: dec,
+        simbad_url: Some(simbad_query_url(&ids)),
+        vizier_url: Some(vizier_query_url(&ids)),
         magnitude: if object.magnitude < 90.0 {
             Some(object.magnitude as f64)
         } else {
@@ -297,6 +329,17 @@ fn push_goto_record(out: &mut String, record: &GotoRecord, observer: Observer) {
             push_json_string(out, unit);
             out.push('}');
         }
+        None => out.push_str("null"),
+    }
+    // L-19: CDS deep links (stars / deep-sky only; null for solar-system).
+    out.push_str(",\"simbadUrl\":");
+    match &record.simbad_url {
+        Some(url) => push_json_string(out, url),
+        None => out.push_str("null"),
+    }
+    out.push_str(",\"vizierUrl\":");
+    match &record.vizier_url {
+        Some(url) => push_json_string(out, url),
         None => out.push_str("null"),
     }
     // Rise / transit / set, if the body is in the planning table.

@@ -412,6 +412,14 @@ fn main() -> Result<()> {
         scene.view = target.local_view(scene.view.fov_y_rad);
         println!("GoTo {}", target.info_summary());
         log::info!("GoTo target: {}", target.info_summary());
+        // L-19: expose the CDS deep links in the metadata output (stars and
+        // deep-sky objects only; solar-system bodies are not in SIMBAD/VizieR).
+        if let Some(url) = &target.simbad_url {
+            println!("SIMBAD {url}");
+        }
+        if let Some(url) = &target.vizier_url {
+            println!("VizieR {url}");
+        }
     }
 
     log::info!(

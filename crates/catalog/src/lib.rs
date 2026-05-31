@@ -5,6 +5,7 @@ mod color;
 mod coords;
 mod deepsky;
 mod doubles;
+mod links;
 pub mod search;
 
 pub use backend::{
@@ -22,6 +23,7 @@ pub use deepsky::{
     NO_PHOTOMETRY_SENTINEL_MAG,
 };
 pub use doubles::{double_stars, resolve_doubles, DoubleStar};
+pub use links::{simbad_query_url, vizier_query_url, StarIdentifiers};
 pub use search::{search, SearchId, SearchKind, SearchMatch, SEARCH_LIMIT_DEFAULT};
 
 #[cfg(feature = "filesystem")]

@@ -242,7 +242,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-16` | Catalog backend scaling design | ✅ |
 | `L-17` | Hipparcos / Tycho-2 / Gaia DR3 ingest | ⬜ |
 | `L-18` | Identifier preservation through the renderer | ⬜ |
-| `L-19` | SIMBAD / VizieR deep links | ⬜ |
+| `L-19` | SIMBAD / VizieR deep links | ✅ |
 | `L-20` | Variable star light curves | ⬜ |
 | `L-21` | Python bindings (PyO3) | ⏳ astronomy queries + session round-trip shipped |
 | `L-22` | Headless server mode | ✅ |
@@ -3016,27 +3016,53 @@ source_id u64).
 
 ---
 
-### `L-19` SIMBAD / VizieR deep links — ⬜
+### `L-19` SIMBAD / VizieR deep links — ✅ done
 
-**Item.** Hover a star → external link with the right SIMBAD / VizieR
-query. Keep external services optional and out of deterministic renders
+**Item.** Select a star → external link with the right SIMBAD / VizieR
+query. External services stay optional and out of deterministic renders
 (no network call from the rendering pipeline).
 
 **Scientific basis.** SIMBAD / VizieR are the canonical CDS lookup
 services for stellar metadata; their query URL formats are documented
 (Wenger 2000, A&AS 143, 9; Ochsenbein 2000, A&AS 143, 23).
 
-**Implementation scope.**
-- `crates/common`: helper `simbad_query_url(ids: &StarIdentifiers) ->
-  String`.
-- `apps/web/frontend`: hover panel renders the link; opt-in toggle.
-- No network calls from `crates/renderer`; the link is just a URL.
+**Implementation.**
+- `crates/catalog/src/links.rs`: `StarIdentifiers` (HIP / HD / HR /
+  proper name / catalogue designation + J2000 coordinates) and pure
+  `simbad_query_url(&StarIdentifiers) -> String` /
+  `vizier_query_url(&StarIdentifiers) -> String` builders. SIMBAD prefers
+  an identifier query (`sim-id?Ident=…`, HIP → HD → HR → proper →
+  designation) and falls back to a J2000 cone search (`sim-coo`); VizieR
+  always uses a positional cone search (`VizieR-4?-c=…&-c.rs=…`). The
+  builders are re-exported on the documented `stars_host_common`
+  (`crates/common`) path; the pure helper lives in `catalog` so the WASM
+  web binding shares one source of truth without taking the native-only
+  `clap` / `chrono` dependencies.
+- `crates/common/src/goto.rs`: `GotoTarget` gains `simbad_url` /
+  `vizier_url` (`None` for solar-system bodies, which the CDS stellar
+  archives do not catalogue), built from the identifiers the resolver
+  already has (uses existing `L-17` / `L-18` paths; no new ingest).
+- `apps/web` (`lib.rs`): `goto_object` JSON emits `simbadUrl` /
+  `vizierUrl`; `apps/web/frontend` info panel renders the links behind an
+  opt-in checkbox persisted in `localStorage` (default off).
+- `apps/cli` / `apps/viewer`: echo the SIMBAD / VizieR URLs in the GoTo
+  metadata output (`println!` / `log`). No network calls anywhere; the
+  renderer is untouched.
 
 **Tests / validation.**
-- Unit: URL format matches CDS specification for a representative ID set.
-- Browser test on the hover panel (mocked navigation).
+- `catalog::links` (8 tests): identifier priority, deep-sky designation
+  encoding, positive / negative declination sign handling, RA wraparound,
+  and the coordinate fallback all match the CDS URL specification.
+- `stars_host_common::goto` (3 tests): a named star resolves to a HIP
+  `sim-id` link, a Messier object resolves to a designation `sim-id`
+  link, and solar-system bodies expose no CDS links.
+- Frontend: the web project ships no JS test harness, so the link
+  rendering is covered by the Rust JSON-emission tests plus the `tsc`
+  type-check in `make ci`; a `vitest` browser test is deferred with the
+  rest of the frontend test-infra work.
 
-**Hosts wired.** Web (CLI / viewer expose the URL in metadata JSON).
+**Hosts wired.** Web (info panel links). CLI / viewer expose the URLs in
+the GoTo metadata output.
 
 ---
 
