@@ -131,7 +131,16 @@ Owns star catalog ingestion, deep-sky catalogues, and catalog-space conversions:
   identifier round-trip tests. Gaia LOD streaming and host wiring are the
   `L-17` follow-up;
 - CPU-side `CatalogIdentifiers` for HYG / HIP / HD / Tycho-2 / Gaia DR3,
-  populated by the HYG and large-catalog backends;
+  populated by the HYG and large-catalog backends. Identifier preservation
+  (`L-18`) adds `CatalogObjectId::label` + `CatalogIdentifiers::{resolved_primary,
+  primary_label, pick_handle}` as the single canonical primary-ID source
+  (priority HIP → HD → TYC → Gaia → HYG). The compact embedded catalog format
+  is `STRBIN4`, which carries HIP / HD so identifiers survive the embedded /
+  WASM path; `renderer::build_star_instance` packs the primary id onto every
+  `StarInstance` (a CPU-side pick handle, not a GPU vertex attribute) and
+  `renderer::pick_nearest` resolves an equatorial ray to the nearest instance,
+  so an on-screen star maps back to its catalogue identity. The CLI `--goto`
+  metadata and the web info panel surface the canonical primary ID;
 - the `DeepSkyCatalog` trait + embedded `MessierCatalog` and
   `NgcBrightCatalog` implementations consumed by the renderer's deep-sky
   overlay (`V-42`); the trait is the slot for the planned runtime

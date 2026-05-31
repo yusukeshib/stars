@@ -156,6 +156,10 @@ kernel ingest + Horizons cross-check remain) and the variable-star library
 shipped. Large-catalog ingest (`L-17`) has landed at the catalog-backend layer
 (Hipparcos / Tycho-2 / Gaia DR3 CSV backends + fetch scripts + identifier
 cross-match); LOD streaming and host wiring remain the `L-17` follow-up.
+Identifier preservation (`L-18`) now survives the renderer instance buffer on
+every host (CSV / embedded / WASM) and the canonical primary ID is surfaced in
+the CLI `--goto` metadata and the web info panel (click-to-copy); the
+interactive canvas-pick UI remains the `L-18` follow-up.
 Observation-planning polish (`L-09`) has now shipped: Moon-impact and
 visibility scoring, recommended-object ranking, favourites, and iCalendar
 export. Guided education mode (`L-23`) has now shipped: a deterministic,
@@ -255,7 +259,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-15` | Data provenance manifest | ✅ |
 | `L-16` | Catalog backend scaling design | ✅ |
 | `L-17` | Hipparcos / Tycho-2 / Gaia DR3 ingest (backends + cross-match ✅; LOD streaming + host wiring ⬜) | ◑ |
-| `L-18` | Identifier preservation through the renderer | ⬜ |
+| `L-18` | Identifier preservation through the renderer (catalog→instance round-trip + CLI/web primary-ID ✅; interactive canvas-pick UI ⬜) | ◑ |
 | `L-19` | SIMBAD / VizieR deep links | ✅ |
 | `L-20` | Variable star light curves | ⬜ |
 | `L-21` | Python bindings (PyO3) | ✅ |
@@ -3249,7 +3253,7 @@ streaming optional behind a setting).
 
 ---
 
-### `L-18` Identifier preservation — ⬜
+### `L-18` Identifier preservation — ◑ (catalog→instance round-trip + CLI/web primary-ID shipped; interactive canvas pick deferred)
 
 **Item.** Pass Hipparcos / HD / TYC / Gaia source_id through the renderer
 so hover, click-to-copy, session reproducibility, SIMBAD / VizieR deep
@@ -3262,17 +3266,33 @@ identifiers; the catalogs above publish them under documented conventions
 source_id u64).
 
 **Implementation scope.**
-- `crates/catalog`: per-star optional ID record (`StarIdentifiers`)
-  flowing through `build_star_instance` into `renderer::vertex`.
-- `crates/common`: JSON session encodes the chosen primary ID family.
-- `apps/*`: hover tooltip + click-to-copy use the primary ID family.
+- `crates/catalog`: `CatalogObjectId::label` / `CatalogIdentifiers::{resolved_primary,
+  primary_label, pick_handle}` give a single canonical primary-ID source
+  (HIP → HD → TYC → Gaia → HYG). The compact embedded catalog format is
+  bumped `STRBIN3 → STRBIN4` to carry HIP / HD so identifiers survive the
+  embedded / WASM path, not just the CSV path. ✅
+- `crates/renderer`: `StarInstance` carries the packed primary-id pick handle
+  (appended; not a GPU vertex attribute), `build_star_instance` threads it,
+  and `renderer::pick_nearest(instances, ray_eq, tol)` resolves a ray to the
+  nearest instance. ✅
+- `apps/*`: the canonical primary ID is surfaced in the CLI `--goto` metadata
+  (`ID HIP 32349`) and the web info panel as a click-to-copy chip; `GotoTarget`
+  /the web goto JSON expose `primary_id`/`primaryId`. ✅
+- **Deferred (◑):** the interactive *canvas-click* pick UI (screen ray →
+  apparent-place inverse → `pick_nearest` → info panel) and the session
+  "primary ID family" preference. The data + `pick_nearest` primitive are in
+  place; only the screen-space inverse + click wiring remain.
 
 **Tests / validation.**
 - Unit: Sirius identifiers round-trip end-to-end across CSV / embedded /
-  WASM paths.
-- Cross-check: hover ID matches `L-17` cross-ID test outputs.
+  WASM paths (`stars-py` `l18_embedded_preserves_sirius_identifiers`). ✅
+- Unit: primary-ID label per family, resolved-primary priority, pick-handle
+  round-trip (`catalog`), instance pick-handle + `pick_nearest` (`renderer`). ✅
+- Cross-check: the resolved Sirius identity (HIP 32349 / HD 48915) matches
+  the `L-17` cross-ID test outputs.
 
-**Hosts wired.** CLI metadata JSON / viewer hover / web hover.
+**Hosts wired.** CLI `--goto` metadata ✅ / web info-panel click-to-copy ✅ /
+interactive canvas pick + viewer hover ⬜ (follow-up).
 
 ---
 

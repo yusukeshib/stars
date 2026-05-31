@@ -36,6 +36,58 @@ impl CatalogObjectId {
             Self::GaiaDr3(_) => "Gaia DR3",
         }
     }
+
+    /// Compact family discriminant used by the renderer-instance pick handle
+    /// (see [`CatalogIdentifiers::pick_handle`]). `0` is reserved for "no id".
+    pub const fn kind_tag(self) -> u32 {
+        match self {
+            Self::Hyg(_) => 1,
+            Self::Hipparcos(_) => 2,
+            Self::HenryDraper(_) => 3,
+            Self::Tycho2(_) => 4,
+            Self::GaiaDr3(_) => 5,
+        }
+    }
+
+    /// Raw numeric value of the identifier, widened to `u64`.
+    pub const fn numeric(self) -> u64 {
+        match self {
+            Self::Hyg(v) | Self::Hipparcos(v) | Self::HenryDraper(v) => v as u64,
+            Self::Tycho2(v) | Self::GaiaDr3(v) => v,
+        }
+    }
+
+    /// Reconstruct an id from a [`kind_tag`](Self::kind_tag) + numeric value,
+    /// the inverse of the pick-handle packing. Returns `None` for tag `0`
+    /// ("no id") or an unknown tag.
+    pub const fn from_parts(kind_tag: u32, value: u64) -> Option<Self> {
+        match kind_tag {
+            1 => Some(Self::Hyg(value as u32)),
+            2 => Some(Self::Hipparcos(value as u32)),
+            3 => Some(Self::HenryDraper(value as u32)),
+            4 => Some(Self::Tycho2(value)),
+            5 => Some(Self::GaiaDr3(value)),
+            _ => None,
+        }
+    }
+
+    /// Canonical human / SIMBAD-resolvable label, e.g. `"HIP 32349"`,
+    /// `"HD 48915"`, `"TYC 5949-2777-1"`, `"Gaia DR3 2947050466531873024"`,
+    /// `"HYG 32263"`. This is the single source of truth for the "primary ID
+    /// family" the hosts display on hover / click-to-copy (`L-18`) and that the
+    /// `L-19` deep links resolve against.
+    pub fn label(self) -> String {
+        match self {
+            Self::Hyg(v) => format!("HYG {v}"),
+            Self::Hipparcos(v) => format!("HIP {v}"),
+            Self::HenryDraper(v) => format!("HD {v}"),
+            Self::Tycho2(v) => {
+                let (t1, t2, t3) = crate::ingest::unpack_tyc(v);
+                format!("TYC {t1}-{t2}-{t3}")
+            }
+            Self::GaiaDr3(v) => format!("Gaia DR3 {v}"),
+        }
+    }
 }
 
 /// Known cross-identifiers for one catalog row.
@@ -100,6 +152,49 @@ impl CatalogIdentifiers {
             hd,
             tycho2: None,
             gaia_dr3: Some(gaia_dr3),
+        }
+    }
+
+    /// The canonical primary identifier for this row, resolving the backend's
+    /// explicit `primary` first and otherwise synthesising one from the
+    /// preserved cross-IDs in the SIMBAD-friendly priority order
+    /// HIP → HD → TYC → Gaia → HYG. Returns `None` only for a row that carries
+    /// no identifier at all (e.g. a resolved double-star secondary).
+    pub fn resolved_primary(self) -> Option<CatalogObjectId> {
+        if let Some(primary) = self.primary {
+            return Some(primary);
+        }
+        if let Some(hip) = self.hip {
+            return Some(CatalogObjectId::Hipparcos(hip));
+        }
+        if let Some(hd) = self.hd {
+            return Some(CatalogObjectId::HenryDraper(hd));
+        }
+        if let Some(tyc) = self.tycho2 {
+            return Some(CatalogObjectId::Tycho2(tyc));
+        }
+        if let Some(gaia) = self.gaia_dr3 {
+            return Some(CatalogObjectId::GaiaDr3(gaia));
+        }
+        self.hyg.map(CatalogObjectId::Hyg)
+    }
+
+    /// Canonical primary-ID label (e.g. `"HIP 32349"`), or `None` for an
+    /// identifier-less row. This is the string the hosts surface on hover /
+    /// click-to-copy (`L-18`).
+    pub fn primary_label(self) -> Option<String> {
+        self.resolved_primary().map(CatalogObjectId::label)
+    }
+
+    /// Pack the resolved primary identifier into the compact
+    /// `(kind_tag, value)` handle the renderer carries on every
+    /// [`crate::Star`]-derived instance so an on-screen pick can be mapped back
+    /// to its catalogue identity without re-reading the catalog. `kind_tag == 0`
+    /// means "no identifier". The inverse is [`CatalogObjectId::from_parts`].
+    pub fn pick_handle(self) -> (u32, u64) {
+        match self.resolved_primary() {
+            Some(id) => (id.kind_tag(), id.numeric()),
+            None => (0, 0),
         }
     }
 }
@@ -325,6 +420,58 @@ mod tests {
         assert_eq!(ids.hyg, Some(42));
         assert_eq!(ids.hip, Some(123));
         assert_eq!(ids.hd, Some(456));
+    }
+
+    #[test]
+    fn l18_primary_label_formats_each_family() {
+        assert_eq!(CatalogObjectId::Hipparcos(32349).label(), "HIP 32349");
+        assert_eq!(CatalogObjectId::HenryDraper(48915).label(), "HD 48915");
+        assert_eq!(CatalogObjectId::Hyg(32263).label(), "HYG 32263");
+        assert_eq!(CatalogObjectId::GaiaDr3(42).label(), "Gaia DR3 42");
+        let tyc = crate::ingest::pack_tyc(5949, 2777, 1);
+        assert_eq!(CatalogObjectId::Tycho2(tyc).label(), "TYC 5949-2777-1");
+    }
+
+    #[test]
+    fn l18_resolved_primary_priority_and_label() {
+        // Explicit primary wins.
+        let hyg = CatalogIdentifiers::from_hyg_row(Some(7), Some(32349), Some(48915));
+        assert_eq!(hyg.primary_label().as_deref(), Some("HYG 7"));
+        // No explicit primary -> HIP before HD.
+        let embedded = CatalogIdentifiers::from_hyg_row(None, Some(32349), Some(48915));
+        assert_eq!(embedded.primary_label().as_deref(), Some("HIP 32349"));
+        assert_eq!(
+            embedded.resolved_primary(),
+            Some(CatalogObjectId::Hipparcos(32349))
+        );
+        // HD only.
+        let hd_only = CatalogIdentifiers::from_hyg_row(None, None, Some(48915));
+        assert_eq!(hd_only.primary_label().as_deref(), Some("HD 48915"));
+        // Identifier-less row (e.g. resolved double secondary).
+        assert_eq!(CatalogIdentifiers::default().primary_label(), None);
+    }
+
+    #[test]
+    fn l18_pick_handle_round_trips_through_kind_and_value() {
+        for id in [
+            CatalogObjectId::Hipparcos(32349),
+            CatalogObjectId::HenryDraper(48915),
+            CatalogObjectId::Hyg(32263),
+            CatalogObjectId::Tycho2(crate::ingest::pack_tyc(5949, 2777, 1)),
+            CatalogObjectId::GaiaDr3(2_947_050_466_531_873_024),
+        ] {
+            let ids = CatalogIdentifiers {
+                primary: Some(id),
+                ..Default::default()
+            };
+            let (kind, value) = ids.pick_handle();
+            assert_ne!(kind, 0);
+            assert_eq!(CatalogObjectId::from_parts(kind, value), Some(id));
+        }
+        // No id -> tag 0 -> None.
+        let (kind, value) = CatalogIdentifiers::default().pick_handle();
+        assert_eq!(kind, 0);
+        assert_eq!(CatalogObjectId::from_parts(kind, value), None);
     }
 
     #[test]

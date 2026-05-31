@@ -48,6 +48,10 @@ pub struct GotoTarget {
     pub magnitude: Option<f64>,
     /// Distance with its unit (`"pc"`, `"AU"`, or `"km"`), when known.
     pub distance: Option<(f64, &'static str)>,
+    /// L-18 canonical primary catalogue identifier (e.g. `"HIP 32349"`,
+    /// `"M 31"`), the same family the on-screen pick / click-to-copy surfaces.
+    /// `None` for solar-system bodies.
+    pub primary_id: Option<String>,
     /// L-19 SIMBAD lookup URL. `None` for solar-system bodies, which CDS
     /// stellar archives do not catalogue.
     pub simbad_url: Option<String>,
@@ -230,9 +234,13 @@ pub fn resolve_goto_id(id: SearchId, observer: Observer) -> Option<GotoTarget> {
         observer.latitude_rad,
     );
 
-    let (simbad_url, vizier_url) = match fields.identifiers {
-        Some(ids) => (Some(simbad_query_url(&ids)), Some(vizier_query_url(&ids))),
-        None => (None, None),
+    let (primary_id, simbad_url, vizier_url) = match &fields.identifiers {
+        Some(ids) => (
+            ids.preferred_identifier(),
+            Some(simbad_query_url(ids)),
+            Some(vizier_query_url(ids)),
+        ),
+        None => (None, None, None),
     };
 
     Some(GotoTarget {
@@ -246,6 +254,7 @@ pub fn resolve_goto_id(id: SearchId, observer: Observer) -> Option<GotoTarget> {
         azimuth_rad: altaz.azimuth,
         magnitude: fields.magnitude,
         distance: fields.distance,
+        primary_id,
         simbad_url,
         vizier_url,
     })

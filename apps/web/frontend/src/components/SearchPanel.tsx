@@ -30,6 +30,9 @@ export type GotoRecord = {
   magnitude: number | null;
   distance: { value: number; unit: string } | null;
   riseSetMs: { rise: number | null; transit: number | null; set: number | null } | null;
+  // L-18 canonical primary catalogue identifier (e.g. "HIP 32349"). Null for
+  // solar-system bodies. Surfaced as a click-to-copy chip in the info panel.
+  primaryId: string | null;
   // L-19 CDS deep links. Null for solar-system bodies, which the CDS stellar
   // archives do not catalogue.
   simbadUrl: string | null;
@@ -272,6 +275,18 @@ const INFO_DD_STYLE: CSSProperties = {
   margin: 0,
 };
 
+// L-18: click-to-copy primary identifier chip.
+const ID_COPY_STYLE: CSSProperties = {
+  margin: 0,
+  padding: 0,
+  border: "none",
+  background: "none",
+  color: "inherit",
+  font: "inherit",
+  cursor: "pointer",
+  textDecoration: "underline dotted",
+};
+
 const LINKS_BLOCK_STYLE: CSSProperties = {
   marginTop: 10,
   paddingTop: 10,
@@ -425,6 +440,24 @@ export function SearchPanel({ onLookup, onGoto, onApplyView }: SearchPanelProps)
           <div style={INFO_TITLE_STYLE}>{selected.display}</div>
           {selected.aka.length > 0 && <div style={INFO_AKA_STYLE}>{selected.aka}</div>}
           <dl style={INFO_GRID_STYLE}>
+            {selected.primaryId !== null && (
+              <>
+                <dt style={INFO_DT_STYLE}>ID</dt>
+                <dd style={INFO_DD_STYLE}>
+                  <button
+                    type="button"
+                    style={ID_COPY_STYLE}
+                    title="Copy identifier"
+                    aria-label={`Copy identifier ${selected.primaryId}`}
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(selected.primaryId ?? "");
+                    }}
+                  >
+                    {selected.primaryId}
+                  </button>
+                </dd>
+              </>
+            )}
             <dt style={INFO_DT_STYLE}>RA (J2000)</dt>
             <dd style={INFO_DD_STYLE}>{formatRa(selected.raRad)}</dd>
             <dt style={INFO_DT_STYLE}>Dec (J2000)</dt>

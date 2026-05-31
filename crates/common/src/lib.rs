@@ -649,6 +649,8 @@ pub fn load_star_instances_from_file(
                 s.magnitude,
                 limiting_magnitude,
                 s.distance_pc,
+                // L-18: preserve the catalogue primary id through the instance.
+                s.identifiers.pick_handle(),
             )
         })
         .collect())

@@ -1594,6 +1594,30 @@ mod tests {
         assert!(oob.is_err(), "out-of-range lookup must return an Err");
     }
 
+    /// L-18: catalogue identifiers must survive the compact embedded (STRBIN4)
+    /// / WASM path, so an on-screen pick on the web build can resolve a star's
+    /// canonical identity. Sirius is HIP 32349 / HD 48915. This pins the same
+    /// identity the HYG-CSV path produces (the `catalog` cross-ID tests) end to
+    /// end through the embedded decoder.
+    #[test]
+    fn l18_embedded_preserves_sirius_identifiers() {
+        let stars = catalog::load_embedded();
+        let sirius = stars
+            .iter()
+            .find(|s| s.identifiers.hip == Some(32349))
+            .expect("Sirius (HIP 32349) present in embedded catalog");
+        assert_eq!(
+            sirius.identifiers.primary_label().as_deref(),
+            Some("HIP 32349")
+        );
+        assert_eq!(sirius.identifiers.hd, Some(48915));
+        let (kind, value) = sirius.identifiers.pick_handle();
+        assert_eq!(
+            catalog::CatalogObjectId::from_parts(kind, value),
+            Some(catalog::CatalogObjectId::Hipparcos(32349))
+        );
+    }
+
     /// The evening plan must cover a ~1-day window with one row per default
     /// planning body and a non-empty, contiguous twilight timeline whose
     /// segments tile the window without gaps. This is the contract a planning

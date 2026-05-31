@@ -230,6 +230,10 @@ struct RawStar {
     ci: Option<f64>,
     pmrarad: Option<f64>,
     pmdecrad: Option<f64>,
+    /// L-18: preserve the Hipparcos / Henry Draper primary + cross identifiers
+    /// through the compact embedded catalogue (`0` sentinel = absent).
+    hip: Option<u32>,
+    hd: Option<u32>,
 }
 
 const MAX_MAGNITUDE: f64 = 8.0;
@@ -239,7 +243,8 @@ const MAX_MAGNITUDE: f64 = 8.0;
 /// background star catalog baked into the WASM bundle.
 const MIN_DISTANCE_PC: f64 = 0.0;
 const MAX_DISTANCE_PC: f64 = 100_000.0;
-const STAR_MAGIC: &[u8; 8] = b"STRBIN3\0";
+// STRBIN4 appends the L-18 HIP / HD identifier columns (two trailing u32).
+const STAR_MAGIC: &[u8; 8] = b"STRBIN4\0";
 
 fn main() {
     println!("cargo:rerun-if-changed={MESSIER_CATALOG}");
@@ -297,6 +302,8 @@ fn generate_star_catalog() {
             pmy,
             pmz,
             distance_pc,
+            hip: raw.hip.unwrap_or(0),
+            hd: raw.hd.unwrap_or(0),
         });
     }
 
@@ -327,6 +334,12 @@ fn generate_star_catalog() {
         writer
             .write_all(&record.distance_pc.to_le_bytes())
             .expect("write distance");
+        writer
+            .write_all(&record.hip.to_le_bytes())
+            .expect("write hip");
+        writer
+            .write_all(&record.hd.to_le_bytes())
+            .expect("write hd");
     }
 }
 
@@ -340,6 +353,8 @@ struct StarRecord {
     pmy: f32,
     pmz: f32,
     distance_pc: f32,
+    hip: u32,
+    hd: u32,
 }
 
 fn radec_hours_deg_to_cartesian(ra_hours: f64, dec_degrees: f64) -> (f64, f64, f64) {

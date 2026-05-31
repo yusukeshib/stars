@@ -3663,6 +3663,46 @@ components, so it stays separable from the parallel `L-23` education work.
 5. **Reference.** W3C WCAG 2.2; WAI-ARIA Authoring Practices (dialog + tabs);
    Wong 2011, Nature Methods 8, 441 (for the deferred CVD palette).
 
+## `L-18` Identifier preservation through the renderer — ◑ (round-trip + CLI/web primary-ID; canvas pick deferred)
+
+Catalogue identity now survives from the catalog through the renderer instance
+buffer and back to the hosts, so a star can be referenced by its canonical ID
+on every build — the foundation the `L-19` SIMBAD / VizieR deep links and the
+object info panel consume.
+
+1. **What changed.**
+   - `catalog`: `CatalogObjectId::{label, kind_tag, numeric, from_parts}` and
+     `CatalogIdentifiers::{resolved_primary, primary_label, pick_handle}` are
+     the single canonical primary-ID source (priority HIP → HD → TYC → Gaia →
+     HYG), e.g. `"HIP 32349"`, `"TYC 5949-2777-1"`, `"Gaia DR3 …"`.
+   - The compact embedded catalog is bumped `STRBIN3 → STRBIN4` (build.rs +
+     decoder), appending HIP / HD columns so identifiers survive the embedded /
+     WASM path, not only the CSV path.
+   - `renderer`: `StarInstance` gains an appended packed pick handle
+     (`catalog_id` + `catalog_id_kind`; **not** a GPU vertex attribute),
+     `build_star_instance` threads it, and `pick_nearest(instances, ray_eq,
+     tol)` resolves an equatorial ray to the nearest instance (brighter star
+     wins ties).
+   - hosts: `GotoTarget`/the web goto JSON expose the canonical `primary_id` /
+     `primaryId`; the CLI prints `ID <primary>` under `--goto` and the web info
+     panel renders a click-to-copy ID chip.
+2. **Why it is ◑ (not ✅).** The data path and the `pick_nearest` primitive are
+   complete and tested, and the canonical ID is surfaced in the CLI metadata
+   and the web info panel. The interactive *canvas-click* pick UI (screen ray →
+   apparent-place inverse → `pick_nearest` → info panel) and the session
+   "primary ID family" preference are the documented follow-ups.
+3. **Where it lives.** `crates/catalog/src/backend.rs` (id helpers),
+   `crates/catalog/src/catalog.rs` + `build.rs` (STRBIN4),
+   `crates/renderer/src/vertex.rs` (`StarInstance` handle + `pick_nearest`),
+   `crates/common/src/{lib.rs,goto.rs}`, `apps/cli/src/main.rs`,
+   `apps/web/src/lib.rs` + `apps/web/frontend/src/components/SearchPanel.tsx`.
+4. **Tests / validation.** `catalog` (3): per-family label, resolved-primary
+   priority, pick-handle round-trip. `renderer` (2): instance handle +
+   `pick_nearest`. `stars-py` `l18_embedded_preserves_sirius_identifiers`:
+   Sirius (HIP 32349 / HD 48915) round-trips through the embedded STRBIN4
+   decoder, matching the `L-17` cross-ID outputs end to end.
+5. **Hosts wired.** CLI `--goto` metadata, web info-panel click-to-copy.
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

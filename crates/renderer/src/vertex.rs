@@ -54,6 +54,35 @@ pub struct StarInstance {
     /// treats stars as directions at infinity; external galactic viewpoints
     /// use this field to place the same catalogue rows as 3D points.
     pub distance_pc: f32,
+    /// `L-18` identifier-preservation pick handle: the resolved primary
+    /// catalogue id as `[value_lo, value_hi]` (a `u64` split little-endian).
+    /// Paired with [`Self::catalog_id_kind`]. `kind == 0` means "no id".
+    ///
+    /// This rides on the instance so an on-screen pick maps back to a star's
+    /// catalogue identity without re-reading the catalog; it is **not** a GPU
+    /// vertex attribute (absent from [`Self::layout`]) — the shader never reads
+    /// it. Appended at the end so the `#[repr(C)]` offsets of the rendered
+    /// fields are unchanged.
+    pub catalog_id: [u32; 2],
+    /// Family discriminant for [`Self::catalog_id`]; see
+    /// `catalog::CatalogObjectId::kind_tag` (`0` = none).
+    pub catalog_id_kind: u32,
+}
+
+impl StarInstance {
+    /// Pack a `(kind_tag, value)` primary-id handle into the instance fields.
+    pub fn pack_catalog_id(kind_tag: u32, value: u64) -> ([u32; 2], u32) {
+        ([value as u32, (value >> 32) as u32], kind_tag)
+    }
+
+    /// Recover the `(kind_tag, value)` handle, or `None` when no id is carried.
+    pub fn catalog_id_parts(&self) -> Option<(u32, u64)> {
+        if self.catalog_id_kind == 0 {
+            return None;
+        }
+        let value = (self.catalog_id[0] as u64) | ((self.catalog_id[1] as u64) << 32);
+        Some((self.catalog_id_kind, value))
+    }
 }
 
 impl StarInstance {
@@ -248,10 +277,14 @@ pub fn build_star_instance(
     magnitude: f32,
     limiting_magnitude: f32,
     distance_pc: f32,
+    // `L-18` resolved primary-id pick handle as `(kind_tag, value)`;
+    // `(0, _)` means "no identifier". See `CatalogIdentifiers::pick_handle`.
+    catalog_id: (u32, u64),
 ) -> StarInstance {
     let params = magnitude_to_render_params(magnitude, limiting_magnitude);
     let w = astronomy::photometry::chromatic_weight_for_magnitude(magnitude as f64) as f32;
     let perceived_color = astronomy::photometry::apply_mesopic_desaturation(photopic_color, w);
+    let (catalog_id, catalog_id_kind) = StarInstance::pack_catalog_id(catalog_id.0, catalog_id.1);
     StarInstance {
         position,
         size: params.radius_px,
@@ -263,7 +296,54 @@ pub fn build_star_instance(
         } else {
             0.0
         },
+        catalog_id,
+        catalog_id_kind,
     }
+}
+
+/// `L-18` on-screen pick: index of the instance whose catalogue direction is
+/// nearest the given equatorial ray, within `max_sep_rad`, or `None`.
+///
+/// `ray_dir_eq` and `StarInstance::position` are both **J2000 equatorial unit
+/// vectors** (the catalogue frame, before the shader's proper-motion /
+/// precession / nutation / aberration / refraction stack). For naked-eye pick
+/// tolerances (≳ a few arcminutes) the apparent-place offset is negligible, so
+/// the host can resolve a click ray directly against the instance buffer. The
+/// nearest instance is chosen by maximising the dot product; ties are broken by
+/// the brighter star (lower magnitude → higher `brightness`).
+pub fn pick_nearest(
+    instances: &[StarInstance],
+    ray_dir_eq: [f32; 3],
+    max_sep_rad: f32,
+) -> Option<usize> {
+    let n = (ray_dir_eq[0] * ray_dir_eq[0]
+        + ray_dir_eq[1] * ray_dir_eq[1]
+        + ray_dir_eq[2] * ray_dir_eq[2])
+        .sqrt();
+    if !n.is_finite() || n < 1e-6 {
+        return None;
+    }
+    let inv = 1.0 / n;
+    let ray = [
+        ray_dir_eq[0] * inv,
+        ray_dir_eq[1] * inv,
+        ray_dir_eq[2] * inv,
+    ];
+    let cos_max = max_sep_rad.clamp(0.0, std::f32::consts::PI).cos();
+    let mut best: Option<(usize, f32, f32)> = None;
+    for (i, inst) in instances.iter().enumerate() {
+        let p = inst.position;
+        let dot = (p[0] * ray[0] + p[1] * ray[1] + p[2] * ray[2]).clamp(-1.0, 1.0);
+        if dot < cos_max {
+            continue;
+        }
+        match best {
+            Some((_, best_dot, best_bri))
+                if dot < best_dot || (dot == best_dot && inst.brightness <= best_bri) => {}
+            _ => best = Some((i, dot, inst.brightness)),
+        }
+    }
+    best.map(|(i, _, _)| i)
 }
 
 #[cfg(test)]
@@ -326,7 +406,7 @@ mod tests {
         let red = [1.0_f32, 0.3, 0.1];
         let lim = NAKED_EYE_LIMITING_MAGNITUDE;
 
-        let bright = build_star_instance([1.0, 0.0, 0.0], [0.0; 3], red, 0.0, lim, 10.0);
+        let bright = build_star_instance([1.0, 0.0, 0.0], [0.0; 3], red, 0.0, lim, 10.0, (0, 0));
         // Bright star: photopic, colour preserved within float error.
         for (got, want) in bright.color.iter().zip(red.iter()) {
             assert!(
@@ -337,7 +417,7 @@ mod tests {
             );
         }
 
-        let faint = build_star_instance([1.0, 0.0, 0.0], [0.0; 3], red, 6.0, lim, 10.0);
+        let faint = build_star_instance([1.0, 0.0, 0.0], [0.0; 3], red, 6.0, lim, 10.0, (0, 0));
         // Faint star: mid-mesopic, channels pulled toward the scotopic grey
         // of the input. The red channel must drop (rods don't see red);
         // the blue channel must rise (rod sensitivity peak near 507 nm).
@@ -352,6 +432,56 @@ mod tests {
             faint.color
         );
         assert_eq!(faint.distance_pc, 10.0);
+    }
+
+    /// L-18: the pick handle round-trips through the instance fields, and
+    /// `pick_nearest` selects the closest instance to an equatorial ray within
+    /// tolerance (brighter star wins ties), returning `None` past tolerance.
+    #[test]
+    fn pick_handle_and_nearest_resolve_identity() {
+        let lim = NAKED_EYE_LIMITING_MAGNITUDE;
+        // Two stars a few degrees apart on the +x hemisphere.
+        let a = build_star_instance(
+            [1.0, 0.0, 0.0],
+            [0.0; 3],
+            [1.0; 3],
+            0.0,
+            lim,
+            10.0,
+            (2, 32349),
+        );
+        let b_dir = {
+            let t = 5f32.to_radians();
+            [t.cos(), t.sin(), 0.0]
+        };
+        let b = build_star_instance(b_dir, [0.0; 3], [1.0; 3], 2.0, lim, 10.0, (3, 48915));
+        let insts = [a, b];
+
+        // Handle survives onto the instance.
+        assert_eq!(insts[0].catalog_id_parts(), Some((2, 32349)));
+        assert_eq!(insts[1].catalog_id_parts(), Some((3, 48915)));
+
+        // A ray near star A picks A.
+        let near_a = [0.999_f32, 0.01, 0.0];
+        assert_eq!(pick_nearest(&insts, near_a, 2f32.to_radians()), Some(0));
+        // A ray near star B picks B.
+        assert_eq!(pick_nearest(&insts, b_dir, 1f32.to_radians()), Some(1));
+        // A ray far from both, with a tight tolerance, picks nothing.
+        assert_eq!(
+            pick_nearest(&insts, [0.0, 0.0, 1.0], 1f32.to_radians()),
+            None
+        );
+        // A degenerate ray is rejected safely.
+        assert_eq!(pick_nearest(&insts, [0.0, 0.0, 0.0], 1.0), None);
+    }
+
+    /// An instance with no catalogue id (e.g. a resolved double secondary)
+    /// reports `None` rather than a bogus `(0, 0)` identity.
+    #[test]
+    fn pick_handle_absent_is_none() {
+        let lim = NAKED_EYE_LIMITING_MAGNITUDE;
+        let s = build_star_instance([1.0, 0.0, 0.0], [0.0; 3], [1.0; 3], 0.0, lim, 10.0, (0, 0));
+        assert_eq!(s.catalog_id_parts(), None);
     }
 
     /// The shader applies a smooth apodization window to the PSF so the
