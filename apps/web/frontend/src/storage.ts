@@ -13,6 +13,7 @@ import {
   DEFAULT_SCINTILLATION_CONFIG,
   type AtmosphereConfig,
   type ExternalViewpointConfig,
+  type MeteorsConfig,
   type Observer,
   type OutputColourspace,
   type OverlayConfig,
@@ -37,6 +38,7 @@ export type PersistedConfig = {
   scintillation?: ScintillationConfig;
   planets?: PlanetsConfig;
   satellites?: SatellitesConfig;
+  meteors?: MeteorsConfig;
   projection?: ProjectionConfig;
   eyepiece?: EyepieceConfig;
   outputColourspace?: OutputColourspace;
@@ -62,6 +64,7 @@ export function loadConfig(): PartialPersistedConfig | null {
       scintillation?: unknown;
       planets?: unknown;
       satellites?: unknown;
+      meteors?: unknown;
       projection?: unknown;
       eyepiece?: unknown;
       outputColourspace?: unknown;
@@ -78,6 +81,8 @@ export function loadConfig(): PartialPersistedConfig | null {
     if (planets) out.planets = planets;
     const satellites = parseSatellitesConfig(obj.satellites);
     if (satellites) out.satellites = satellites;
+    const meteors = parseMeteorsConfig(obj.meteors);
+    if (meteors) out.meteors = meteors;
     const projection = parseProjectionConfig(obj.projection);
     if (projection) out.projection = projection;
     const eyepiece = parseEyepieceConfig(obj.eyepiece);
@@ -185,6 +190,20 @@ function parseSatellitesConfig(v: unknown): SatellitesConfig | null {
       ? o.exposureSeconds
       : 0;
   return { enabled: o.enabled, exposureSeconds };
+}
+
+function parseMeteorsConfig(v: unknown): MeteorsConfig | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Partial<MeteorsConfig>;
+  if (typeof o.enabled !== "boolean") return null;
+  const num = (x: unknown, min: number, fallback: number): number =>
+    typeof x === "number" && Number.isFinite(x) && x >= min ? x : fallback;
+  return {
+    enabled: o.enabled,
+    seed: num(o.seed, 0, 1),
+    rateScale: num(o.rateScale, 0, 1.0),
+    windowSeconds: num(o.windowSeconds, 0, 120.0),
+  };
 }
 
 function parseVec3(v: unknown, range: [number, number]): { x: number; y: number; z: number } | null {

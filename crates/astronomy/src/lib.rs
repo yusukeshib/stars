@@ -14,6 +14,7 @@ mod horizontal;
 pub mod illuminants;
 pub mod jupiter_shadows;
 pub mod light_pollution_atlas;
+pub mod meteors;
 pub mod moons;
 mod observer;
 pub mod occultation;
@@ -47,6 +48,11 @@ pub use jupiter_shadows::{
     GalileanShadowState, JUPITER_OCCLUDER_TARGET, JUPITER_PLANET_INDEX, SHADOW_TRANSIT_KIND,
 };
 pub use light_pollution_atlas::{AtlasError, FalchiAtlas};
+pub use meteors::{
+    active_showers, meteor_stream, observed_rate_per_hour, radiant_altitude_rad,
+    solar_longitude_deg, zhr_at_solar_longitude, ActiveShower, Meteor, MeteorShower,
+    IMO_WORKING_LIST, REFERENCE_LIMITING_MAGNITUDE,
+};
 pub use moons::{
     apparent_galilean_moons, apparent_galilean_moons_topocentric, apparent_titan,
     apparent_titan_topocentric, GalileanMoon, GalileanMoonApparent, TitanApparent,

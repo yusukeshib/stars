@@ -6,7 +6,9 @@ use astronomy::{
     ScoredTarget,
 };
 use clap::Parser;
-use renderer::{LocalView, OutputColourSpace, SkyViewpoint, DEFAULT_SCREEN_LIMITING_MAGNITUDE};
+use renderer::{
+    LocalView, MeteorLayer, OutputColourSpace, SkyViewpoint, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+};
 use stars_host_common::{
     atmosphere_from_args, curated_satellite_layer, eyepiece_from_args, hyg_catalog_snapshot,
     light_pollution_from_args, load_session, overlay_config_from_args, parse_time_to_time_scales,
@@ -257,6 +259,26 @@ struct Args {
     #[arg(long, default_value_t = 0.0)]
     satellite_exposure_seconds: f32,
 
+    /// Enable the V-47 meteor-shower layer: a deterministic Poisson sample of
+    /// the IMO Working List showers active at the scene time/location plus a
+    /// faint sporadic background. Off by default so the dark sky is unchanged.
+    #[arg(long)]
+    meteors: bool,
+
+    /// Deterministic meteor-stream seed (same seed + time reproduces the same
+    /// meteors on every host).
+    #[arg(long, default_value_t = 1)]
+    meteor_seed: u64,
+
+    /// Multiplier on the modelled meteor rate (1.0 = physical expectation).
+    #[arg(long, default_value_t = 1.0)]
+    meteor_rate_scale: f32,
+
+    /// Meteor integration window (seconds): a still frame shows the meteors
+    /// that would appear over this long-exposure window.
+    #[arg(long, default_value_t = 120.0)]
+    meteor_window_seconds: f32,
+
     /// Enable telescope eyepiece simulation. Supplying any telescope/eyepiece
     /// parameter also enables this mode.
     #[arg(long)]
@@ -439,6 +461,12 @@ fn main() -> Result<()> {
             scintillation,
             planets_enabled: !args.no_planets,
             satellites: curated_satellite_layer(args.satellites, args.satellite_exposure_seconds),
+            meteors: MeteorLayer {
+                enabled: args.meteors,
+                seed: args.meteor_seed,
+                rate_scale: args.meteor_rate_scale,
+                window_seconds: args.meteor_window_seconds,
+            },
             projection: args.projection.into(),
             viewpoint,
             external_viewpoint,

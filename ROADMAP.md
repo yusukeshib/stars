@@ -119,7 +119,7 @@ via `V-39`, including the `V-39-Atlas` Falchi 2016 World Atlas loader),
 niche visual
 features (`V-45` telescope-side optical artifacts, `V-46` galactic structural
 model, and `V-50` output colour management have all shipped), and rare
-phenomena (`V-47`–`V-49`).
+phenomena (`V-47` meteor showers has shipped; `V-48`–`V-49` remain).
 
 **High priority next:** the visual-richness gaps `V-51`–`V-56` (eclipses /
 occultations, planetary rings and moons, resolved star clusters, double
@@ -214,7 +214,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-44` | Custom external viewpoint origin | ✅ |
 | `V-45` | **Telescope-side optical artifacts** | ✅ |
 | `V-46` | **Galactic structural model for external viewpoints** | ✅ |
-| `V-47` | **Meteor shower display** | ⬜ |
+| `V-47` | **Meteor shower display** | ✅ |
 | `V-48` | **Aurora display** | ⬜ |
 | `V-49` | **Comet rendering** | ⬜ |
 | `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ✅ |
@@ -1555,7 +1555,7 @@ a usable Python implementation.
 
 ## Rare and transient phenomena
 
-### `V-47` Meteor shower display — ⬜
+### `V-47` Meteor shower display — ✅
 
 **Item.** Stochastic meteor rendering, anchored to the IMO Working List
 of Visual Meteor Showers (radiant α / δ, peak date, ZHR, population index
@@ -1564,30 +1564,60 @@ at the configured rate, with deterministic seeding so the same JSON
 session reproduces the same meteor stream.
 
 **Scientific basis.** Koschack & Rendtel 1990 give the visual ZHR
-formalism: observed rate is `ZHR · sin(h_R) · r^(6.5 − lim_mag) /
-F_correction`. Per-meteor magnitude follows the population index `r`.
-Trail geometry from velocity vector × atmospheric entry geometry.
+reduction `ZHR = n · F · r^(6.5 − lm) / sin(h_R)`. Inverting it for the
+*observed* rate a real sky produces gives `n = ZHR · sin(h_R) ·
+r^(lm − 6.5) / F`, which is what the renderer samples — note `lm < 6.5`
+correctly *lowers* the rate below ZHR (a darker-than-standard sky shows
+fewer meteors), so the worked Perseid example below lands at ≈ 58 m/h,
+not the optimistic ≈ 100 m/h of the original sketch. Date-dependent ZHR
+follows the Jenniskens 1994 solar-longitude activity profile
+`ZHR(λ) = ZHR_max · 10^(−B·|Δλ|)`. Per-meteor magnitude follows the
+population index `r`. Trail geometry radiates from the radiant great
+circle, with length scaled by the geocentric velocity.
 
 **References.**
 - Koschack, R., Rendtel, J. 1990, WGN 18, 44 (visual flux model).
 - Rendtel, J. et al. (annual), *IMO Meteor Shower Calendar*.
 - McKinley, D. W. R. 1961, *Meteor Science and Engineering*.
 
-**Implementation scope.**
-- `crates/astronomy/src/meteors.rs`: shower catalog struct, expected
-  observed rate at observer time / location, deterministic Poisson stream
-  from a session seed.
-- `crates/renderer/src/shaders/meteor.wgsl`: streak rendering with
-  magnitude → length / brightness mapping; one-frame appearance, no
-  persistent train.
-- `data/manifest.toml`: IMO Working List ingested (transcribed constants
-  from peer-reviewed papers if the live download is not permissively
-  licensed).
+**Implementation.**
+- `crates/astronomy/src/meteors.rs`: the `MeteorShower` struct and the
+  `IMO_WORKING_LIST` catalog (Quadrantids, Lyrids, η-Aquariids, Perseids,
+  Orionids, Leonids, Geminids, Ursids), `solar_longitude_deg`,
+  `zhr_at_solar_longitude` (Jenniskens profile), `observed_rate_per_hour`
+  (Koschack-Rendtel inversion), `active_showers`, and `meteor_stream` — a
+  deterministic SplitMix64-seeded Poisson sample of shower + sporadic
+  meteors, time-binned by `(seed, jd_utc / window)` so the same session
+  reproduces the same stream on every host.
+- `crates/renderer/src/camera.rs`: a host-tier `MeteorLayer`
+  (enabled / seed / rate_scale / window_seconds), `MAX_METEORS = 64`,
+  CameraUniform `meteor_segments` + `meteor_params` rows (appended at the
+  END of the uniform), and `meteor_uniforms()` mapping each streak through
+  the shared apparent-direction transform.
+- `crates/renderer/src/shaders/skyglow.wgsl`: a self-contained
+  `meteor_radiance` evaluator (reusing the great-circle
+  `satellite_streak_mask` helper) invoked from a single insertion point in
+  the composition, so the meteor work stays isolated from the parallel
+  `V-48` / `V-49` shader edits. One-frame streaks, no persistent train.
+- The shower catalog is a transcribed-constant Rust table (citations in the
+  module + `DATA_SOURCES.md`), so no committed data artifact / manifest row
+  is needed.
+- Session: `SessionMeteors` is appended to the scene with
+  `#[serde(default, skip_serializing_if = …)]`, so existing sessions /
+  presets stay byte-identical and the schema version is unchanged.
 
 **Tests / validation.**
-- Unit: Perseid ZHR=100 at radiant alt 60°, lim mag 6.0 →
-  ≈ 100 m/h ±10%.
-- Visual: deterministic seed → identical meteor stream across hosts.
+- Unit: `observed_rate_per_hour(ZHR=100, h_R=60°, r=2.2, lm=6.0)` ≈
+  58.4 m/h (the Koschack-Rendtel value); recovers exactly ZHR at the
+  zenith / 6.5-mag standard conditions; zero below the horizon.
+- Unit: the Jenniskens activity profile peaks at maximum and decays
+  symmetrically in solar longitude; solar longitude ≈ 140° at Perseid
+  maximum.
+- Unit / renderer: `meteor_stream` is deterministic for a fixed
+  `(seed, time)` and differs across seeds; the packed renderer uniform
+  carries unit-length streak endpoints, honours the `MAX_METEORS` cap, and
+  is suppressed for external viewpoints.
+- Session: an enabled meteor layer round-trips through the JSON schema.
 
 **Deliberate non-goal scope.** Persistent trains, fireball flares, and
 meteoroid-fragmentation physics are out of scope. The renderer reproduces

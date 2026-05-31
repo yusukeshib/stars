@@ -12,8 +12,8 @@ use anyhow::Result;
 use clap::ValueEnum;
 use renderer::{
     Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView,
-    OutputColourSpace, OverlayConfig, OverlayKind, SatelliteLayer, Scintillation, SkyProjection,
-    SkyViewpoint,
+    MeteorLayer, OutputColourSpace, OverlayConfig, OverlayKind, SatelliteLayer, Scintillation,
+    SkyProjection, SkyViewpoint,
 };
 use serde::{Deserialize, Serialize};
 
@@ -638,6 +638,7 @@ fn earth_scene(
         catalog,
         corrections: CorrectionSnapshot::for_scene(atmosphere),
         output_colourspace: OutputColourSpace::default(),
+        meteors: MeteorLayer::default(),
     })
 }
 
@@ -701,6 +702,7 @@ fn external_scene(
         catalog,
         corrections: CorrectionSnapshot::for_scene(Atmosphere::OFF),
         output_colourspace: OutputColourSpace::default(),
+        meteors: MeteorLayer::default(),
     })
 }
 

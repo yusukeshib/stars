@@ -130,6 +130,9 @@ const en: Dictionary = {
   "card.view.mercuryToNeptune": "Mercury → Neptune",
   "card.view.satellites": "Artificial satellites (ISS / Starlink)",
   "card.view.satelliteExposure": "Satellite streak exposure (s)",
+  "card.view.meteors": "Meteor showers (V-47)",
+  "card.view.meteorSeed": "Meteor seed",
+  "card.view.meteorRateScale": "Meteor rate scale",
   "card.view.viewpoint": "Viewpoint",
   "card.view.screenProjection": "Screen projection",
   "card.view.helper":
@@ -356,6 +359,9 @@ const ja: Dictionary = {
   "card.view.mercuryToNeptune": "水星 → 海王星",
   "card.view.satellites": "人工衛星（ISS / Starlink）",
   "card.view.satelliteExposure": "衛星の軌跡露出（秒）",
+  "card.view.meteors": "流星群（V-47）",
+  "card.view.meteorSeed": "流星シード",
+  "card.view.meteorRateScale": "流星レート倍率",
   "card.view.viewpoint": "視点",
   "card.view.screenProjection": "画面投影",
   "card.view.helper":

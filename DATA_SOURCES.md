@@ -647,6 +647,36 @@ Embedded Hošek-Wilkie coefficient table (V-38):
   spectral and CIE XYZ tables shipped with the same upstream archive are
   not vendored — only the RGB path is consumed by the renderer.
 
+### Meteor showers (V-47)
+
+Used for the V-47 meteor-shower display (radiant-based streaks with
+date-dependent rate). The IMO Working List of Visual Meteor Showers is
+transcribed into a small constant table
+(`astronomy::meteors::IMO_WORKING_LIST`: Quadrantids, Lyrids, eta Aquariids,
+Perseids, Orionids, Leonids, Geminids, Ursids) carrying each shower's J2000
+radiant α/δ at maximum, peak solar longitude, maximum ZHR, population index
+`r`, geocentric velocity `v∞`, and a solar-longitude activity slope `B`.
+
+This is a literature-derived constant table embedded in Rust source (not a
+committed data artifact), so there is **no `data/manifest.toml` row** — the
+same treatment as the V-55 per-satellite standard-magnitude table. The
+constants are transcribed from:
+
+- Koschack, R. & Rendtel, J. 1990, WGN 18, 44 — visual ZHR reduction
+  `ZHR = n·F·r^(6.5−lm)/sin h_R`; the renderer samples the inverse
+  observed-rate form `n = ZHR·sin h_R·r^(lm−6.5)/F`;
+- Jenniskens, P. 1994, A&A 287, 990 — annual-stream activity profiles
+  (ZHR_max, population index, solar-longitude slope `B`);
+- IMO Meteor Shower Calendar (Rendtel et al., annual) — radiant positions,
+  peak solar longitudes, and ZHR for the working-list showers;
+- McKinley, D. W. R. 1961, *Meteor Science and Engineering* — entry-velocity
+  / trail-geometry background.
+
+Implementation area: `crates/astronomy/src/meteors.rs`;
+rendered via `crates/renderer/src/camera.rs` (`MeteorLayer`,
+`meteor_uniforms`) and `crates/renderer/src/shaders/skyglow.wgsl`
+(`meteor_radiance`).
+
 ### Time, coordinate corrections, and ephemerides
 
 Used for:
@@ -716,6 +746,7 @@ Implementation areas:
 - `crates/astronomy/src/corrections.rs`
 - `crates/astronomy/src/ephemeris.rs`
 - `crates/astronomy/src/moons.rs` (V-52b Galilean satellites, V-52c Titan)
+- `crates/astronomy/src/meteors.rs` (V-47 meteor showers)
 - `crates/astronomy/src/moons/lainey_l1.rs` (V-52b-E5 — full Lainey
   2006 L1.2 series + IMCCE coefficient parser; replaces the prior
   Lieske 1998 E5 scaffold)

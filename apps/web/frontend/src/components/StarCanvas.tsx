@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { StarView } from "stars-web";
-import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type EyepieceConfig, type Observer, type OutputColourspace, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type RecommendedPlan, type SatellitesConfig, type ScintillationConfig, type View } from "../observer";
+import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type EyepieceConfig, type MeteorsConfig, type Observer, type OutputColourspace, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type RecommendedPlan, type SatellitesConfig, type ScintillationConfig, type View } from "../observer";
 
 type Props = {
   observer: Observer;
@@ -12,6 +12,7 @@ type Props = {
   scintillation: ScintillationConfig;
   planets: PlanetsConfig;
   satellites: SatellitesConfig;
+  meteors: MeteorsConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   outputColourspace: OutputColourspace;
@@ -52,6 +53,7 @@ export function StarCanvas({
   scintillation,
   planets,
   satellites,
+  meteors,
   projection,
   eyepiece,
   outputColourspace,
@@ -80,6 +82,7 @@ export function StarCanvas({
   const scintillationRef = useRef(scintillation);
   const planetsRef = useRef(planets);
   const satellitesRef = useRef(satellites);
+  const meteorsRef = useRef(meteors);
   const projectionRef = useRef(projection);
   const eyepieceRef = useRef(eyepiece);
   const outputColourspaceRef = useRef(outputColourspace);
@@ -91,6 +94,7 @@ export function StarCanvas({
   scintillationRef.current = scintillation;
   planetsRef.current = planets;
   satellitesRef.current = satellites;
+  meteorsRef.current = meteors;
   projectionRef.current = projection;
   eyepieceRef.current = eyepiece;
   outputColourspaceRef.current = outputColourspace;
@@ -117,6 +121,15 @@ export function StarCanvas({
   useEffect(() => {
     handleRef.current?.set_satellites(satellites.enabled, satellites.exposureSeconds);
   }, [satellites]);
+
+  useEffect(() => {
+    handleRef.current?.set_meteors(
+      meteors.enabled,
+      meteors.seed,
+      meteors.rateScale,
+      meteors.windowSeconds,
+    );
+  }, [meteors]);
 
   useEffect(() => {
     handleRef.current?.set_eyepiece_simulation(

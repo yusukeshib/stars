@@ -13,8 +13,8 @@ use anyhow::{bail, Context, Result};
 use astronomy::TimeScales;
 use renderer::{
     Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView,
-    OutputColourSpace, OverlayConfig, OverlayKind, SatelliteLayer, Scintillation, SkyProjection,
-    SkyViewpoint,
+    MeteorLayer, OutputColourSpace, OverlayConfig, OverlayKind, SatelliteLayer, Scintillation,
+    SkyProjection, SkyViewpoint,
 };
 
 use crate::curated_satellite_layer;
@@ -63,6 +63,13 @@ pub struct StarSession {
     /// schema version is the hard gate for forward compatibility.
     #[serde(default)]
     pub output_colourspace: OutputColourspaceArg,
+    /// V-47 meteor-shower layer. `#[serde(default)]` so older sessions still
+    /// deserialize (to "off"), and `skip_serializing_if` keeps it out of the
+    /// JSON entirely when it is at its default (off) state — so existing
+    /// preset sessions are byte-identical and no schema-version bump is
+    /// needed. Appended at the END of the struct.
+    #[serde(default, skip_serializing_if = "SessionMeteors::is_default")]
+    pub meteors: SessionMeteors,
 }
 
 /// Native rendering-ready scene derived from a [`StarSession`].
@@ -89,6 +96,8 @@ pub struct SessionScene {
     pub corrections: CorrectionSnapshot,
     /// V-50 selected output colour space (sRGB / Display-P3 / Rec.2020).
     pub output_colourspace: OutputColourSpace,
+    /// V-47 meteor-shower layer (engine-ready).
+    pub meteors: MeteorLayer,
 }
 
 /// Serialized V-55 satellite-layer settings. The TLE set itself is *not*
@@ -126,6 +135,59 @@ impl SessionSatellites {
     /// snapshot when enabled.
     pub fn to_satellite_layer(self) -> SatelliteLayer {
         curated_satellite_layer(self.enabled, self.exposure_seconds.max(0.0))
+    }
+}
+
+/// Serialized V-47 meteor-shower-layer settings. The shower catalog lives in
+/// `astronomy::meteors`; only the host-tier controls are persisted so the
+/// same session reproduces the same deterministic stream.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionMeteors {
+    pub enabled: bool,
+    pub seed: u64,
+    pub rate_scale: f32,
+    pub window_seconds: f32,
+}
+
+impl Default for SessionMeteors {
+    fn default() -> Self {
+        // Mirrors `renderer::MeteorLayer::default()`.
+        Self {
+            enabled: false,
+            seed: 1,
+            rate_scale: 1.0,
+            window_seconds: 120.0,
+        }
+    }
+}
+
+impl SessionMeteors {
+    /// True when this is the default (off) layer, so the serializer can omit
+    /// it and keep pre-V-47 sessions / presets byte-identical.
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Build an engine-ready [`MeteorLayer`].
+    pub fn to_meteor_layer(self) -> MeteorLayer {
+        MeteorLayer {
+            enabled: self.enabled,
+            seed: self.seed,
+            rate_scale: self.rate_scale.max(0.0),
+            window_seconds: self.window_seconds.max(0.0),
+        }
+    }
+}
+
+impl From<&MeteorLayer> for SessionMeteors {
+    fn from(layer: &MeteorLayer) -> Self {
+        Self {
+            enabled: layer.enabled,
+            seed: layer.seed,
+            rate_scale: layer.rate_scale,
+            window_seconds: layer.window_seconds,
+        }
     }
 }
 
@@ -456,6 +518,7 @@ impl StarSession {
             catalog: scene.catalog.clone(),
             corrections: scene.corrections,
             output_colourspace: OutputColourspaceArg::from(scene.output_colourspace),
+            meteors: SessionMeteors::from(&scene.meteors),
         }
     }
 
@@ -542,6 +605,7 @@ impl StarSession {
             catalog: self.catalog.validated()?,
             corrections: self.corrections,
             output_colourspace: self.output_colourspace.into(),
+            meteors: self.meteors.to_meteor_layer(),
         })
     }
 }
@@ -911,6 +975,12 @@ mod tests {
             catalog: crate::hyg_catalog_snapshot("crates/catalog/data/hyg_v42.csv", 7.5),
             corrections: CorrectionSnapshot::default(),
             output_colourspace: OutputColourSpace::DisplayP3,
+            meteors: MeteorLayer {
+                enabled: true,
+                seed: 99,
+                rate_scale: 2.0,
+                window_seconds: 300.0,
+            },
         }
     }
 
@@ -923,9 +993,17 @@ mod tests {
         assert!(json.contains("\"cardinal-labels\""));
         assert!(json.contains("\"scintillation\""));
         assert!(json.contains("\"outputColourspace\":\"display-p3\""));
+        // V-47: an enabled meteor layer round-trips through the JSON.
+        assert!(json.contains("\"meteors\""));
         let parsed: StarSession = serde_json::from_str(&json).unwrap();
         let restored = parsed.to_scene().unwrap();
         assert_eq!(restored.output_colourspace, scene.output_colourspace);
+        assert_eq!(restored.meteors.enabled, scene.meteors.enabled);
+        assert_eq!(restored.meteors.seed, scene.meteors.seed);
+        assert_eq!(
+            restored.meteors.window_seconds,
+            scene.meteors.window_seconds
+        );
         assert_eq!(restored.latitude_deg, scene.latitude_deg);
         assert_eq!(restored.longitude_deg, scene.longitude_deg);
         assert!((restored.time.jd_utc - scene.time.jd_utc).abs() < 1e-12);

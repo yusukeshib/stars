@@ -17,9 +17,9 @@ use catalog::search::{
 };
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, ExternalViewpoint,
-    EyepieceSimulation, LightPollution, LocalView, OpticalDesign, OutputColourSpace, OverlayConfig,
-    OverlayKind,
-    Renderer, SatelliteLayer, Scintillation, SkyProjection, SkyViewpoint, StarInstance,
+    EyepieceSimulation, LightPollution, LocalView, MeteorLayer, OpticalDesign, OutputColourSpace,
+    OverlayConfig, OverlayKind, Renderer, SatelliteLayer, Scintillation, SkyProjection,
+    SkyViewpoint, StarInstance,
     DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 
@@ -587,6 +587,25 @@ impl StarView {
             enabled,
             exposure_seconds: exposure_seconds.max(0.0),
             tles,
+        };
+    }
+
+    /// V-47: enable / disable the meteor-shower layer and set its deterministic
+    /// stream parameters. `rate_scale` multiplies the modelled observed rate;
+    /// `window_seconds` is the long-exposure integration window (and the time
+    /// bin for deterministic seeding).
+    pub fn set_meteors(
+        &self,
+        enabled: bool,
+        seed: f64,
+        rate_scale: f32,
+        window_seconds: f32,
+    ) {
+        self.state.borrow_mut().camera.meteors = MeteorLayer {
+            enabled,
+            seed: seed.max(0.0) as u64,
+            rate_scale: rate_scale.max(0.0),
+            window_seconds: window_seconds.max(0.0),
         };
     }
 

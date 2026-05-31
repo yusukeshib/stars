@@ -118,6 +118,7 @@ pub async fn render_scene_pixels(
     camera.light_pollution = crate::resolve_light_pollution(scene.light_pollution);
     camera.planets_enabled = scene.planets_enabled;
     camera.satellites = scene.satellites.clone();
+    camera.meteors = scene.meteors.clone();
     camera.projection = scene.projection;
     camera.viewpoint = scene.viewpoint;
     camera.external_viewpoint = scene.external_viewpoint;

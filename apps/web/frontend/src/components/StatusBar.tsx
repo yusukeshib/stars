@@ -16,6 +16,7 @@ import {
   type AtmosphereConfig,
   type AtmospherePreset,
   type EyepieceConfig,
+  type MeteorsConfig,
   type Observer,
   type OpticalDesign,
   type OverlayConfig,
@@ -48,6 +49,7 @@ type Props = {
   atmosphere: AtmosphereConfig;
   planets: PlanetsConfig;
   satellites: SatellitesConfig;
+  meteors: MeteorsConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   outputColourspace: OutputColourspace;
@@ -60,6 +62,7 @@ type Props = {
   onSetAtmosphere: (next: AtmosphereConfig) => void;
   onSetPlanets: (next: PlanetsConfig) => void;
   onSetSatellites: (next: SatellitesConfig) => void;
+  onSetMeteors: (next: MeteorsConfig) => void;
   onSetProjection: (next: ProjectionConfig) => void;
   onSetEyepiece: (next: EyepieceConfig) => void;
   onSetOutputColourspace: (next: OutputColourspace) => void;
@@ -155,6 +158,7 @@ export function StatusBar({
   atmosphere,
   planets,
   satellites,
+  meteors,
   projection,
   eyepiece,
   outputColourspace,
@@ -167,6 +171,7 @@ export function StatusBar({
   onSetAtmosphere,
   onSetPlanets,
   onSetSatellites,
+  onSetMeteors,
   onSetProjection,
   onSetEyepiece,
   onSetOutputColourspace,
@@ -456,6 +461,7 @@ export function StatusBar({
             atmosphere={atmosphere}
             planets={planets}
             satellites={satellites}
+            meteors={meteors}
             projection={projection}
             eyepiece={eyepiece}
             outputColourspace={outputColourspace}
@@ -466,6 +472,7 @@ export function StatusBar({
             onSetAtmosphere={onSetAtmosphere}
             onSetPlanets={onSetPlanets}
             onSetSatellites={onSetSatellites}
+            onSetMeteors={onSetMeteors}
             onSetProjection={onSetProjection}
             onSetEyepiece={onSetEyepiece}
             onSetOutputColourspace={onSetOutputColourspace}
@@ -640,6 +647,7 @@ type SettingsPanelProps = Pick<
   | "atmosphere"
   | "planets"
   | "satellites"
+  | "meteors"
   | "projection"
   | "eyepiece"
   | "outputColourspace"
@@ -650,6 +658,7 @@ type SettingsPanelProps = Pick<
   | "onSetAtmosphere"
   | "onSetPlanets"
   | "onSetSatellites"
+  | "onSetMeteors"
   | "onSetProjection"
   | "onSetEyepiece"
   | "onSetOutputColourspace"
@@ -665,6 +674,7 @@ function SettingsPanel({
   atmosphere,
   planets,
   satellites,
+  meteors,
   projection,
   eyepiece,
   outputColourspace,
@@ -675,6 +685,7 @@ function SettingsPanel({
   onSetAtmosphere,
   onSetPlanets,
   onSetSatellites,
+  onSetMeteors,
   onSetProjection,
   onSetEyepiece,
   onSetOutputColourspace,
@@ -743,6 +754,50 @@ function SettingsPanel({
                   onSetSatellites({
                     ...satellites,
                     exposureSeconds: Number.isFinite(v) && v >= 0 ? v : 0,
+                  });
+                }}
+                style={{ width: "5rem", marginLeft: "0.5rem" }}
+              />
+            </label>
+            <label style={checkboxRowStyle}>
+              <input
+                type="checkbox"
+                checked={meteors.enabled}
+                onChange={(e) => onSetMeteors({ ...meteors, enabled: e.target.checked })}
+                style={{ accentColor: "#8fb1ff" }}
+              />
+              {t("card.view.meteors")}
+            </label>
+            <label style={checkboxRowStyle}>
+              <span>{t("card.view.meteorSeed")}</span>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={meteors.seed}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  onSetMeteors({
+                    ...meteors,
+                    seed: Number.isFinite(v) && v >= 0 ? v : 0,
+                  });
+                }}
+                style={{ width: "6rem", marginLeft: "0.5rem" }}
+              />
+            </label>
+            <label style={checkboxRowStyle}>
+              <span>{t("card.view.meteorRateScale")}</span>
+              <input
+                type="number"
+                min={0}
+                max={1000}
+                step={0.5}
+                value={meteors.rateScale}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  onSetMeteors({
+                    ...meteors,
+                    rateScale: Number.isFinite(v) && v >= 0 ? v : 1.0,
                   });
                 }}
                 style={{ width: "5rem", marginLeft: "0.5rem" }}

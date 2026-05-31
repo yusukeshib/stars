@@ -84,6 +84,17 @@ export type SatellitesConfig = {
   exposureSeconds: number;
 };
 
+/** V-47 meteor-shower layer state. */
+export type MeteorsConfig = {
+  enabled: boolean;
+  /** Deterministic stream seed. */
+  seed: number;
+  /** Multiplier on the modelled observed rate (1.0 = physical expectation). */
+  rateScale: number;
+  /** Long-exposure integration window (seconds). */
+  windowSeconds: number;
+};
+
 /** Per-frame atmospheric scintillation state (V-24). */
 export type ScintillationConfig = {
   enabled: boolean;
@@ -177,6 +188,13 @@ export const DEFAULT_PLANETS_CONFIG: PlanetsConfig = {
 export const DEFAULT_SATELLITES_CONFIG: SatellitesConfig = {
   enabled: false,
   exposureSeconds: 0,
+};
+
+export const DEFAULT_METEORS_CONFIG: MeteorsConfig = {
+  enabled: false,
+  seed: 1,
+  rateScale: 1.0,
+  windowSeconds: 120.0,
 };
 
 export const DEFAULT_EYEPIECE_CONFIG: EyepieceConfig = {

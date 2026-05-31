@@ -6,8 +6,8 @@ use anyhow::Result;
 use astronomy::Observer;
 use clap::Parser;
 use renderer::{
-    Atmosphere, Camera, LightPollution, LocalView, OutputColourSpace, OverlayConfig, Renderer,
-    SatelliteLayer, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    Atmosphere, Camera, LightPollution, LocalView, MeteorLayer, OutputColourSpace, OverlayConfig,
+    Renderer, SatelliteLayer, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
     atmosphere_from_args, curated_satellite_layer, eyepiece_from_args, light_pollution_from_args,
@@ -233,6 +233,23 @@ struct Args {
     #[arg(long, default_value_t = 0.0)]
     satellite_exposure_seconds: f32,
 
+    /// Enable the V-47 meteor-shower layer (deterministic shower + sporadic
+    /// stream). Toggle at runtime with the `M` key.
+    #[arg(long)]
+    meteors: bool,
+
+    /// Deterministic meteor-stream seed.
+    #[arg(long, default_value_t = 1)]
+    meteor_seed: u64,
+
+    /// Multiplier on the modelled meteor rate (1.0 = physical expectation).
+    #[arg(long, default_value_t = 1.0)]
+    meteor_rate_scale: f32,
+
+    /// Meteor integration window (seconds) for the long-exposure still.
+    #[arg(long, default_value_t = 120.0)]
+    meteor_window_seconds: f32,
+
     /// Enable telescope eyepiece simulation. Supplying any telescope/eyepiece
     /// parameter also enables this mode.
     #[arg(long)]
@@ -368,6 +385,12 @@ fn main() -> Result<()> {
             scintillation,
             planets_enabled: !args.no_planets,
             satellites: curated_satellite_layer(args.satellites, args.satellite_exposure_seconds),
+            meteors: MeteorLayer {
+                enabled: args.meteors,
+                seed: args.meteor_seed,
+                rate_scale: args.meteor_rate_scale,
+                window_seconds: args.meteor_window_seconds,
+            },
             projection: args.projection.into(),
             viewpoint,
             external_viewpoint,
@@ -436,6 +459,7 @@ fn main() -> Result<()> {
         resolve_light_pollution(scene.light_pollution),
         scene.planets_enabled,
         scene.satellites.clone(),
+        scene.meteors.clone(),
         scene.projection,
         scene.viewpoint,
         scene.external_viewpoint,
@@ -502,6 +526,8 @@ struct App {
     /// V-55 artificial-satellite layer (curated TLEs are always loaded so the
     /// `L` key can toggle the layer on/off at runtime).
     satellites: SatelliteLayer,
+    /// V-47 meteor-shower layer (the `M` key toggles it at runtime).
+    meteors: MeteorLayer,
     projection: renderer::SkyProjection,
     viewpoint: renderer::SkyViewpoint,
     external_viewpoint: renderer::ExternalViewpoint,
@@ -583,6 +609,7 @@ impl App {
         light_pollution: LightPollution,
         planets_enabled: bool,
         satellites: SatelliteLayer,
+        meteors: MeteorLayer,
         projection: renderer::SkyProjection,
         viewpoint: renderer::SkyViewpoint,
         external_viewpoint: renderer::ExternalViewpoint,
@@ -610,6 +637,7 @@ impl App {
             light_pollution,
             planets_enabled,
             satellites,
+            meteors,
             projection,
             viewpoint,
             external_viewpoint,
@@ -743,6 +771,7 @@ impl ApplicationHandler for App {
         camera.light_pollution = self.light_pollution;
         camera.planets_enabled = self.planets_enabled;
         camera.satellites = self.satellites.clone();
+        camera.meteors = self.meteors.clone();
         camera.projection = self.projection;
         camera.viewpoint = self.viewpoint;
         camera.external_viewpoint = self.external_viewpoint;
@@ -925,6 +954,18 @@ impl ApplicationHandler for App {
                         Some(KeyCode::BracketLeft) => {
                             gpu.camera.eyepiece.ota_rotation_deg =
                                 (gpu.camera.eyepiece.ota_rotation_deg - 15.0).rem_euclid(360.0);
+                        }
+                        Some(KeyCode::KeyM) => {
+                            // V-47: toggle the meteor-shower layer.
+                            gpu.camera.meteors.enabled = !gpu.camera.meteors.enabled;
+                            log::info!(
+                                "meteors {}",
+                                if gpu.camera.meteors.enabled {
+                                    "on"
+                                } else {
+                                    "off"
+                                }
+                            );
                         }
                         Some(KeyCode::Space) => self.sky_clock.toggle_pause(),
                         Some(KeyCode::Digit1) => self.sky_clock.set_speed(CLOCK_SPEED_REALTIME),
