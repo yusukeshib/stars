@@ -121,9 +121,19 @@ Gaia DR3 ~1.8 billion rows): they are fetched on demand and recorded as
 (use the standard Gaia acknowledgement). Identifier mapping: HIP → primary
 `Hipparcos`; Tycho-2 → primary packed `Tycho2` (`(TYC1<<24)|(TYC2<<4)|TYC3`)
 with HIP cross-ID; Gaia → primary `GaiaDr3` source_id with optional HIP/HD
-cross-IDs. Gaia `G` is used directly as the display magnitude and `BP−RP` is
-mapped to an approximate `B−V` for display chroma only (the exact Riello et
-al. 2021 transforms are deferred with LOD streaming and host wiring).
+cross-IDs. Gaia Johnson **V** is derived from `G` and `BP−RP` via the exact
+Riello et al. 2021 (Gaia EDR3/DR3, A&A 649, A3, Table 5.7) `G−V` cubic, and
+`B−V` (display chroma only) from the Riello `G−V` / `G−I` relations mapped to
+`B−V` by the Caldwell et al. 1993 dwarf locus — Gaia publishes no Johnson-B
+transform (see `VALIDATION.md`). The full Gaia source streams through the
+content-addressable LOD / spatial-tile layer (`catalog::lod`); its tile
+archive is fetched / generated, not committed, so it adds no manifest row
+beyond the `gaia-dr3-i355` fetch service. The `catalog::lod` tests use
+synthetic in-memory / temp-dir fixtures (no committed bytes).
+
+Reference for the Gaia photometric transforms: Riello, M. et al. 2021, A&A
+649, A3 (Gaia EDR3 photometric content and validation); Caldwell, J. A. R.
+et al. 1993, SAAOC 15, 1 (dwarf colour-colour locus).
 
 ### Bright-star HIP↔HD cross-match anchor index (`L-17`)
 

@@ -10,15 +10,15 @@ use renderer::{
     LocalView, MeteorLayer, OutputColourSpace, SkyViewpoint, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
-    atmosphere_from_args, aurora_from_args, curated_comet_layer, curated_satellite_layer,
-    eyepiece_from_args, first_night_tour, hyg_catalog_snapshot, light_pollution_from_args,
+    atmosphere_from_args, aurora_from_args, catalog_snapshot_for, curated_comet_layer,
+    curated_satellite_layer, eyepiece_from_args, first_night_tour, light_pollution_from_args,
     load_session, overlay_config_from_args, parse_time_to_time_scales,
     render_scene_from_catalog_path, resolve_goto_query, save_session, scene_from_preset,
     scene_preset_infos, scintillation_from_args, viewpoint_from_args, AtmosphereOverrides,
-    AtmospherePresetArg, AuroraSeasonArg, CorrectionSnapshot, ExternalViewpointOverrides,
-    EyepieceOverrides, LightPollutionOverrides, OpticalDesign, OutputColourspaceArg, OverlayArg,
-    OverlayPaletteArg, ProjectionArg, RenderOptions, ScenePresetArg, ScintillationOverrides,
-    SessionScene, StarSession, ViewpointArg,
+    AtmospherePresetArg, AuroraSeasonArg, CatalogBackendArg, CorrectionSnapshot,
+    ExternalViewpointOverrides, EyepieceOverrides, LightPollutionOverrides, OpticalDesign,
+    OutputColourspaceArg, OverlayArg, OverlayPaletteArg, ProjectionArg, RenderOptions,
+    ScenePresetArg, ScintillationOverrides, SessionScene, StarSession, ViewpointArg,
 };
 
 /// Resolve the V-45 optical design from the `--telescope-design` /
@@ -136,9 +136,18 @@ struct Args {
     #[arg(short, long, default_value = "stars.png")]
     output: PathBuf,
 
-    /// Path to the HYG-format star catalog CSV.
+    /// Path to the star catalog CSV. Interpreted according to
+    /// `--catalog-backend` (HYG by default; the Hipparcos / Tycho-2 / Gaia DR3
+    /// backends expect the normalised CSV export from `scripts/fetch-*.sh`).
     #[arg(long, default_value = "crates/catalog/data/hyg_v42.csv")]
     catalog: PathBuf,
+
+    /// `L-17` catalog backend used to parse `--catalog`. HYG is the default;
+    /// `hipparcos` / `tycho2` / `gaia-dr3` preserve each survey's astrometric
+    /// zero-point. The chosen backend is recorded in the JSON session so a
+    /// reproduced render re-selects the same catalogue.
+    #[arg(long, value_enum, default_value_t = CatalogBackendArg::Hyg)]
+    catalog_backend: CatalogBackendArg,
 
     /// Overlay layers to draw. Comma-separated list, or pass --no-overlays to disable all.
     ///
@@ -568,7 +577,11 @@ fn main() -> Result<()> {
                     ota_rotation_deg: args.ota_rotation_deg,
                 },
             ),
-            catalog: hyg_catalog_snapshot(&args.catalog, args.limiting_magnitude),
+            catalog: catalog_snapshot_for(
+                args.catalog_backend.into(),
+                &args.catalog,
+                args.limiting_magnitude,
+            ),
             corrections: CorrectionSnapshot::for_scene(atmosphere),
             output_colourspace: OutputColourSpace::default(),
         }
