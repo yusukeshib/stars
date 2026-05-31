@@ -1016,12 +1016,26 @@ fallback (`astronomy::ephemeris`).
 - **Retrieval command:** `scripts/fetch-de440-subset.sh [OUT_BSP]`.
 - **Fields used:** geocentric / barycentric Chebyshev position (Type 2) and
   position+velocity (Type 3) for the Sun, Moon, and planet barycenters.
+- **No manifest row (by design):** `data/manifest.toml` rows exist only for
+  artifacts that are *committed* (`embedded` / `generated`) or are a *runtime
+  web service* (`runtime-service`). A fetched DE440 kernel is neither — it is a
+  user-supplied local binary — so it has no manifest row and `make
+  manifest-check` does not track it. (Adding one would require either
+  committing the multi-megabyte kernel or a new manifest `ArtifactKind`.)
 - **Known limitations / status:** the reader is implemented and unit-tested
-  against a synthetic, spec-accurate in-memory SPK. Wiring a fetched DE440
-  kernel into the apparent-place pipeline and the JPL Horizons sub-arcsecond
-  cross-check are **deferred** (they require the external kernel); see
-  `ROADMAP.md` `L-06`. Until then the renderer's Sun/Moon/planet output is the
-  VSOP87 / ELP2000 visual tier.
+  against a synthetic, spec-accurate in-memory SPK, **and** it is now wired
+  into the apparent Sun/Moon/planet pipeline behind the `astronomy` crate's
+  off-by-default `de440` cargo feature
+  (`astronomy::apparent_{sun,moon,planet}_de440[_topocentric]`): a light-time /
+  planetary-aberration loop, first-order annual aberration, and the IAU
+  2006/2000B precession-nutation rotation into the mean-equator-of-date frame.
+  The default build and the WASM build keep the analytic VSOP87 / ELP2000
+  series. **Still deferred** (require the external kernel): driving the
+  renderer hosts from a fetched kernel and the JPL Horizons sub-arcsecond
+  cross-check, scaffolded as the `#[ignore]`d
+  `de440_cross_check_matches_analytic_series` test (run with
+  `STARS_DE440_KERNEL=… cargo test -p astronomy --features de440 -- --ignored`).
+  See `ROADMAP.md` `L-06`.
 
 ## Future data sources to document
 

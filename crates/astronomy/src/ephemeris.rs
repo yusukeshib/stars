@@ -256,6 +256,44 @@ pub(crate) fn ra_dec_from_equatorial_vector(v: [f64; 3]) -> (f64, f64, f64) {
     (right_ascension_rad, declination_rad, distance)
 }
 
+/// Lunar illuminated fraction, Sun-Moon phase angle, and Earth-umbra coverage
+/// from the geometry of the Moon and Sun directions.
+///
+/// Shared by the analytic [`apparent_moon`] path and the feature-gated DE440
+/// path so both produce an identical phase / eclipse aid (V-36) from whichever
+/// ephemeris source supplied the directions. The umbra is the V-51a pair-wise
+/// obscuration of the Moon disk by Earth's shadow disk centred on the
+/// antisolar point.
+fn moon_phase_and_shadow(
+    moon_dir: [f64; 3],
+    moon_angular_radius_rad: f64,
+    moon_distance_km: f64,
+    sun_dir: [f64; 3],
+    sun_angular_radius_rad: f64,
+) -> (f64, f64, f64) {
+    let elongation = angular_separation_f64(moon_dir, sun_dir);
+    let phase_angle_rad = (std::f64::consts::PI - elongation).clamp(0.0, std::f64::consts::PI);
+    let illuminated_fraction = 0.5 * (1.0 + phase_angle_rad.cos());
+
+    let anti_sun = [-sun_dir[0], -sun_dir[1], -sun_dir[2]];
+    let umbra_radius =
+        (EARTH_EQUATORIAL_RADIUS_KM / moon_distance_km).asin() - sun_angular_radius_rad;
+    let earth_shadow_fraction = if umbra_radius > 0.0 {
+        let umbra = ApparentDisk::new(
+            Vec3::new(anti_sun[0] as f32, anti_sun[1] as f32, anti_sun[2] as f32),
+            umbra_radius,
+        );
+        let moon_disk = ApparentDisk::new(
+            Vec3::new(moon_dir[0] as f32, moon_dir[1] as f32, moon_dir[2] as f32),
+            moon_angular_radius_rad,
+        );
+        obscuration_fraction(umbra, moon_disk) as f64
+    } else {
+        0.0
+    };
+    (illuminated_fraction, phase_angle_rad, earth_shadow_fraction)
+}
+
 fn angular_separation_f64(a: [f64; 3], b: [f64; 3]) -> f64 {
     let ad = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
     let bd = (b[0] * b[0] + b[1] * b[1] + b[2] * b[2]).sqrt();
@@ -554,32 +592,13 @@ pub fn apparent_moon(julian_date: f64) -> MoonApparent {
     let moon_dir = equatorial_unit_vector_f64(right_ascension_rad, declination_rad);
     let sun = apparent_sun(julian_date);
     let sun_dir = equatorial_unit_vector_f64(sun.right_ascension_rad, sun.declination_rad);
-    let elongation = angular_separation_f64(moon_dir, sun_dir);
-    let phase_angle_rad = (std::f64::consts::PI - elongation).clamp(0.0, std::f64::consts::PI);
-    let illuminated_fraction = 0.5 * (1.0 + phase_angle_rad.cos());
-
-    // Visual lunar-eclipse aid (V-36): the Earth's umbra at the Moon's
-    // distance is an apparent disk centred on the antisolar point with
-    // angular radius equal to the geocentric Earth radius minus the
-    // Sun's apparent radius, both expressed as angles at one lunar
-    // distance. Reuse the V-51a pair-wise obscuration helper so the
-    // umbra-occults-Moon geometry collapses into the same path used by
-    // every other eclipse / occultation pair.
-    let anti_sun = [-sun_dir[0], -sun_dir[1], -sun_dir[2]];
-    let umbra_radius = (EARTH_EQUATORIAL_RADIUS_KM / distance_km).asin() - sun.angular_radius_rad;
-    let earth_shadow_fraction = if umbra_radius > 0.0 {
-        let umbra = ApparentDisk::new(
-            Vec3::new(anti_sun[0] as f32, anti_sun[1] as f32, anti_sun[2] as f32),
-            umbra_radius,
-        );
-        let moon_disk = ApparentDisk::new(
-            Vec3::new(moon_dir[0] as f32, moon_dir[1] as f32, moon_dir[2] as f32),
-            angular_radius_rad,
-        );
-        obscuration_fraction(umbra, moon_disk) as f64
-    } else {
-        0.0
-    };
+    let (illuminated_fraction, phase_angle_rad, earth_shadow_fraction) = moon_phase_and_shadow(
+        moon_dir,
+        angular_radius_rad,
+        distance_km,
+        sun_dir,
+        sun.angular_radius_rad,
+    );
 
     MoonApparent {
         right_ascension_rad,
@@ -619,6 +638,320 @@ pub fn apparent_moon_topocentric(observer: Observer) -> MoonApparent {
         earth_shadow_fraction: geo.earth_shadow_fraction,
     }
 }
+
+// ---------------------------------------------------------------------------
+// L-06: DE440 SPK-kernel apparent-place path (feature-gated).
+//
+// When the `de440` feature is enabled, callers can load a JPL DE440 / DE441
+// DAF/SPK kernel through [`crate::SpkKernel`] and drive the same
+// `SunApparent` / `MoonApparent` / `PlanetApparent` outputs from
+// publication-grade Chebyshev states instead of the analytic VSOP87 / ELP2000
+// series. The default build and the WASM build keep the analytic series (DE440
+// kernels are large external binaries; see `scripts/fetch-de440-subset.sh`).
+//
+// The pipeline mirrors the analytic path: a light-time (planetary-aberration)
+// iteration on the geocentric vector, first-order annual aberration, and an
+// IAU 2006/2000B precession-nutation rotation into the mean-equator-of-date
+// frame the rest of the renderer consumes, so DE440 bodies land in the same
+// frame as the analytic Sun/Moon/planets and the precessed star catalogue.
+// ---------------------------------------------------------------------------
+#[cfg(feature = "de440")]
+mod de440 {
+    use super::*;
+    use crate::corrections::{
+        annual_aberration, earth_velocity_over_c_j2000, mat_mul_vec, precession_nutation_matrix,
+    };
+    use crate::spk::{naif, SpkError, SpkKernel};
+
+    /// Speed of light in km/day (IAU 2009 exact c = 299792.458 km/s), used for
+    /// the light-time / planetary-aberration iteration.
+    const SPEED_OF_LIGHT_KM_PER_DAY: f64 = 299_792.458 * 86_400.0;
+
+    impl Planet {
+        /// NAIF body id used to query a DE440 kernel. The giant planets use
+        /// their barycenter (guaranteed present in the main DE440 kernel; the
+        /// planet-center wobble is sub-naked-eye); the inner planets'
+        /// barycenters coincide with their centers.
+        fn naif_id(self) -> i32 {
+            match self {
+                Self::Mercury => naif::MERCURY_BARYCENTER,
+                Self::Venus => naif::VENUS_BARYCENTER,
+                Self::Mars => naif::MARS_BARYCENTER,
+                Self::Jupiter => naif::JUPITER_BARYCENTER,
+                Self::Saturn => naif::SATURN_BARYCENTER,
+                Self::Uranus => naif::URANUS_BARYCENTER,
+                Self::Neptune => naif::NEPTUNE_BARYCENTER,
+            }
+        }
+    }
+
+    fn norm(v: [f64; 3]) -> f64 {
+        (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+    }
+
+    /// Light-time-corrected (astrometric) geocentric position of `target` in
+    /// the kernel's ICRF/J2000 frame, in kilometres. The planetary-aberration
+    /// loop evaluates the target at the retarded epoch `t - distance/c` while
+    /// the Earth stays at the observation epoch, matching the analytic
+    /// `geocent_apprnt_*` path.
+    fn astrometric_geocentric_km(
+        kernel: &SpkKernel,
+        target: i32,
+        jd_tdb: f64,
+    ) -> Result<[f64; 3], SpkError> {
+        let earth = kernel.position_km(naif::EARTH, naif::SOLAR_SYSTEM_BARYCENTER, jd_tdb)?;
+        let mut rel = {
+            let t = kernel.position_km(target, naif::SOLAR_SYSTEM_BARYCENTER, jd_tdb)?;
+            [t[0] - earth[0], t[1] - earth[1], t[2] - earth[2]]
+        };
+        // Three iterations converge planetary light time well below the µas
+        // level for every solar-system body inside the kernel coverage.
+        for _ in 0..3 {
+            let tau_days = norm(rel) / SPEED_OF_LIGHT_KM_PER_DAY;
+            let t = kernel.position_km(target, naif::SOLAR_SYSTEM_BARYCENTER, jd_tdb - tau_days)?;
+            rel = [t[0] - earth[0], t[1] - earth[1], t[2] - earth[2]];
+        }
+        Ok(rel)
+    }
+
+    /// Rotate an astrometric J2000 geocentric vector into the apparent
+    /// mean-equator-of-date frame: annual aberration in J2000, then the
+    /// IAU 2006 precession + IAU 2000B nutation matrix. Returns the unit
+    /// of-date direction and the (frame-invariant) distance in km. `jd_tt`
+    /// and `jd_tdb` differ by < 2 ms, negligible for the precession matrix.
+    fn apparent_of_date(geo_j2000_km: [f64; 3], jd_tdb: f64, jd_tt: f64) -> ([f64; 3], f64) {
+        let distance_km = norm(geo_j2000_km);
+        let inv = 1.0 / distance_km.max(f64::MIN_POSITIVE);
+        let dir = [
+            geo_j2000_km[0] * inv,
+            geo_j2000_km[1] * inv,
+            geo_j2000_km[2] * inv,
+        ];
+        let beta = earth_velocity_over_c_j2000(jd_tdb);
+        let aberrated = annual_aberration(dir, beta);
+        let of_date = mat_mul_vec(precession_nutation_matrix(jd_tt), aberrated);
+        (of_date, distance_km)
+    }
+
+    /// Mean-equator-of-date equatorial unit vector → (ecliptic longitude,
+    /// ecliptic latitude), the inverse of [`ecliptic_to_equatorial_vector`].
+    fn equatorial_to_ecliptic(v: [f64; 3], obliquity_rad: f64) -> (f64, f64) {
+        let (sin_eps, cos_eps) = obliquity_rad.sin_cos();
+        let x = v[0];
+        let y = v[1] * cos_eps + v[2] * sin_eps;
+        let z = -v[1] * sin_eps + v[2] * cos_eps;
+        let r = (x * x + y * y + z * z).sqrt().max(f64::MIN_POSITIVE);
+        let lon = y.atan2(x).rem_euclid(std::f64::consts::TAU);
+        let lat = (z / r).clamp(-1.0, 1.0).asin();
+        (lon, lat)
+    }
+
+    /// Apparent geocentric Sun from a DE440 kernel (TDB Julian Date).
+    pub fn apparent_sun_de440(kernel: &SpkKernel, jd_tdb: f64) -> Result<SunApparent, SpkError> {
+        let geo = astrometric_geocentric_km(kernel, naif::SUN, jd_tdb)?;
+        let (of_date, distance_km) = apparent_of_date(geo, jd_tdb, jd_tdb);
+        let (right_ascension_rad, declination_rad, _) = ra_dec_from_equatorial_vector(of_date);
+        let (ecliptic_longitude_rad, _) =
+            equatorial_to_ecliptic(of_date, mean_obliquity_rad(jd_tdb));
+        Ok(SunApparent {
+            right_ascension_rad,
+            declination_rad,
+            ecliptic_longitude_rad,
+            distance_au: distance_km / ASTRONOMICAL_UNIT_KM,
+            angular_radius_rad: (SOLAR_RADIUS_KM / distance_km).asin(),
+        })
+    }
+
+    /// Apparent geocentric Moon from a DE440 kernel (TDB Julian Date).
+    pub fn apparent_moon_de440(kernel: &SpkKernel, jd_tdb: f64) -> Result<MoonApparent, SpkError> {
+        let geo = astrometric_geocentric_km(kernel, naif::MOON, jd_tdb)?;
+        let (of_date, distance_km) = apparent_of_date(geo, jd_tdb, jd_tdb);
+        let (right_ascension_rad, declination_rad, _) = ra_dec_from_equatorial_vector(of_date);
+        let angular_radius_rad = (LUNAR_RADIUS_KM / distance_km).asin();
+        let sun = apparent_sun_de440(kernel, jd_tdb)?;
+        let moon_dir = equatorial_unit_vector_f64(right_ascension_rad, declination_rad);
+        let sun_dir = equatorial_unit_vector_f64(sun.right_ascension_rad, sun.declination_rad);
+        let (illuminated_fraction, phase_angle_rad, earth_shadow_fraction) = moon_phase_and_shadow(
+            moon_dir,
+            angular_radius_rad,
+            distance_km,
+            sun_dir,
+            sun.angular_radius_rad,
+        );
+        Ok(MoonApparent {
+            right_ascension_rad,
+            declination_rad,
+            distance_km,
+            angular_radius_rad,
+            illuminated_fraction,
+            phase_angle_rad,
+            earth_shadow_fraction,
+        })
+    }
+
+    /// Apparent geocentric planet from a DE440 kernel (TDB Julian Date).
+    pub fn apparent_planet_de440(
+        kernel: &SpkKernel,
+        planet: Planet,
+        jd_tdb: f64,
+    ) -> Result<PlanetApparent, SpkError> {
+        let id = planet.naif_id();
+        let geo = astrometric_geocentric_km(kernel, id, jd_tdb)?;
+        let (of_date, distance_km) = apparent_of_date(geo, jd_tdb, jd_tdb);
+        let (right_ascension_rad, declination_rad, _) = ra_dec_from_equatorial_vector(of_date);
+        let (ecliptic_longitude_rad, ecliptic_latitude_rad) =
+            equatorial_to_ecliptic(of_date, mean_obliquity_rad(jd_tdb));
+        let distance_au = distance_km / ASTRONOMICAL_UNIT_KM;
+
+        // Phase / magnitude geometry uses geometric (non-light-time)
+        // heliocentric and Earth-Sun distances, matching the analytic path.
+        let heliocentric_distance_au =
+            norm(kernel.position_km(id, naif::SUN, jd_tdb)?) / ASTRONOMICAL_UNIT_KM;
+        let earth_sun_distance_au =
+            norm(kernel.position_km(naif::EARTH, naif::SUN, jd_tdb)?) / ASTRONOMICAL_UNIT_KM;
+        let cos_phase = ((heliocentric_distance_au * heliocentric_distance_au)
+            + (distance_au * distance_au)
+            - (earth_sun_distance_au * earth_sun_distance_au))
+            / (2.0 * heliocentric_distance_au * distance_au);
+        let phase_angle_rad = cos_phase.clamp(-1.0, 1.0).acos();
+        let illuminated_fraction = 0.5 * (1.0 + phase_angle_rad.cos());
+        let phase_deg = phase_angle_rad.to_degrees();
+        let astro_planet = planet.astro();
+        let magnitude = match planet {
+            Planet::Saturn => -8.88 + 5.0 * (heliocentric_distance_au * distance_au).log10(),
+            _ => astro::planet::apprnt_mag_84(
+                &astro_planet,
+                phase_deg,
+                distance_au,
+                heliocentric_distance_au,
+            )
+            .unwrap_or(6.0),
+        };
+
+        Ok(PlanetApparent {
+            planet,
+            right_ascension_rad,
+            declination_rad,
+            ecliptic_longitude_rad,
+            ecliptic_latitude_rad,
+            distance_au,
+            heliocentric_distance_au,
+            angular_radius_rad: astro::planet::semidiameter(&astro_planet, distance_au)
+                .unwrap_or(0.0),
+            illuminated_fraction,
+            phase_angle_rad,
+            magnitude,
+        })
+    }
+
+    /// Apply the observer's WGS84 topocentric parallax to an of-date apparent
+    /// place (km distance). The observer vector is in the equator of date, the
+    /// same frame the apparent direction now lives in.
+    fn apply_topocentric(
+        observer: Observer,
+        right_ascension_rad: f64,
+        declination_rad: f64,
+        distance_km: f64,
+    ) -> (f64, f64, f64) {
+        let dir = equatorial_unit_vector_f64(right_ascension_rad, declination_rad);
+        let observer_km = observer_equatorial_position_km(observer);
+        let topo = [
+            dir[0] * distance_km - observer_km[0],
+            dir[1] * distance_km - observer_km[1],
+            dir[2] * distance_km - observer_km[2],
+        ];
+        ra_dec_from_equatorial_vector(topo)
+    }
+
+    /// Apparent topocentric Sun from a DE440 kernel.
+    pub fn apparent_sun_de440_topocentric(
+        kernel: &SpkKernel,
+        observer: Observer,
+    ) -> Result<SunApparent, SpkError> {
+        let geo = apparent_sun_de440(kernel, observer.time.jd_tdb)?;
+        let (right_ascension_rad, declination_rad, topo_km) = apply_topocentric(
+            observer,
+            geo.right_ascension_rad,
+            geo.declination_rad,
+            geo.distance_au * ASTRONOMICAL_UNIT_KM,
+        );
+        Ok(SunApparent {
+            right_ascension_rad,
+            declination_rad,
+            ecliptic_longitude_rad: geo.ecliptic_longitude_rad,
+            distance_au: topo_km / ASTRONOMICAL_UNIT_KM,
+            angular_radius_rad: (SOLAR_RADIUS_KM / topo_km).asin(),
+        })
+    }
+
+    /// Apparent topocentric Moon from a DE440 kernel.
+    pub fn apparent_moon_de440_topocentric(
+        kernel: &SpkKernel,
+        observer: Observer,
+    ) -> Result<MoonApparent, SpkError> {
+        let geo = apparent_moon_de440(kernel, observer.time.jd_tdb)?;
+        let (right_ascension_rad, declination_rad, distance_km) = apply_topocentric(
+            observer,
+            geo.right_ascension_rad,
+            geo.declination_rad,
+            geo.distance_km,
+        );
+        Ok(MoonApparent {
+            right_ascension_rad,
+            declination_rad,
+            distance_km,
+            angular_radius_rad: (LUNAR_RADIUS_KM / distance_km).asin(),
+            illuminated_fraction: geo.illuminated_fraction,
+            phase_angle_rad: geo.phase_angle_rad,
+            earth_shadow_fraction: geo.earth_shadow_fraction,
+        })
+    }
+
+    /// Apparent topocentric planet from a DE440 kernel.
+    pub fn apparent_planet_de440_topocentric(
+        kernel: &SpkKernel,
+        observer: Observer,
+        planet: Planet,
+    ) -> Result<PlanetApparent, SpkError> {
+        let geo = apparent_planet_de440(kernel, planet, observer.time.jd_tdb)?;
+        let (right_ascension_rad, declination_rad, topo_km) = apply_topocentric(
+            observer,
+            geo.right_ascension_rad,
+            geo.declination_rad,
+            geo.distance_au * ASTRONOMICAL_UNIT_KM,
+        );
+        let distance_au = topo_km / ASTRONOMICAL_UNIT_KM;
+        Ok(PlanetApparent {
+            right_ascension_rad,
+            declination_rad,
+            distance_au,
+            angular_radius_rad: astro::planet::semidiameter(&planet.astro(), distance_au)
+                .unwrap_or(0.0),
+            ..geo
+        })
+    }
+
+    /// Apparent topocentric states for all seven rendered planets from a DE440
+    /// kernel, mirroring [`apparent_planets_topocentric`] for the analytic
+    /// path so hosts can swap sources behind one call.
+    pub fn apparent_planets_de440_topocentric(
+        kernel: &SpkKernel,
+        observer: Observer,
+    ) -> Result<[PlanetApparent; 7], SpkError> {
+        let mut out: [Option<PlanetApparent>; 7] = [None; 7];
+        for (slot, planet) in out.iter_mut().zip(Planet::ALL) {
+            *slot = Some(apparent_planet_de440_topocentric(kernel, observer, planet)?);
+        }
+        Ok(out.map(|p| p.expect("every planet filled")))
+    }
+}
+
+#[cfg(feature = "de440")]
+pub use de440::{
+    apparent_moon_de440, apparent_moon_de440_topocentric, apparent_planet_de440,
+    apparent_planet_de440_topocentric, apparent_planets_de440_topocentric, apparent_sun_de440,
+    apparent_sun_de440_topocentric,
+};
 
 #[cfg(test)]
 mod tests {
@@ -825,5 +1158,89 @@ mod tests {
         let geo = apparent_saturn_ring(observer.time.jd_tdb);
         let topo = apparent_saturn_ring_topocentric(observer);
         assert!((geo.sub_earth_lat_rad - topo.sub_earth_lat_rad).abs() < 1e-9);
+    }
+}
+
+// L-06 DE440 cross-check scaffold. Compiled only with `--features de440` and
+// `#[ignore]`d so `make ci` (default features, no kernel) is unaffected. Run
+// the cross-check explicitly once a DE440 kernel has been fetched:
+//
+//   STARS_DE440_KERNEL=data/de440s.bsp \
+//     cargo test -p astronomy --features de440 -- --ignored de440_cross_check
+//
+// The kernel itself is a 32–110 MB external binary that is NOT committed; see
+// `scripts/fetch-de440-subset.sh` and `DATA_SOURCES.md`.
+#[cfg(all(test, feature = "de440"))]
+mod de440_cross_check {
+    use super::*;
+    use crate::spk::SpkKernel;
+
+    /// Load the DE440 kernel named by `STARS_DE440_KERNEL`. Panics with a clear
+    /// message if unset/unreadable — these tests are `#[ignore]`d, so they only
+    /// run when the operator has deliberately opted in with a fetched kernel.
+    fn load_kernel() -> SpkKernel {
+        let path = std::env::var("STARS_DE440_KERNEL").expect(
+            "set STARS_DE440_KERNEL to a fetched DE440 .bsp (scripts/fetch-de440-subset.sh)",
+        );
+        let bytes =
+            std::fs::read(&path).unwrap_or_else(|e| panic!("reading DE440 kernel {path:?}: {e}"));
+        SpkKernel::from_bytes(&bytes).expect("parse DE440 kernel")
+    }
+
+    fn sep_arcsec(a_ra: f64, a_dec: f64, b_ra: f64, b_dec: f64) -> f64 {
+        let a = equatorial_unit_vector_f64(a_ra, a_dec);
+        let b = equatorial_unit_vector_f64(b_ra, b_dec);
+        (a[0] * b[0] + a[1] * b[1] + a[2] * b[2])
+            .clamp(-1.0, 1.0)
+            .acos()
+            .to_degrees()
+            * 3600.0
+    }
+
+    // The DE440 apparent path must agree with the analytic VSOP87 / ELP2000
+    // series within the analytic series' own truncation budget. This is a real,
+    // non-fabricated cross-check that validates the kernel wiring (parser →
+    // light-time → aberration → precession/nutation) end-to-end. Tightening it
+    // to the < 1″ topocentric JPL Horizons gate requires pinning Horizons
+    // reference RA/Dec constants from an actual Horizons query against the same
+    // fetched kernel epoch; that is the remaining step tracked in ROADMAP L-06.
+    #[test]
+    #[ignore = "requires a fetched DE440 kernel via STARS_DE440_KERNEL"]
+    fn de440_cross_check_matches_analytic_series() {
+        let kernel = load_kernel();
+        // 2024-01-01 00:00 TDB, comfortably inside de440s coverage.
+        let jd_tdb = 2_460_310.5;
+
+        let sun_de440 = apparent_sun_de440(&kernel, jd_tdb).expect("DE440 sun");
+        let sun_vsop = apparent_sun(jd_tdb);
+        let sun_sep = sep_arcsec(
+            sun_de440.right_ascension_rad,
+            sun_de440.declination_rad,
+            sun_vsop.right_ascension_rad,
+            sun_vsop.declination_rad,
+        );
+        assert!(sun_sep < 30.0, "Sun DE440 vs VSOP87 = {sun_sep}″");
+
+        let moon_de440 = apparent_moon_de440(&kernel, jd_tdb).expect("DE440 moon");
+        let moon_elp = apparent_moon(jd_tdb);
+        let moon_sep = sep_arcsec(
+            moon_de440.right_ascension_rad,
+            moon_de440.declination_rad,
+            moon_elp.right_ascension_rad,
+            moon_elp.declination_rad,
+        );
+        // The truncated ELP2000 series is good to ~tens of arcsec; DE440 is the
+        // reference, so allow the analytic series' documented spread.
+        assert!(moon_sep < 60.0, "Moon DE440 vs ELP2000 = {moon_sep}″");
+
+        let mars_de440 = apparent_planet_de440(&kernel, Planet::Mars, jd_tdb).expect("DE440 mars");
+        let mars_vsop = apparent_planet(Planet::Mars, jd_tdb);
+        let mars_sep = sep_arcsec(
+            mars_de440.right_ascension_rad,
+            mars_de440.declination_rad,
+            mars_vsop.right_ascension_rad,
+            mars_vsop.declination_rad,
+        );
+        assert!(mars_sep < 30.0, "Mars DE440 vs VSOP87D = {mars_sep}″");
     }
 }

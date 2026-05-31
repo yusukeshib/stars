@@ -152,7 +152,8 @@ web host controls. With both shipped, every `V-51`–`V-56` item is now done.
 The Library track is at "amateur-grade is shipped" — every numbered item has
 now landed; the only open work is one documented follow-up inside an
 otherwise-shipped item: DE440-class ephemerides (`L-06`: the SPK Chebyshev
-kernel reader has shipped; kernel ingest + Horizons cross-check remain).
+kernel reader and the off-by-default `de440`-feature apparent-place wiring
+have shipped; kernel-driven renderer hosts + Horizons cross-check remain).
 Large-catalog ingest (`L-17`) is now complete: the Hipparcos / Tycho-2 /
 Gaia DR3 CSV backends + cross-match shipped first, and the follow-up has
 landed too — Gaia content-addressable LOD / spatial-tile streaming, the exact
@@ -256,7 +257,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-03` | Compact nutation | ✅ |
 | `L-04` | Annual aberration | ✅ |
 | `L-05` | Stellar proper motion | ✅ |
-| `L-06` | DE440 / VSOP87 ephemeris upgrade (SPK Chebyshev reader ✅; kernel ingest + Horizons cross-check ⬜) | ◑ |
+| `L-06` | DE440 / VSOP87 ephemeris upgrade (SPK reader + `de440`-feature apparent-place wiring ✅; kernel-driven hosts + Horizons cross-check ⬜) | ◑ |
 | `L-07` | Rise / transit / set tables | ✅ |
 | `L-08` | Twilight indicators | ✅ |
 | `L-09` | Observation-planning polish | ✅ |
@@ -2953,7 +2954,7 @@ vs. SIMBAD.
 
 ---
 
-### `L-06` DE440 / VSOP87 ephemeris upgrade — ◑ (SPK Chebyshev reader shipped; kernel ingest + Horizons cross-check deferred)
+### `L-06` DE440 / VSOP87 ephemeris upgrade — ◑ (SPK reader + `de440`-feature apparent-place wiring shipped; kernel-driven hosts + Horizons cross-check deferred)
 
 **Item.** Move Sun / Moon / planet states from the current VSOP87 /
 ELP2000 visual-quality models to publication-quality JPL DE440 Chebyshev
@@ -3005,13 +3006,36 @@ little/big-endian, multi-segment chaining, missing-coverage errors). The
 default Sun/Moon/planet path and the WASM build keep the analytic VSOP87 /
 ELP2000 series unchanged.
 
-**Deferred (why ◑, not ✅).** Committing or fetching an actual DE440 kernel
-(a 32–110 MB binary, documented in `DATA_SOURCES.md` +
-`scripts/fetch-de440-subset.sh`) and wiring it through the apparent-place
-pipeline, plus the JPL Horizons sub-arcsecond cross-check, are not done:
-both require the external kernel and so are out of scope for the offline
-crate build. The row stays ◑ until a fetched kernel drives
-`apparent_sun/moon/planet` and the Horizons comparison is pinned.
+**Shipped (this iteration, `de440` feature).** The SPK reader is now wired
+into the apparent-place pipeline behind the `astronomy` crate's
+off-by-default `de440` cargo feature. `apparent_sun_de440`,
+`apparent_moon_de440`, `apparent_planet_de440` and their `_topocentric`
+variants (re-exported from the crate root) take an `SpkKernel` and reproduce
+the analytic structs (`SunApparent` / `MoonApparent` / `PlanetApparent`) via
+a light-time / planetary-aberration loop, first-order annual aberration
+(`corrections::annual_aberration`), and the IAU 2006/2000B precession-nutation
+rotation into the mean-equator-of-date frame — so DE440 bodies land in the
+same frame as the analytic series and the precessed star catalogue. The Moon
+phase / Earth-umbra aid (`V-36`) is now a shared helper used by both paths.
+The default build and the WASM build keep the analytic VSOP87 / ELP2000
+series unchanged. `scripts/fetch-de440-subset.sh` (already present) fetches a
+slim `de440s.bsp`, documented in `DATA_SOURCES.md`; the precision tier and
+fallback are recorded in `docs/standards-compliance.md`.
+
+**Deferred (why ◑, not ✅).** Two steps still require the actual 32–110 MB
+DE440 kernel and so are out of scope for the offline crate build:
+(1) switching the CLI / viewer renderer **hosts** to the `de440` feature so a
+fetched kernel actually drives on-screen Sun/Moon/planet placement (today the
+feature is library-only), and (2) the JPL Horizons sub-arcsecond cross-check.
+The cross-check is scaffolded as the `#[ignore]`d
+`de440_cross_check_matches_analytic_series` test
+(`STARS_DE440_KERNEL=… cargo test -p astronomy --features de440 -- --ignored`),
+which validates DE440 against the analytic series; tightening it to pinned
+Horizons RA/Dec constants is the remaining numerical step. No
+`data/manifest.toml` row is added: the kernel is neither committed nor a
+runtime web service, so it falls outside the manifest's tracked-artifact
+invariant (see `DATA_SOURCES.md`). The row stays ◑ until a fetched kernel
+drives the hosts and the Horizons comparison is pinned.
 
 ---
 
