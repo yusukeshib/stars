@@ -187,6 +187,12 @@ const en: Dictionary = {
   "card.planning.rise": "Rise",
   "card.planning.transit": "Transit",
   "card.planning.set": "Set",
+  "card.planning.recommended": "Tonight's recommended",
+  "card.planning.exportIcal": "Export .ics",
+  "card.planning.favourite": "Favourite",
+  "card.planning.score": "Visibility score (0–100)",
+  "card.planning.maxAltitude": "Max altitude tonight",
+  "card.planning.moonImpact": "Moon sky-brightness impact (ΔV mag/arcsec²)",
 
   // Overlay groups (web UI only)
   "overlayGroup.referenceGeometry.title": "Reference geometry",
@@ -382,6 +388,12 @@ const ja: Dictionary = {
   "card.planning.rise": "出",
   "card.planning.transit": "南中",
   "card.planning.set": "入り",
+  "card.planning.recommended": "今夜のおすすめ",
+  "card.planning.exportIcal": ".ics 出力",
+  "card.planning.favourite": "お気に入り",
+  "card.planning.score": "可視スコア（0–100）",
+  "card.planning.maxAltitude": "今夜の最高高度",
+  "card.planning.moonImpact": "月光による空の明るさへの影響（ΔV mag/arcsec²）",
 
   "overlayGroup.referenceGeometry.title": "参照幾何",
   "overlayGroup.referenceGeometry.description":

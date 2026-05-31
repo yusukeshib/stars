@@ -52,11 +52,15 @@ pub use occultation::{
 pub use planning::{
     active_occluders, body_altitude_rad, body_equatorial, evening_plan, evening_window_jd_utc,
     find_lunar_occultation, find_mutual_planetary_occultation, find_planet_transit,
-    find_solar_eclipse, jd_utc_to_unix_ms, rise_transit_set, solar_eclipse_state, twilight_band,
-    twilight_indicators, EveningPlan, LunarOccultationEvent, LunarOccultedBody,
-    MutualPlanetaryOccultationEvent, PlanetTransitEvent, PlanningBody, RiseTransitSet,
-    SolarEclipseEvent, SolarEclipseKind, SolarEclipseState, TwilightBand, TwilightIndicator,
-    DEFAULT_PLANNING_BODIES,
+    find_solar_eclipse, icalendar_for_targets, jd_utc_to_unix_ms, moon_impact,
+    moon_sky_brightness_nanolamberts, nanolamberts_from_v_mag, planning_targets_from_bodies,
+    rank_targets, rise_transit_set, solar_eclipse_state, twilight_band, twilight_indicators,
+    v_mag_from_nanolamberts, visibility_score, EveningPlan, LunarOccultationEvent,
+    LunarOccultedBody, MoonImpact, MutualPlanetaryOccultationEvent, PlanetTransitEvent,
+    PlanningBody, PlanningTarget, RiseTransitSet, ScoredTarget, SolarEclipseEvent,
+    SolarEclipseKind, SolarEclipseState, TwilightBand, TwilightIndicator, VisibilityScore,
+    DARK_SKY_ZENITH_V_MAG, DEFAULT_PLANNING_BODIES, KS_V_EXTINCTION_COEFF,
+    MIN_OBSERVABLE_ALTITUDE_DEG,
 };
 pub use satellites::{
     apparent_satellites, parse_tle_set, Satellite, SatelliteApparent, SatelliteError, Tle,

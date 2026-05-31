@@ -35,6 +35,8 @@ declare module "stars-web" {
       upZ: number,
     ): void;
     planning_table_json(): string;
+    planning_recommended_json(): string;
+    planning_ical(): string;
     set_atmosphere_config(
       enabled: boolean,
       preset: string,
