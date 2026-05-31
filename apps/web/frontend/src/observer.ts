@@ -95,6 +95,29 @@ export type MeteorsConfig = {
   windowSeconds: number;
 };
 
+// V-48 aurora layer. Season spellings match the Rust `AuroraSeasonArg`
+// kebab-case serde / `set_aurora` season argument.
+export const AURORA_SEASONS = ["winter", "equinox", "summer"] as const;
+export type AuroraSeason = (typeof AURORA_SEASONS)[number];
+
+/** V-48 aurora-layer state. */
+export type AuroraConfig = {
+  enabled: boolean;
+  /** Planetary Kp index (0..9) driving oval position and brightness. */
+  kp: number;
+  season: AuroraSeason;
+};
+
+export const DEFAULT_AURORA_CONFIG: AuroraConfig = {
+  enabled: false,
+  kp: 0,
+  season: "equinox",
+};
+
+export const isAuroraSeason = (s: unknown): s is AuroraSeason =>
+  typeof s === "string" && (AURORA_SEASONS as readonly string[]).includes(s);
+
+
 /** Per-frame atmospheric scintillation state (V-24). */
 export type ScintillationConfig = {
   enabled: boolean;

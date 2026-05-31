@@ -125,6 +125,7 @@ pub async fn render_scene_pixels(
     camera.eyepiece = scene.eyepiece;
     camera.limiting_magnitude = scene.catalog.limiting_magnitude;
     camera.output_colourspace = scene.output_colourspace;
+    camera.aurora = scene.aurora;
     renderer.update_camera(&queue, &camera, options.width, options.height);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {

@@ -119,7 +119,8 @@ via `V-39`, including the `V-39-Atlas` Falchi 2016 World Atlas loader),
 niche visual
 features (`V-45` telescope-side optical artifacts, `V-46` galactic structural
 model, and `V-50` output colour management have all shipped), and rare
-phenomena (`V-47` meteor showers has shipped; `V-48`–`V-49` remain).
+phenomena (`V-47` meteor showers and `V-48` aurora display have shipped;
+`V-49` comets remain).
 
 **High priority next:** the visual-richness gaps `V-51`–`V-56` (eclipses /
 occultations, planetary rings and moons, resolved star clusters, double
@@ -215,7 +216,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-45` | **Telescope-side optical artifacts** | ✅ |
 | `V-46` | **Galactic structural model for external viewpoints** | ✅ |
 | `V-47` | **Meteor shower display** | ✅ |
-| `V-48` | **Aurora display** | ⬜ |
+| `V-48` | **Aurora display** | ✅ |
 | `V-49` | **Comet rendering** | ⬜ |
 | `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ✅ |
 | `V-51` | **Unified eclipse / occultation pass** (`a` + `b` + `c` + `d` + `e` + `f` done) | ✅ |
@@ -1627,7 +1628,7 @@ the *statistical expectation* of a shower, not individual fireball events.
 
 ---
 
-### `V-48` Aurora display — ⬜
+### `V-48` Aurora display — ✅ done
 
 **Item.** Optional high-latitude aurora overlay driven by a Kp / Hp index
 input (offline-supplied via the JSON session or fetched from NOAA SWPC
@@ -1667,6 +1668,44 @@ auroral oval model.
 rays, dynamic substorm motion) is intentionally not modelled. The
 renderer shows the *statistically expected* oval position and brightness
 for the supplied Kp.
+
+**Implementation (shipped).**
+- `crates/astronomy/src/aurora.rs`: `auroral_oval_boundary(kp, season)`
+  (equatorward boundary calibrated to ≈ 63° at Kp = 4, Feldstein & Starkov
+  1967), `geomagnetic_latitude_deg` / `bearing_to_geomagnetic_pole_rad`
+  (centered-dipole corrected geomagnetic coordinates, IGRF-13 2020 pole),
+  `emission_apparent_altitude_rad` (apparent elevation of an elevated
+  emitting layer), `aurora_intensity(kp, season)`, and `aurora_view(...)`
+  which projects the discrete equatorward arc + O I 630.0 nm red curtain
+  into the observer's local sky.
+- `crates/renderer/src/camera.rs`: an `AuroraLayer` on `Camera` plus
+  `aurora_geometry` / `aurora_params` `CameraUniform` rows (appended at the
+  end of the struct), packed by `Camera::aurora_uniforms()`.
+- `crates/renderer/src/shaders/skyglow.wgsl`: a self-contained
+  `aurora_radiance(...)` painting the O I 557.7 nm green discrete arc, the
+  O I 630.0 nm red band above it, and the magenta N₂ lower border
+  (Chamberlain 1961 emission heights), with an azimuth taper and the
+  scene's per-channel extinction. Disabled (`aurora_params == 0`) is a free
+  zero per pixel, so the dark-sky composition is unchanged.
+- Geomagnetic-coordinate note: the corrected geomagnetic latitude uses a
+  centered dipole rather than full AACGM (documented in `VALIDATION.md`);
+  sufficient for naked-eye oval placement and keeps the WASM build small.
+- Session: an additive `aurora` block (`#[serde(default)]`, no schema
+  bump). CLI `--aurora` / `--aurora-kp` / `--aurora-season`; viewer `A`
+  key toggle + the same flags; web `StarView.set_aurora` binding with a
+  settings-panel control and session / URL / localStorage round-trip.
+
+**Tests / validation (shipped).**
+- `astronomy::aurora`: equatorward boundary ≈ 63° at Kp = 4 (within 1°),
+  oval expands equatorward with Kp, Tromsø geomagnetic latitude ≈ 67°,
+  overhead emission at the zenith, emission drops below the horizon with
+  distance, red curtain sits above the green base, intensity monotone in
+  Kp, a sub-auroral observer sees a low arc, and a quiet low-latitude site
+  shows no aurora.
+- `renderer::camera`: aurora uniforms are zero by default and when the
+  viewpoint is external, and pack a real arc at Tromsø / Kp 5.
+- `stars_host_common::session`: the `aurora` block round-trips through JSON
+  and defaults to disabled when absent.
 
 **Hosts wired.** CLI / viewer / web.
 

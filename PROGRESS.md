@@ -31,7 +31,9 @@ Shipped:
   (`V-53`), and the observer-side Bortle / SQM light-pollution scaling
   of the dark-sky background with sodium / LED tint plus the `V-39-Atlas`
   Falchi 2016 World Atlas loader that samples zenith brightness by observer
-  lat/lng (`V-39`).
+  lat/lng (`V-39`), and the statistically-expected aurora display driven by a
+  geomagnetic Kp index (`V-48`, Feldstein-Starkov oval + Chamberlain
+  emission heights).
 - **Library track** — IAU-grade time / precession / nutation / aberration /
   proper motion (`L-01`–`L-05`), planning helpers (`L-07`, `L-08`),
   observation-planning polish — Krisciunas-Schaefer 1991 Moon-impact /
@@ -3326,6 +3328,46 @@ radiating from the right point at a physically-grounded rate.
 References (also pinned in ROADMAP `V-47`): Koschack, R. & Rendtel, J. 1990,
 WGN 18, 44; Jenniskens, P. 1994, A&A 287, 990; IMO Meteor Shower Calendar;
 McKinley, D. W. R. 1961, *Meteor Science and Engineering*.
+
+## `V-48` Aurora display — shipped (CLI + viewer + web)
+
+1. **What changed.** The renderer can paint the statistically-expected
+   auroral oval for a supplied planetary Kp index: a green O I 557.7 nm
+   discrete arc with a higher-altitude red O I 630.0 nm band and a magenta
+   N₂ lower border, positioned for the observer's geomagnetic latitude.
+   Off by default, so the dark-sky composition is unchanged.
+2. **Why it counts as complete.** The oval-boundary, geomagnetic-coordinate,
+   and apparent-altitude models are pinned (equatorward boundary ≈ 63° at
+   Kp = 4, per Feldstein & Starkov 1967); the renderer uniform packing is
+   tested; the layer renders visibly and is wired into all three hosts with
+   an additive (no-schema-bump) session round-trip.
+3. **Where it lives.** `crates/astronomy/src/aurora.rs`
+   (`auroral_oval_boundary`, `geomagnetic_latitude_deg`,
+   `bearing_to_geomagnetic_pole_rad`, `emission_apparent_altitude_rad`,
+   `aurora_intensity`, `aurora_view`); `crates/renderer/src/camera.rs`
+   (`AuroraLayer`, `Camera::aurora_uniforms`, `aurora_geometry` /
+   `aurora_params` uniform rows appended at the end of `CameraUniform`);
+   `crates/renderer/src/shaders/skyglow.wgsl` (self-contained
+   `aurora_radiance`, Chamberlain 1961 emission-height structure);
+   `crates/common` (`AuroraSeasonArg`, `aurora_from_args`,
+   `SessionScene.aurora` / `SessionAurora` with `#[serde(default)]`);
+   `apps/cli` (`--aurora` / `--aurora-kp` / `--aurora-season`), `apps/viewer`
+   (`A`-key toggle + the same flags), and `apps/web`
+   (`StarView.set_aurora`, settings-panel control, session / URL /
+   localStorage round-trip).
+4. **Tests / validation.** `astronomy::aurora` pins the Kp = 4 → 63°
+   boundary, equatorward expansion with Kp, the Tromsø geomagnetic
+   latitude, overhead/below-horizon emission geometry, the red-above-green
+   curtain ordering, intensity monotonicity, a visible sub-auroral arc, and
+   no aurora at a quiet low-latitude site; `renderer::camera` pins the
+   default-off / external-viewpoint-off / visible-arc uniform packing;
+   `stars_host_common::session` pins the additive `aurora` JSON round-trip
+   and its disabled default when the key is absent.
+5. **Model limit.** Corrected geomagnetic latitude uses a centered dipole
+   (IGRF-13 2020 pole), not full AACGM, and the display is the statistically
+   expected oval — no real-time curtains/rays/substorm motion. Documented in
+   `VALIDATION.md`.
+6. **Hosts wired.** CLI, viewer, web.
 
 ## Documentation progress
 

@@ -6,17 +6,18 @@ use anyhow::Result;
 use astronomy::Observer;
 use clap::Parser;
 use renderer::{
-    Atmosphere, Camera, LightPollution, LocalView, MeteorLayer, OutputColourSpace, OverlayConfig,
-    Renderer, SatelliteLayer, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    Atmosphere, AuroraLayer, Camera, LightPollution, LocalView, MeteorLayer, OutputColourSpace,
+    OverlayConfig, Renderer, SatelliteLayer, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
-    atmosphere_from_args, curated_satellite_layer, eyepiece_from_args, light_pollution_from_args,
-    load_session, load_star_instances_from_file, overlay_config_from_args,
-    parse_time_to_time_scales, resolve_goto_query, resolve_light_pollution, scene_from_preset,
-    scene_preset_infos, scintillation_from_args, viewpoint_from_args, AtmosphereOverrides,
-    AtmospherePresetArg, CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides,
-    EyepieceOverrides, LightPollutionOverrides, OpticalDesign, OutputColourspaceArg, OverlayArg,
-    ProjectionArg, ScenePresetArg, ScintillationOverrides, SessionScene, ViewpointArg,
+    atmosphere_from_args, aurora_from_args, curated_satellite_layer, eyepiece_from_args,
+    light_pollution_from_args, load_session, load_star_instances_from_file,
+    overlay_config_from_args, parse_time_to_time_scales, resolve_goto_query,
+    resolve_light_pollution, scene_from_preset, scene_preset_infos, scintillation_from_args,
+    viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg, AuroraSeasonArg,
+    CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides,
+    LightPollutionOverrides, OpticalDesign, OutputColourspaceArg, OverlayArg, ProjectionArg,
+    ScenePresetArg, ScintillationOverrides, SessionScene, ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -250,6 +251,19 @@ struct Args {
     #[arg(long, default_value_t = 120.0)]
     meteor_window_seconds: f32,
 
+    /// Enable the V-48 aurora layer (auroral-oval arc for the supplied Kp).
+    /// Toggle at runtime with the `A` key. Off by default.
+    #[arg(long)]
+    aurora: bool,
+
+    /// Planetary Kp index (0..9) driving the aurora oval. Implies `--aurora`.
+    #[arg(long)]
+    aurora_kp: Option<f32>,
+
+    /// Season for the aurora oval shift / dark-sky visibility weight.
+    #[arg(long, value_enum)]
+    aurora_season: Option<AuroraSeasonArg>,
+
     /// Enable telescope eyepiece simulation. Supplying any telescope/eyepiece
     /// parameter also enables this mode.
     #[arg(long)]
@@ -391,6 +405,11 @@ fn main() -> Result<()> {
                 rate_scale: args.meteor_rate_scale,
                 window_seconds: args.meteor_window_seconds,
             },
+            aurora: aurora_from_args(
+                args.aurora || args.aurora_kp.is_some(),
+                args.aurora_kp.unwrap_or(0.0),
+                args.aurora_season.unwrap_or_default(),
+            ),
             projection: args.projection.into(),
             viewpoint,
             external_viewpoint,
@@ -422,6 +441,16 @@ fn main() -> Result<()> {
     // V-50: explicit flag overrides the scene's stored colour space.
     if let Some(cs) = args.output_colourspace {
         scene.output_colourspace = cs.into();
+    }
+
+    // V-48: aurora flags override the scene's stored layer.
+    if args.aurora || args.aurora_kp.is_some() || args.aurora_season.is_some() {
+        scene.aurora = aurora_from_args(
+            true,
+            args.aurora_kp.unwrap_or(scene.aurora.kp),
+            args.aurora_season
+                .unwrap_or_else(|| scene.aurora.season.into()),
+        );
     }
 
     let catalog_path = scene
@@ -460,6 +489,7 @@ fn main() -> Result<()> {
         scene.planets_enabled,
         scene.satellites.clone(),
         scene.meteors.clone(),
+        scene.aurora,
         scene.projection,
         scene.viewpoint,
         scene.external_viewpoint,
@@ -528,6 +558,8 @@ struct App {
     satellites: SatelliteLayer,
     /// V-47 meteor-shower layer (the `M` key toggles it at runtime).
     meteors: MeteorLayer,
+    /// V-48 aurora layer (toggle with the `A` key).
+    aurora: AuroraLayer,
     projection: renderer::SkyProjection,
     viewpoint: renderer::SkyViewpoint,
     external_viewpoint: renderer::ExternalViewpoint,
@@ -610,6 +642,7 @@ impl App {
         planets_enabled: bool,
         satellites: SatelliteLayer,
         meteors: MeteorLayer,
+        aurora: AuroraLayer,
         projection: renderer::SkyProjection,
         viewpoint: renderer::SkyViewpoint,
         external_viewpoint: renderer::ExternalViewpoint,
@@ -638,6 +671,7 @@ impl App {
             planets_enabled,
             satellites,
             meteors,
+            aurora,
             projection,
             viewpoint,
             external_viewpoint,
@@ -772,6 +806,7 @@ impl ApplicationHandler for App {
         camera.planets_enabled = self.planets_enabled;
         camera.satellites = self.satellites.clone();
         camera.meteors = self.meteors.clone();
+        camera.aurora = self.aurora;
         camera.projection = self.projection;
         camera.viewpoint = self.viewpoint;
         camera.external_viewpoint = self.external_viewpoint;
@@ -965,6 +1000,25 @@ impl ApplicationHandler for App {
                                 } else {
                                     "off"
                                 }
+                            );
+                        }
+                        Some(KeyCode::KeyA) => {
+                            // V-48: toggle the aurora layer. Default to Kp=5 if
+                            // no activity level was supplied so the toggle is
+                            // visibly useful out of the box.
+                            gpu.camera.aurora.enabled = !gpu.camera.aurora.enabled;
+                            if gpu.camera.aurora.enabled && gpu.camera.aurora.kp <= 0.0 {
+                                gpu.camera.aurora.kp = 5.0;
+                            }
+                            self.aurora = gpu.camera.aurora;
+                            log::info!(
+                                "aurora {} (Kp {:.1})",
+                                if gpu.camera.aurora.enabled {
+                                    "on"
+                                } else {
+                                    "off"
+                                },
+                                gpu.camera.aurora.kp
                             );
                         }
                         Some(KeyCode::Space) => self.sky_clock.toggle_pause(),

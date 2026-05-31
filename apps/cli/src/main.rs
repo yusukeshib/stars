@@ -10,13 +10,14 @@ use renderer::{
     LocalView, MeteorLayer, OutputColourSpace, SkyViewpoint, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
-    atmosphere_from_args, curated_satellite_layer, eyepiece_from_args, hyg_catalog_snapshot,
-    light_pollution_from_args, load_session, overlay_config_from_args, parse_time_to_time_scales,
-    render_scene_from_catalog_path, resolve_goto_query, save_session, scene_from_preset,
-    scene_preset_infos, scintillation_from_args, viewpoint_from_args, AtmosphereOverrides,
-    AtmospherePresetArg, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides,
-    LightPollutionOverrides, OpticalDesign, OutputColourspaceArg, OverlayArg, ProjectionArg,
-    RenderOptions, ScenePresetArg, ScintillationOverrides, SessionScene, StarSession, ViewpointArg,
+    atmosphere_from_args, aurora_from_args, curated_satellite_layer, eyepiece_from_args,
+    hyg_catalog_snapshot, light_pollution_from_args, load_session, overlay_config_from_args,
+    parse_time_to_time_scales, render_scene_from_catalog_path, resolve_goto_query, save_session,
+    scene_from_preset, scene_preset_infos, scintillation_from_args, viewpoint_from_args,
+    AtmosphereOverrides, AtmospherePresetArg, AuroraSeasonArg, CorrectionSnapshot,
+    ExternalViewpointOverrides, EyepieceOverrides, LightPollutionOverrides, OpticalDesign,
+    OutputColourspaceArg, OverlayArg, ProjectionArg, RenderOptions, ScenePresetArg,
+    ScintillationOverrides, SessionScene, StarSession, ViewpointArg,
 };
 
 /// Resolve the V-45 optical design from the `--telescope-design` /
@@ -376,6 +377,21 @@ struct Args {
     /// otherwise the default is sRGB.
     #[arg(long, value_enum)]
     output_colourspace: Option<OutputColourspaceArg>,
+
+    /// Enable the V-48 aurora layer. Paints the statistically-expected
+    /// auroral-oval arc for the observer's geomagnetic latitude and the
+    /// supplied `--aurora-kp`. Off by default.
+    #[arg(long)]
+    aurora: bool,
+
+    /// Planetary Kp index (0..9) driving the aurora oval position and
+    /// brightness. Implies `--aurora` when supplied.
+    #[arg(long)]
+    aurora_kp: Option<f32>,
+
+    /// Season for the aurora oval shift / dark-sky visibility weight.
+    #[arg(long, value_enum)]
+    aurora_season: Option<AuroraSeasonArg>,
 }
 
 fn main() -> Result<()> {
@@ -467,6 +483,11 @@ fn main() -> Result<()> {
                 rate_scale: args.meteor_rate_scale,
                 window_seconds: args.meteor_window_seconds,
             },
+            aurora: aurora_from_args(
+                args.aurora || args.aurora_kp.is_some(),
+                args.aurora_kp.unwrap_or(0.0),
+                args.aurora_season.unwrap_or_default(),
+            ),
             projection: args.projection.into(),
             viewpoint,
             external_viewpoint,
@@ -495,6 +516,17 @@ fn main() -> Result<()> {
     // (manual / preset / session) carried; otherwise the stored value stands.
     if let Some(cs) = args.output_colourspace {
         scene.output_colourspace = cs.into();
+    }
+
+    // V-48: --aurora / --aurora-kp / --aurora-season override the scene's
+    // stored aurora layer (so they work on top of --session / --preset too).
+    if args.aurora || args.aurora_kp.is_some() || args.aurora_season.is_some() {
+        scene.aurora = aurora_from_args(
+            true,
+            args.aurora_kp.unwrap_or(scene.aurora.kp),
+            args.aurora_season
+                .unwrap_or_else(|| scene.aurora.season.into()),
+        );
     }
 
     // V-56 GoTo: resolve a named target and centre the view on it. Applied

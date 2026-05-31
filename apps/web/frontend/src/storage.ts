@@ -11,7 +11,10 @@ import {
   DEFAULT_EYEPIECE_CONFIG,
   DEFAULT_PROJECTION_CONFIG,
   DEFAULT_SCINTILLATION_CONFIG,
+  DEFAULT_AURORA_CONFIG,
+  isAuroraSeason,
   type AtmosphereConfig,
+  type AuroraConfig,
   type ExternalViewpointConfig,
   type MeteorsConfig,
   type Observer,
@@ -39,6 +42,7 @@ export type PersistedConfig = {
   planets?: PlanetsConfig;
   satellites?: SatellitesConfig;
   meteors?: MeteorsConfig;
+  aurora?: AuroraConfig;
   projection?: ProjectionConfig;
   eyepiece?: EyepieceConfig;
   outputColourspace?: OutputColourspace;
@@ -65,6 +69,7 @@ export function loadConfig(): PartialPersistedConfig | null {
       planets?: unknown;
       satellites?: unknown;
       meteors?: unknown;
+      aurora?: unknown;
       projection?: unknown;
       eyepiece?: unknown;
       outputColourspace?: unknown;
@@ -83,6 +88,8 @@ export function loadConfig(): PartialPersistedConfig | null {
     if (satellites) out.satellites = satellites;
     const meteors = parseMeteorsConfig(obj.meteors);
     if (meteors) out.meteors = meteors;
+    const aurora = parseAuroraConfig(obj.aurora);
+    if (aurora) out.aurora = aurora;
     const projection = parseProjectionConfig(obj.projection);
     if (projection) out.projection = projection;
     const eyepiece = parseEyepieceConfig(obj.eyepiece);
@@ -205,6 +212,18 @@ function parseMeteorsConfig(v: unknown): MeteorsConfig | null {
     windowSeconds: num(o.windowSeconds, 0, 120.0),
   };
 }
+
+function parseAuroraConfig(v: unknown): AuroraConfig | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Partial<AuroraConfig>;
+  if (typeof o.enabled !== "boolean") return null;
+  return {
+    enabled: o.enabled,
+    kp: inRange(o.kp, [0, 9]) ? o.kp : DEFAULT_AURORA_CONFIG.kp,
+    season: isAuroraSeason(o.season) ? o.season : DEFAULT_AURORA_CONFIG.season,
+  };
+}
+
 
 function parseVec3(v: unknown, range: [number, number]): { x: number; y: number; z: number } | null {
   if (!v || typeof v !== "object") return null;

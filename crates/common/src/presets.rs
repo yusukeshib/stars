@@ -639,6 +639,7 @@ fn earth_scene(
         corrections: CorrectionSnapshot::for_scene(atmosphere),
         output_colourspace: OutputColourSpace::default(),
         meteors: MeteorLayer::default(),
+        aurora: renderer::AuroraLayer::default(),
     })
 }
 
@@ -703,6 +704,7 @@ fn external_scene(
         corrections: CorrectionSnapshot::for_scene(Atmosphere::OFF),
         output_colourspace: OutputColourSpace::default(),
         meteors: MeteorLayer::default(),
+        aurora: renderer::AuroraLayer::default(),
     })
 }
 

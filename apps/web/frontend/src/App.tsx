@@ -14,15 +14,18 @@ import {
   DEFAULT_OVERLAY_CONFIG,
   DEFAULT_PLANETS_CONFIG,
   DEFAULT_SATELLITES_CONFIG,
+  DEFAULT_AURORA_CONFIG,
   DEFAULT_PROJECTION_CONFIG,
   DEFAULT_OUTPUT_COLOURSPACE,
   MIN_FOV_DEG,
   MAX_FOV_DEG,
   isAtmospherePreset,
+  isAuroraSeason,
   isOverlayLayer,
   isSkyProjection,
   isSkyViewpoint,
   type AtmosphereConfig,
+  type AuroraConfig,
   type ScintillationConfig,
   type EyepieceConfig,
   type ExternalViewpointConfig,
@@ -174,6 +177,9 @@ function loadSessionFromUrl(): UrlSession | null {
     "planets",
     "satellites",
     "satExposure",
+    "aurora",
+    "auroraKp",
+    "auroraSeason",
     "projection",
     "viewpoint",
     "originPc",
@@ -248,6 +254,14 @@ function loadSessionFromUrl(): UrlSession | null {
       enabled: params.get("satellites") === "on",
       exposureSeconds: numberParam(params, "satExposure", DEFAULT_SATELLITES_CONFIG.exposureSeconds, 0, 600),
     },
+    aurora: {
+      enabled: params.get("aurora") === "on",
+      kp: numberParam(params, "auroraKp", DEFAULT_AURORA_CONFIG.kp, 0, 9),
+      season: (() => {
+        const s = params.get("auroraSeason");
+        return isAuroraSeason(s) ? s : DEFAULT_AURORA_CONFIG.season;
+      })(),
+    },
     projection: {
       projection: isSkyProjection(projectionParam)
         ? projectionParam
@@ -276,13 +290,14 @@ function loadSessionFromUrl(): UrlSession | null {
   };
 }
 
-function sessionUrl({ observer, view, overlays, atmosphere, planets, satellites, projection, eyepiece, timeMs }: {
+function sessionUrl({ observer, view, overlays, atmosphere, planets, satellites, aurora, projection, eyepiece, timeMs }: {
   observer: Observer;
   view: View;
   overlays: OverlayConfig;
   atmosphere: AtmosphereConfig;
   planets: PlanetsConfig;
   satellites: SatellitesConfig;
+  aurora: AuroraConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   timeMs: number;
@@ -302,6 +317,9 @@ function sessionUrl({ observer, view, overlays, atmosphere, planets, satellites,
   url.searchParams.set("planets", planets.enabled ? "on" : "off");
   url.searchParams.set("satellites", satellites.enabled ? "on" : "off");
   url.searchParams.set("satExposure", satellites.exposureSeconds.toFixed(1));
+  url.searchParams.set("aurora", aurora.enabled ? "on" : "off");
+  url.searchParams.set("auroraKp", aurora.kp.toFixed(1));
+  url.searchParams.set("auroraSeason", aurora.season);
   url.searchParams.set("projection", projection.projection);
   url.searchParams.set("viewpoint", projection.viewpoint);
   url.searchParams.set("originPc", vec3SearchParam(projection.external.originPc));
@@ -359,6 +377,9 @@ export function App() {
   const [meteors, setMeteors] = useState<MeteorsConfig>(
     URL_SESSION?.meteors ?? PERSISTED?.meteors ?? DEFAULT_METEORS_CONFIG,
   );
+  const [aurora, setAurora] = useState<AuroraConfig>(
+    URL_SESSION?.aurora ?? PERSISTED?.aurora ?? DEFAULT_AURORA_CONFIG,
+  );
   const [projection, setProjection] = useState<ProjectionConfig>(
     URL_SESSION?.projection ?? PERSISTED?.projection ?? DEFAULT_PROJECTION_CONFIG,
   );
@@ -392,11 +413,11 @@ export function App() {
   // next load would silently mislead the user.
   useEffect(() => {
     const handle = setTimeout(
-      () => saveConfig({ observer, view, overlays, atmosphere, scintillation, planets, satellites, meteors, projection, eyepiece, outputColourspace }),
+      () => saveConfig({ observer, view, overlays, atmosphere, scintillation, planets, satellites, meteors, aurora, projection, eyepiece, outputColourspace }),
       250,
     );
     return () => clearTimeout(handle);
-  }, [observer, view, overlays, atmosphere, scintillation, planets, satellites, meteors, projection, eyepiece, outputColourspace]);
+  }, [observer, view, overlays, atmosphere, scintillation, planets, satellites, meteors, aurora, projection, eyepiece, outputColourspace]);
 
   // Mirror the current session into the address bar so the user can copy the
   // URL at any time without going through the explicit "Copy URL" action.
@@ -409,12 +430,12 @@ export function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handle = setTimeout(() => {
-      const url = sessionUrl({ observer, view, overlays, atmosphere, planets, satellites, projection, eyepiece, timeMs });
+      const url = sessionUrl({ observer, view, overlays, atmosphere, planets, satellites, aurora, projection, eyepiece, timeMs });
       window.history.replaceState(null, "", url);
     }, 250);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- timeMs deliberately excluded; see comment above.
-  }, [observer, view, overlays, atmosphere, scintillation, planets, satellites, projection, eyepiece]);
+  }, [observer, view, overlays, atmosphere, scintillation, planets, satellites, aurora, projection, eyepiece]);
 
   // Clock always ticks. When the user picks a custom moment via the quick time
   // popup we simply rebase `timeMs`; the same loop keeps advancing from there.
@@ -440,6 +461,7 @@ export function App() {
     planets,
     satellites,
     meteors,
+    aurora,
     projection,
     eyepiece,
     outputColourspace,
@@ -455,6 +477,7 @@ export function App() {
     setPlanets(session.planets);
     setSatellites(session.satellites);
     setMeteors(session.meteors);
+    setAurora(session.aurora);
     setProjection(session.projection);
     setEyepiece(session.eyepiece);
     setOutputColourspace(session.outputColourspace);
@@ -484,6 +507,7 @@ export function App() {
         planets={planets}
         satellites={satellites}
         meteors={meteors}
+        aurora={aurora}
         projection={projection}
         eyepiece={eyepiece}
         outputColourspace={outputColourspace}
@@ -529,6 +553,7 @@ export function App() {
         planets={planets}
         satellites={satellites}
         meteors={meteors}
+        aurora={aurora}
         projection={projection}
         eyepiece={eyepiece}
         planning={planning}
@@ -541,6 +566,7 @@ export function App() {
         onSetPlanets={setPlanets}
         onSetSatellites={setSatellites}
         onSetMeteors={setMeteors}
+        onSetAurora={setAurora}
         onSetProjection={setProjection}
         onSetEyepiece={setEyepiece}
         outputColourspace={outputColourspace}
