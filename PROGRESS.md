@@ -29,9 +29,9 @@ Shipped:
   Messier objects plus the bright NGC / IC subset (`V-42`), the
   resolved-open-cluster slice for Pleiades / Beehive / Double Cluster
   (`V-53`), and the observer-side Bortle / SQM light-pollution scaling
-  of the dark-sky background with sodium / LED tint (`V-39`, Bortle /
-  SQM core; the Falchi 2016 GeoTIFF loader is tracked separately as
-  `V-39-Atlas`).
+  of the dark-sky background with sodium / LED tint plus the `V-39-Atlas`
+  Falchi 2016 World Atlas loader that samples zenith brightness by observer
+  lat/lng (`V-39`).
 - **Library track** — IAU-grade time / precession / nutation / aberration /
   proper motion (`L-01`–`L-05`), planning helpers (`L-07`, `L-08`),
   observation-planning polish — Krisciunas-Schaefer 1991 Moon-impact /
@@ -47,9 +47,7 @@ Shipped:
 
 Still open:
 
-- **Visual track** — Falchi 2016 World Atlas GeoTIFF loader
-  (`V-39-Atlas`; Bortle / SQM core of `V-39`, V-25, V-26, V-27, V-28
-  have shipped), niche visual features (`V-45`–`V-50`), rare
+- **Visual track** — niche visual features (`V-45`–`V-50`), rare
   phenomena (`V-47`–`V-49`). A follow-up PR will add a runtime streaming
   backend for the full ~14,000-entry OpenNGC catalogue on top of the
   embedded `V-42` subset shipped here.
@@ -333,12 +331,29 @@ Tests pinned at the V-39 calibration / regression contracts:
 - `atlas2016_falls_back_to_rural_default` keeps the deferred follow-up's
   sentinel renderable.
 
-Deferred to follow-up `V-39-Atlas`:
+Follow-up `V-39-Atlas` (shipped) — Falchi 2016 World Atlas loader:
 
-- Falchi et al. 2016 World Atlas GeoTIFF download + sampler. The atlas is
-  ~1 GB and needs a careful licence note; the `Atlas2016` variant is laid
-  down in this slice and returns the Bortle-1 floor (with the host-side
-  `TODO(V-39-Atlas)` log line) until the loader ships.
+- `astronomy::FalchiAtlas` (`light_pollution_atlas.rs`) parses a compact
+  little-endian `FALATL01` lat/lng grid of total zenith V mag/arcsec² and
+  bilinearly samples it by observer location, skipping `NaN` no-data cells
+  (ocean / out-of-swath). The module is IO-free and unit-tested against a
+  synthetic in-memory grid (corners, centre blend, bounds, NaN handling,
+  longitude wrap, header/truncation errors).
+- `scripts/fetch-falchi-atlas.sh` downloads the ~1 GB upstream GeoTIFF (DOI
+  10.5880/GFZ.1.4.2016.001) and `scripts/build-falchi-atlas.py` resamples it
+  to the `FALATL01` grid via `μ = 21.6 − 2.5·log10(1 + ratio)` (the renderer's
+  natural floor), so atlas- and Bortle/SQM-derived brightness share one scale.
+- `stars_host_common::{load_falchi_atlas, resolve_light_pollution}` read the
+  grid named by `STARS_FALCHI_ATLAS` and map `LightPollution::Atlas2016`
+  to a sampled `LightPollution::Sqm` at render time (CLI via the headless
+  `render` path, viewer at scene→app handoff). The session keeps the
+  `Atlas2016` (lat, lng) for reproducibility; when no grid is configured the
+  variant falls back to the Bortle-1 floor, so the renderer, shaders, and
+  session schema are all unchanged and committed presets stay byte-stable.
+- The upstream GeoTIFF is recorded in `data/manifest.toml`
+  (`falchi-2016-world-atlas`, kind `runtime-service`: no committed bytes) and
+  documented in `DATA_SOURCES.md`. Web keeps the existing `Atlas2016`
+  fallback (sampling a ~1 GB raster in-browser is out of scope).
 
 Primary implementation areas:
 

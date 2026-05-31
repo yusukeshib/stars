@@ -469,6 +469,58 @@ Implementation areas:
 - `crates/common/src/satellites.rs`
 - `crates/renderer/src/camera.rs`, `crates/renderer/src/shaders/skyglow.wgsl`
 
+## Optional external dataset: Falchi 2016 World Atlas (V-39-Atlas)
+
+Upstream source (not committed):
+
+- Falchi, F. et al. 2016, *The new world atlas of artificial night sky
+  brightness*, **Science Advances** 2, e1600377 (doi:10.1126/sciadv.1600377).
+- 2015 data release (GeoTIFF) via GFZ Data Services,
+  doi:10.5880/GFZ.1.4.2016.001.
+
+Manifest id:
+
+- `falchi-2016-world-atlas` in `data/manifest.toml` (kind = `runtime-service`;
+  it has no committed local bytes because the raster is ~1 GB).
+
+Field used:
+
+- band 1 — the ratio of artificial zenith sky brightness to the natural
+  background (Falchi's adopted natural reference ≈ 0.174 mcd/m², V ≈ 21.6
+  mag/arcsec²).
+
+License / terms:
+
+- recorded as `see-upstream`; accept the release terms at the DOI landing
+  page before downloading. Only the user's own machine fetches the file.
+
+Preprocessing / local storage:
+
+1. `scripts/fetch-falchi-atlas.sh` downloads the GeoTIFF (URL supplied via
+   `FALCHI_ATLAS_URL`, since the direct link sits behind the DOI page).
+2. `scripts/build-falchi-atlas.py` block-averages it to a coarse regular
+   lat/lng grid and converts each cell's ratio `r` to a total zenith V-band
+   surface brightness with the flux-additive model
+   `μ = 21.6 − 2.5·log10(1 + r)` (matching the renderer's natural floor),
+   writing the compact little-endian `FALATL01` grid documented in
+   `crates/astronomy/src/light_pollution_atlas.rs`.
+3. Point the native hosts at the result with `STARS_FALCHI_ATLAS=<path>`.
+
+Implementation areas:
+
+- `crates/astronomy/src/light_pollution_atlas.rs` — `FalchiAtlas` parser +
+  bilinear `sample_zenith_mag_per_arcsec2` (IO-free, unit-tested with a
+  synthetic grid fixture);
+- `crates/common/src/lib.rs` — `load_falchi_atlas` / `resolve_light_pollution`
+  read `STARS_FALCHI_ATLAS` and map `LightPollution::Atlas2016` to a sampled
+  `LightPollution::Sqm`; `apps/cli` / `apps/viewer` resolve at render time.
+
+Determinism / fallback:
+
+- the default render path never reads the atlas; when `STARS_FALCHI_ATLAS` is
+  unset (or a location is outside coverage) `Atlas2016` keeps the rural
+  Bortle-1 floor, so committed scene presets stay byte-stable.
+
 ## Runtime web services
 
 ### OpenStreetMap Nominatim search API
@@ -566,7 +618,7 @@ References named in roadmap:
 - Garstang, R. H. 1986, PASP 98, 364 — single-scattering zenith-distance
   kernel (V-39 core);
 - Falchi, F. et al. 2016, *Science Advances* 2, e1600377 — World Atlas
-  GeoTIFF source for the deferred `V-39-Atlas` loader;
+  GeoTIFF source for the `V-39-Atlas` loader (see the dedicated section above);
 - ASTM G-173 / CIE daylight-basis references where used by code comments.
 
 Implementation areas:
@@ -756,17 +808,6 @@ row to `data/manifest.toml`:
 - AAVSO variable-star light curves;
 - full OpenNGC ~14,000-entry NGC / IC catalog (runtime-loaded streaming
   backend, the V-42 follow-up to the shipped bright subset);
-- Falchi et al. 2016 World Atlas of artificial night-sky brightness
-  GeoTIFF (`V-39-Atlas` follow-up to the Bortle / SQM core shipped under
-  `V-39`). Source: Falchi, F. et al. 2016, *Science Advances* 2, e1600377,
-  doi 10.1126/sciadv.1600377; supplementary GeoTIFF distributed via the
-  Earth Observation Group / NCEI under the documented licence on the data
-  page. Shipping the atlas (~1 GB) is out of scope for the core slice; a
-  downloader script under `scripts/` is the planned path. The
-  `LightPollution::Atlas2016 { latitude_deg, longitude_deg }` schema variant
-  is already laid down in `crates/astronomy/src/skyglow.rs` so the loader
-  can ship without churning sessions, and currently returns the Bortle 1
-  natural floor with a host-side `TODO(V-39-Atlas)` log line.
 - telescope / eyepiece preset data;
 - curated public demo-gallery session files;
 - large-catalog spatial indexes, LOD subsets, or WASM-specific extracts.

@@ -115,7 +115,7 @@ pub async fn render_scene_pixels(
     );
     camera.atmosphere = scene.atmosphere;
     camera.scintillation = scene.scintillation;
-    camera.light_pollution = scene.light_pollution;
+    camera.light_pollution = crate::resolve_light_pollution(scene.light_pollution);
     camera.planets_enabled = scene.planets_enabled;
     camera.satellites = scene.satellites.clone();
     camera.projection = scene.projection;

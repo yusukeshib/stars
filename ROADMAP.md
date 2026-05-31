@@ -79,8 +79,9 @@ is split into independently shippable rungs:
 6. **Unified extinction** — one (β, α, DU) optical-depth state shared by the
    star-extinction path and the daylight scattering shader. ✅ (`V-37`).
 7. **Site-specific brightness** — observer-side light-pollution selector
-   (Bortle / SQM / Falchi atlas). ◑ (`V-39` Bortle + SQM core shipped;
-   Falchi 2016 atlas loader tracked as follow-up `V-39-Atlas`).
+   (Bortle / SQM / Falchi atlas). ✅ (`V-39` Bortle + SQM core plus the
+   `V-39-Atlas` Falchi 2016 World Atlas loader, sampling zenith brightness by
+   observer lat/lng).
 
 ---
 
@@ -114,7 +115,7 @@ side-effect, not the motivation.
 The Visual track is at "naked-eye physical realism is mostly there" — the
 remaining items are realism polish (`V-24` scintillation, `V-25`–`V-28`
 have all shipped), site-specific brightness (Bortle / SQM core shipped
-via `V-39`; Falchi 2016 atlas loader tracked as follow-up `V-39-Atlas`),
+via `V-39`, including the `V-39-Atlas` Falchi 2016 World Atlas loader),
 niche visual
 features (`V-45`, `V-46`; `V-50` output colour management has shipped),
 and rare phenomena (`V-47`–`V-49`).
@@ -204,7 +205,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-36` | Moon phase + Earth-shadow aid | ✅ |
 | `V-37` | Unified spectral extinction (β / α / DU) | ✅ |
 | `V-38` | Hošek-Wilkie daylight sky model | ✅ |
-| `V-39` | Light pollution / Bortle + SQM (Bortle / SQM core ✅, Atlas2016 follow-up ⬜) | ◑ |
+| `V-39` | Light pollution / Bortle + SQM + Falchi 2016 World Atlas loader | ✅ |
 | `V-40` | Full-sky projections (Mollweide / Aitoff / Hammer) | ✅ |
 | `V-41` | Out-of-Earth galactic-north viewpoint | ✅ |
 | `V-42` | Deep-sky overlay (Messier + bright NGC / IC subset) | ✅ |
@@ -1203,7 +1204,7 @@ us share spectra with `V-37`.
 
 ---
 
-### `V-39` Light pollution / Bortle map — ✅ done (Bortle / SQM core; Atlas2016 follow-up)
+### `V-39` Light pollution / Bortle map — ✅ done (Bortle / SQM core + Falchi 2016 atlas loader)
 
 **Item.** The current dark-sky pipeline assumes a clear rural site
 (V ≈ 21.6 mag/arcsec² zenith). Real observers want the sky they will
@@ -1269,11 +1270,24 @@ is in place; the React settings card is deferred to a follow-up PR).
 - Gallery presets: `tokyo-bortle-8` (Bortle 8 + hazy-urban atmosphere) and
   `dark-sky-bortle-1` (byte-identical to `dark-sky` by construction).
 
-**Deferred to follow-up `V-39-Atlas`.**
-- Falchi et al. 2016 World Atlas GeoTIFF download / loader. The atlas is
-  ~1 GB and needs a careful licence note; the `Atlas2016` variant is laid
-  down in this slice and returns the Bortle-1 floor + a host-side
-  `TODO(V-39-Atlas)` log line until the loader ships.
+**Shipped (`V-39-Atlas` follow-up).**
+- `astronomy::FalchiAtlas` (`light_pollution_atlas.rs`): an IO-free parser +
+  bilinear sampler for a compact `FALATL01` lat/lng grid of total zenith V
+  mag/arcsec², resampled from the Falchi 2016 World Atlas. NaN no-data cells
+  (ocean / out-of-swath) are skipped in the blend.
+- `scripts/fetch-falchi-atlas.sh` downloads the ~1 GB upstream GeoTIFF (DOI
+  10.5880/GFZ.1.4.2016.001, licence accepted at the landing page) and
+  `scripts/build-falchi-atlas.py` resamples it to the `FALATL01` grid using the
+  flux-additive model `μ = 21.6 − 2.5·log10(1 + ratio)` (the renderer's natural
+  floor). The GeoTIFF is recorded in `data/manifest.toml` as a non-committed
+  external dataset.
+- Native hosts resolve `LightPollution::Atlas2016 { lat, lng }` at render time
+  via `stars_host_common::resolve_light_pollution`, loading the grid named by
+  `STARS_FALCHI_ATLAS` and sampling it into an equivalent
+  `LightPollution::Sqm`. The session keeps the `Atlas2016` (lat, lng) for
+  reproducibility, and the variant falls back to the Bortle-1 floor when no
+  grid is configured, so the default render path stays deterministic and the
+  renderer / shader / schema are unchanged.
 
 ---
 
