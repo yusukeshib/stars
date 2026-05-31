@@ -22,9 +22,11 @@ struct RawStar {
 #[derive(Debug, Clone, Copy)]
 pub struct Star {
     /// Stable catalog identifiers associated with this star when the backend
-    /// can supply them. The current HYG CSV path preserves HYG / Hipparcos / HD
-    /// numeric IDs; compact embedded catalogs omit IDs until Phase 3 identifier
-    /// preservation is wired through the renderer.
+    /// can supply them. The HYG CSV path preserves HYG / Hipparcos / HD numeric
+    /// IDs; since `L-18` the compact embedded (`STRBIN4`) catalog also carries
+    /// the Hipparcos / Henry Draper primary + cross IDs, so identifiers survive
+    /// through the renderer instance buffer on every host (CSV / embedded /
+    /// WASM).
     pub identifiers: CatalogIdentifiers,
     pub position: Vec3,
     /// Heliocentric distance in parsecs from HYG's `dist` column. Earth-centred
@@ -58,11 +60,13 @@ pub(crate) const DEFAULT_MAX_MAGNITUDE: f32 = 8.0;
 const MIN_DISTANCE_PC: f64 = 0.0;
 const MAX_DISTANCE_PC: f64 = 100_000.0;
 #[cfg(feature = "embedded")]
-const EMBEDDED_MAGIC: &[u8; 8] = b"STRBIN3\0";
+// STRBIN4 adds the L-18 HIP / HD identifier columns (two trailing u32, `0` =
+// none) so catalogue identity survives the compact embedded / WASM path.
+const EMBEDDED_MAGIC: &[u8; 8] = b"STRBIN4\0";
 #[cfg(feature = "embedded")]
 const EMBEDDED_HEADER_LEN: usize = 12;
 #[cfg(feature = "embedded")]
-const EMBEDDED_RECORD_LEN: usize = 26;
+const EMBEDDED_RECORD_LEN: usize = 34;
 
 pub fn load_from_csv(data: &str) -> Vec<Star> {
     let mut reader = csv::ReaderBuilder::new()
@@ -156,8 +160,17 @@ fn load_from_binary(data: &[u8]) -> Result<Vec<Star>, String> {
             decode_f32(record, 18),
         );
         let distance_pc = decode_f32(record, 22);
+        // L-18: HIP / HD primary + cross identifiers (0 = none).
+        let hip = match decode_u32(record, 26) {
+            0 => None,
+            v => Some(v),
+        };
+        let hd = match decode_u32(record, 30) {
+            0 => None,
+            v => Some(v),
+        };
         stars.push(Star {
-            identifiers: CatalogIdentifiers::default(),
+            identifiers: CatalogIdentifiers::from_hyg_row(None, hip, hd),
             position: Vec3::new(x, y, z).normalize_or_zero(),
             distance_pc,
             proper_motion,
@@ -167,8 +180,7 @@ fn load_from_binary(data: &[u8]) -> Result<Vec<Star>, String> {
     }
 
     // V-54: resolve merged WDS visual doubles on the embedded path too. The
-    // compact binary drops identifiers, so the resolver matches primaries by
-    // position.
+    // resolver matches primaries by HIP id when present, else by position.
     let stars = crate::doubles::resolve_doubles(stars);
 
     log::info!("Loaded {} embedded stars (compact binary)", stars.len());
@@ -192,6 +204,15 @@ fn decode_unit_i16(record: &[u8], offset: usize) -> f32 {
 #[cfg(feature = "embedded")]
 fn decode_f32(record: &[u8], offset: usize) -> f32 {
     f32::from_le_bytes(
+        record[offset..offset + 4]
+            .try_into()
+            .expect("fixed-size field"),
+    )
+}
+
+#[cfg(feature = "embedded")]
+fn decode_u32(record: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(
         record[offset..offset + 4]
             .try_into()
             .expect("fixed-size field"),

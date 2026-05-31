@@ -591,6 +591,10 @@ fn main() -> Result<()> {
         scene.view = target.local_view(scene.view.fov_y_rad);
         println!("GoTo {}", target.info_summary());
         log::info!("GoTo target: {}", target.info_summary());
+        // L-18: the canonical primary catalogue id (the click-to-copy family).
+        if let Some(id) = &target.primary_id {
+            println!("ID {id}");
+        }
         // L-19: expose the CDS deep links in the metadata output (stars and
         // deep-sky objects only; solar-system bodies are not in SIMBAD/VizieR).
         if let Some(url) = &target.simbad_url {

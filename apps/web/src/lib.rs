@@ -117,6 +117,9 @@ struct GotoRecord {
     magnitude: Option<f64>,
     distance: Option<(f64, &'static str)>,
     planning: Option<PlanningBody>,
+    /// L-18 canonical primary catalogue identifier (e.g. `"HIP 32349"`,
+    /// `"M 31"`). `None` for solar-system bodies.
+    primary_id: Option<String>,
     /// L-19 SIMBAD lookup URL. `None` for solar-system bodies.
     simbad_url: Option<String>,
     /// L-19 VizieR cone-search URL. `None` for solar-system bodies.
@@ -155,6 +158,7 @@ fn resolve(id: SearchId, observer: Observer) -> Option<GotoRecord> {
                     None
                 },
                 planning: None,
+                primary_id: ids.preferred_identifier(),
                 simbad_url: Some(simbad_query_url(&ids)),
                 vizier_url: Some(vizier_query_url(&ids)),
             })
@@ -243,6 +247,7 @@ fn resolve(id: SearchId, observer: Observer) -> Option<GotoRecord> {
                 distance: Some(distance),
                 planning: Some(planning),
                 // Solar-system bodies are not in the CDS stellar archives.
+                primary_id: None,
                 simbad_url: None,
                 vizier_url: None,
             })
@@ -287,6 +292,7 @@ fn deepsky_goto(id: SearchId, object: DeepSkyObject) -> GotoRecord {
         aka: label,
         right_ascension_rad: ra,
         declination_rad: dec,
+        primary_id: ids.preferred_identifier(),
         simbad_url: Some(simbad_query_url(&ids)),
         vizier_url: Some(vizier_query_url(&ids)),
         magnitude: if object.magnitude < 90.0 {
@@ -338,6 +344,12 @@ fn push_goto_record(out: &mut String, record: &GotoRecord, observer: Observer) {
             push_json_string(out, unit);
             out.push('}');
         }
+        None => out.push_str("null"),
+    }
+    // L-18: canonical primary catalogue identifier (null for solar-system).
+    out.push_str(",\"primaryId\":");
+    match &record.primary_id {
+        Some(id) => push_json_string(out, id),
         None => out.push_str("null"),
     }
     // L-19: CDS deep links (stars / deep-sky only; null for solar-system).
@@ -461,6 +473,9 @@ impl StarView {
                     s.magnitude,
                     LIMITING_MAGNITUDE,
                     s.distance_pc,
+                    // L-18: carry the catalogue primary id onto the instance so
+                    // a canvas pick maps back to the star's identity.
+                    s.identifiers.pick_handle(),
                 )
             })
             .collect();
