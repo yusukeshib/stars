@@ -16,6 +16,7 @@ use catalog::{load_from_file, CatalogSource};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
+mod comets;
 mod goto;
 mod presets;
 mod render;
@@ -26,6 +27,7 @@ pub use goto::{resolve_goto_id, resolve_goto_query, GotoTarget};
 // WASM web binding can share the single source of truth; we re-export them on
 // the documented `stars_host_common` path for the native hosts.
 pub use catalog::{simbad_query_url, vizier_query_url, StarIdentifiers};
+pub use comets::{curated_comet_elements, curated_comet_layer, CURATED_COMET_TEXT};
 pub use presets::*;
 pub use render::*;
 pub use renderer::OpticalDesign;

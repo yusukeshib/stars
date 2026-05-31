@@ -117,6 +117,10 @@ export const DEFAULT_AURORA_CONFIG: AuroraConfig = {
 export const isAuroraSeason = (s: unknown): s is AuroraSeason =>
   typeof s === "string" && (AURORA_SEASONS as readonly string[]).includes(s);
 
+/** V-49 comet layer (curated osculating elements) state. */
+export type CometsConfig = {
+  enabled: boolean;
+};
 
 /** Per-frame atmospheric scintillation state (V-24). */
 export type ScintillationConfig = {
@@ -218,6 +222,10 @@ export const DEFAULT_METEORS_CONFIG: MeteorsConfig = {
   seed: 1,
   rateScale: 1.0,
   windowSeconds: 120.0,
+};
+
+export const DEFAULT_COMETS_CONFIG: CometsConfig = {
+  enabled: false,
 };
 
 export const DEFAULT_EYEPIECE_CONFIG: EyepieceConfig = {

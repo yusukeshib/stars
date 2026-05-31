@@ -11,15 +11,15 @@ use std::path::Path;
 use anyhow::Result;
 use clap::ValueEnum;
 use renderer::{
-    Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView,
-    MeteorLayer, OutputColourSpace, OverlayConfig, OverlayKind, SatelliteLayer, Scintillation,
-    SkyProjection, SkyViewpoint,
+    Atmosphere, AtmospherePreset, CometLayer, ExternalViewpoint, EyepieceSimulation,
+    LightPollution, LocalView, MeteorLayer, OutputColourSpace, OverlayConfig, OverlayKind,
+    SatelliteLayer, Scintillation, SkyProjection, SkyViewpoint,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    curated_satellite_layer, hyg_catalog_snapshot, parse_time_to_time_scales, CatalogSnapshot,
-    CorrectionSnapshot, SessionScene, StarSession,
+    curated_comet_layer, curated_satellite_layer, hyg_catalog_snapshot, parse_time_to_time_scales,
+    CatalogSnapshot, CorrectionSnapshot, SessionScene, StarSession,
 };
 
 /// CLI-facing stable identifiers for built-in deterministic scenes.
@@ -44,6 +44,7 @@ pub enum ScenePresetArg {
     VenusTransit,
     JupiterShadowTransit,
     IssPass,
+    BrightComet,
     AllSkyHammer,
     AllSkyMollweide,
     GalacticNorth,
@@ -68,6 +69,7 @@ impl ScenePresetArg {
         Self::VenusTransit,
         Self::JupiterShadowTransit,
         Self::IssPass,
+        Self::BrightComet,
         Self::AllSkyHammer,
         Self::AllSkyMollweide,
         Self::GalacticNorth,
@@ -92,6 +94,7 @@ impl ScenePresetArg {
             Self::VenusTransit => "venus-transit",
             Self::JupiterShadowTransit => "jupiter-shadow-transit",
             Self::IssPass => "iss-pass",
+            Self::BrightComet => "bright-comet",
             Self::AllSkyHammer => "all-sky-hammer",
             Self::AllSkyMollweide => "all-sky-mollweide",
             Self::GalacticNorth => "galactic-north",
@@ -211,6 +214,12 @@ pub const SCENE_PRESET_INFOS: &[ScenePresetInfo] = &[
         title: "ISS pass (dark-sky)",
         description: "2026-05-30 ~05:57 UTC near-zenith International Space Station pass from a fixed 45°S / 0° observer (alt ≈ 82°, az ≈ 242°, fully sunlit) at astronomical twilight from the curated CelesTrak TLE snapshot. Wires the V-55 SGP4 satellite layer: TEME→topocentric reduction, Earth-shadow visibility, and McCants apparent magnitude.",
         validation_focus: "V-55 satellite layer: SGP4 propagation, sunlit/above-horizon gating, apparent-magnitude sprite against a dark sky at the curated TLE epoch",
+    },
+    ScenePresetInfo {
+        id: ScenePresetArg::BrightComet,
+        title: "Bright comet (C/2023 A3 evening)",
+        description: "2024-10-17 ~18:45 UTC dark-sky western-evening view of comet C/2023 A3 (Tsuchinshan-ATLAS) from a 40°N / 0° observer (comet alt ≈ 17°, az ≈ 258°, m ≈ 1.8) shortly after its perihelion. Wires the V-49 comet layer: two-body Keplerian propagation from JPL SBDB osculating elements, Bobrovnikoff-Bowell coma photometry, anti-solar ion tail, and the β = 0.6 dust syndyne.",
+        validation_focus: "V-49 comet layer: osculating-element position/magnitude, coma + anti-solar ion / dust tails against a dark twilight sky",
     },
     ScenePresetInfo {
         id: ScenePresetArg::AllSkyHammer,
@@ -563,6 +572,31 @@ pub fn scene_from_preset(
             scene.satellites = curated_satellite_layer(true, 0.0);
             scene
         }
+        ScenePresetArg::BrightComet => {
+            // V-49 validation: comet C/2023 A3 (Tsuchinshan-ATLAS) in the
+            // western evening sky on 2024-10-17, three weeks after its
+            // 2024-09-27 perihelion, when it was a bright (m ≈ 1.8) naked-eye
+            // object with a long anti-solar tail. The observer (40°N, 0°) is
+            // ~1.7 h past sunset (astronomical twilight) so the comet and its
+            // tails stand out against a dark sky.
+            let mut scene = earth_scene(
+                40.0,
+                0.0,
+                "2024-10-17T18:45:00Z",
+                257.0,
+                17.0,
+                40.0,
+                overlay_config(&[
+                    OverlayKind::Horizon,
+                    OverlayKind::CardinalLabels,
+                    OverlayKind::ConstellationLines,
+                ]),
+                AtmospherePreset::ClearRural,
+                catalog,
+            )?;
+            scene.comets = curated_comet_layer(true);
+            scene
+        }
         ScenePresetArg::AllSkyHammer => {
             all_sky_scene("2026-08-13T12:00:00Z", SkyProjection::Hammer, catalog)?
         }
@@ -631,6 +665,7 @@ fn earth_scene(
         scintillation: Scintillation::default(),
         planets_enabled: true,
         satellites: SatelliteLayer::default(),
+        comets: CometLayer::default(),
         projection: SkyProjection::Perspective,
         viewpoint: SkyViewpoint::Earth,
         external_viewpoint: ExternalViewpoint::GALACTIC_NORTH,
@@ -696,6 +731,7 @@ fn external_scene(
         scintillation: Scintillation::OFF,
         planets_enabled: false,
         satellites: SatelliteLayer::default(),
+        comets: CometLayer::default(),
         projection,
         viewpoint,
         external_viewpoint,

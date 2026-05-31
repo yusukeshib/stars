@@ -3128,6 +3128,68 @@ CelesTrak (celestrak.org); McCants (mmccants.org).
 
 ---
 
+## `V-49` Comet rendering — shipped (CLI + viewer + web)
+
+Named comets now render from a curated osculating-element snapshot with a
+coma plus anti-solar ion tail and a β = 0.6 dust syndyne, so Halley,
+Hale-Bopp, and C/2023 A3 (Tsuchinshan-ATLAS) can be drawn for any observer /
+instant.
+
+1. **What changed.** A new `astronomy::comets` module stores comet orbits as
+   J2000-ecliptic osculating Keplerian elements (Marsden / MPC convention)
+   and propagates them two-body from the time of perihelion passage — the
+   elliptical, parabolic (Barker), and hyperbolic conics are all handled. The
+   heliocentric Gauss-vector state (position + velocity) is rotated into the
+   J2000 equatorial frame, where it shares one frame with the Earth's VSOP87D
+   position (de-precessed mean-of-date → J2000 by the inverse IAU 2006
+   precession matrix); the geocentric vector is light-time corrected and
+   reduced to RA/Dec, with WGS84 topocentric parallax for the renderer. Coma
+   photometry uses the Bobrovnikoff-Bowell law
+   `m1 = M1 + 5 log₁₀ Δ + K1 log₁₀ r`; the ion tail follows the prolonged
+   anti-solar radius vector and the dust tail a representative
+   Finson-Probstein β = 0.6 syndyne. The renderer carries a `CometLayer` on
+   `Camera`, packs a per-frame comet uniform block, and
+   `shaders/skyglow.wgsl` draws each comet as a soft 1/ρ coma plus
+   great-circle ion / dust tail streaks in a self-contained `comet_radiance`
+   pass.
+
+2. **Why it counts as complete.** Two-body propagation is pinned (exact `r =
+   q` at perihelion; Halley at the 1986-04-10 close approach matches the
+   recorded apparition — RA ≈ 15.5 h, Dec ≈ −47°, Δ ≈ 0.42 AU — to
+   arcminutes); the magnitude law and tail geometry are tested; the layer
+   renders visibly (the `bright-comet` C/2023 A3 preset) and is wired into
+   every host with a session + manifest-pinned data trail.
+
+3. **Where it lives.** `crates/astronomy/src/comets.rs`;
+   `crates/renderer/src/camera.rs` (`CometLayer`, `comet_uniforms`, appended
+   `CameraUniform` comet block) + `crates/renderer/src/shaders/skyglow.wgsl`
+   (`comet_radiance`); `crates/common/src/comets.rs` (curated element embed)
+   + `crates/common/data/comets/elements.csv`; a backward-compatible
+   `#[serde(default)]` `comets` session field (no schema-version bump) in
+   `crates/common/src/session.rs`; the `bright-comet` preset in
+   `crates/common/src/presets.rs`; `apps/cli` (`--comets`), `apps/viewer`
+   (`--comets` + `C` key), and `apps/web` (`StarView.set_comets` + frontend
+   settings toggle, localStorage, and shareable-URL state).
+
+4. **Tests / validation.** `astronomy::comets` pins the perihelion-radius
+   invariant, post-perihelion distance growth, the Halley 1986 close-approach
+   position, the magnitude law, unit anti-solar tail directions, the
+   parabolic / hyperbolic branches, and the CSV parser; `make manifest-check`
+   pins the element snapshot and the `bright-comet` preset.
+
+5. **Hosts wired.** CLI (`--comets`), viewer (`--comets` + runtime `C`
+   toggle), web (`set_comets` WASM binding + settings toggle with session /
+   URL round-trip). The layer is off by default so the dark-sky composition
+   is unchanged; the default render path uses the curated, manifest-pinned
+   snapshot so renders stay deterministic.
+
+References (also pinned in ROADMAP `V-49`): Finson, M. L. & Probstein, R. F.
+1968, ApJ 154, 327; Marsden, B. G. & Williams, G. V., MPC element format;
+Bobrovnikoff, N. T. 1942, ApJ 95, 71; Bowell, E. et al. 1989. Orbital data
+via NASA/JPL SBDB.
+
+---
+
 ### L-19 SIMBAD / VizieR deep links
 
 The info panel / GoTo metadata now carries canonical CDS lookup URLs built

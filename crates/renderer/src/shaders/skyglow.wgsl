@@ -149,10 +149,22 @@ struct CameraUniform {
     aurora_geometry: vec4<f32>,
     // V-48 aurora control header: [enabled, intensity, reserved, reserved].
     aurora_params: vec4<f32>,
+    // V-49 comet nucleus: xyz = apparent J2000-equatorial unit direction,
+    // w = apparent total magnitude.
+    comet_dir_mag: array<vec4<f32>, 4>,
+    // V-49 comet ion-tail tip: xyz = unit sky direction of the anti-solar
+    // ion-tail tip, w = coma angular radius (radians).
+    comet_ion_tip: array<vec4<f32>, 4>,
+    // V-49 comet dust-tail tip: xyz = unit sky direction of the β=0.6 dust
+    // syndyne tip, w = tail angular length (radians).
+    comet_dust_tip: array<vec4<f32>, 4>,
+    // V-49 comet header: [count, enabled, reserved, reserved].
+    comet_params: vec4<f32>,
 };
 
 const MAX_SATELLITES: u32 = 32u;
 const MAX_METEORS: u32 = 64u;
+const MAX_COMETS: u32 = 4u;
 
 // Stable shader codes for `OccluderTarget` (mirrors Rust).
 const OCCLUDER_TARGET_SUN: i32 = 0;
@@ -1139,6 +1151,105 @@ fn aurora_radiance(ray_dir: vec3<f32>, zeropoint: f32, pixel_arcsec2: f32) -> ve
     return rgb;
 }
 
+// =====================================================================
+// V-49 comet rendering (self-contained; invoked once from fs_main).
+// Each above-horizon comet renders a soft coma (surface brightness ∝ 1/ρ
+// from the nucleus, per Finson-Probstein / Bobrovnikoff conventions) plus an
+// anti-solar ion tail and a β=0.6 dust syndyne, both drawn as great-circle
+// streaks from the nucleus to their tip directions that taper with distance.
+// =====================================================================
+
+// Angular distance (radians) from `ray_dir` to the great-circle segment from
+// `a` to `b` (unit directions); used to give tails a soft, tapering profile.
+fn comet_arc_distance(ray_dir: vec3<f32>, a: vec3<f32>, b: vec3<f32>) -> f32 {
+    let n = cross(a, b);
+    let nlen = length(n);
+    if nlen < 1e-7 {
+        return acos(clamp(dot(ray_dir, a), -1.0, 1.0));
+    }
+    let nn = n / nlen;
+    let dist_to_plane = abs(asin(clamp(dot(ray_dir, nn), -1.0, 1.0)));
+    let proj = normalize(ray_dir - nn * dot(ray_dir, nn));
+    let ab = acos(clamp(dot(a, b), -1.0, 1.0));
+    let ap = acos(clamp(dot(a, proj), -1.0, 1.0));
+    let bp = acos(clamp(dot(b, proj), -1.0, 1.0));
+    if ap + bp - ab > 1e-4 {
+        let da = acos(clamp(dot(ray_dir, a), -1.0, 1.0));
+        let db = acos(clamp(dot(ray_dir, b), -1.0, 1.0));
+        return min(da, db);
+    }
+    return dist_to_plane;
+}
+
+// Fraction along the great-circle arc a..b nearest to `ray_dir`, in [0, 1].
+// 0 = at the nucleus end `a`, 1 = at the tail tip `b`. Used to fade the tail
+// brightness from the coma outward.
+fn comet_arc_fraction(ray_dir: vec3<f32>, a: vec3<f32>, b: vec3<f32>) -> f32 {
+    let ab = acos(clamp(dot(a, b), -1.0, 1.0));
+    if ab < 1e-6 {
+        return 0.0;
+    }
+    let n = cross(a, b);
+    let nlen = length(n);
+    if nlen < 1e-7 {
+        return 0.0;
+    }
+    let nn = n / nlen;
+    let proj = normalize(ray_dir - nn * dot(ray_dir, nn));
+    let ap = acos(clamp(dot(a, proj), -1.0, 1.0));
+    return clamp(ap / ab, 0.0, 1.0);
+}
+
+fn comet_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_sr: f32) -> vec3<f32> {
+    if camera.comet_params.y <= 0.0 || sin_alt <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    var rgb = vec3<f32>(0.0);
+    let pixel_radius = sqrt(max(pixel_sr, 1e-12));
+    for (var i = 0u; i < MAX_COMETS; i = i + 1u) {
+        if f32(i) >= camera.comet_params.x {
+            break;
+        }
+        let entry = camera.comet_dir_mag[i];
+        let nucleus = normalize(entry.xyz);
+        // Skip below-horizon comets.
+        if dot(nucleus, camera.zenith_eq.xyz) <= 0.0 {
+            continue;
+        }
+        let magnitude = entry.w;
+        let total_flux = magnitude_to_flux(magnitude, zeropoint);
+        let coma_radius = max(camera.comet_ion_tip[i].w, pixel_radius);
+        let ion_tip = normalize(camera.comet_ion_tip[i].xyz);
+        let dust_tip = normalize(camera.comet_dust_tip[i].xyz);
+
+        // Coma: soft circular profile with surface brightness ∝ 1/ρ from the
+        // nucleus, normalised so the integrated coma carries ~70% of the
+        // total light (the rest goes to the tails).
+        let rho = acos(clamp(dot(ray_dir, nucleus), -1.0, 1.0));
+        let coma_profile = (1.0 - smoothstep01(0.0, coma_radius, rho))
+            / (1.0 + rho / max(coma_radius * 0.25, 1e-6));
+        let coma_area = max(PI * coma_radius * coma_radius, pixel_sr);
+        let coma = vec3<f32>(0.78, 0.92, 1.00) * total_flux * 0.7 * coma_profile
+            * (pixel_sr / coma_area);
+
+        // Tails: great-circle streaks that taper to the tip. The ion tail
+        // reads bluish (CO+ emission); the dust tail reads warm yellow-white
+        // (reflected sunlight). Brightness fades along the arc and across it.
+        let tail_width = max(coma_radius * 0.6, pixel_radius);
+        let ion_d = comet_arc_distance(ray_dir, nucleus, ion_tip);
+        let ion_t = comet_arc_fraction(ray_dir, nucleus, ion_tip);
+        let ion_mask = (1.0 - smoothstep01(0.0, tail_width, ion_d)) * (1.0 - ion_t);
+        let dust_d = comet_arc_distance(ray_dir, nucleus, dust_tip);
+        let dust_t = comet_arc_fraction(ray_dir, nucleus, dust_tip);
+        let dust_mask = (1.0 - smoothstep01(0.0, tail_width * 1.3, dust_d)) * (1.0 - dust_t);
+        let tail_scale = total_flux * 0.15 * (pixel_sr / max(coma_area, 1e-6));
+        rgb += coma;
+        rgb += vec3<f32>(0.55, 0.75, 1.00) * tail_scale * ion_mask;
+        rgb += vec3<f32>(1.00, 0.92, 0.72) * tail_scale * dust_mask;
+    }
+    return rgb;
+}
+
 fn moonlit_sky_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32) -> vec3<f32> {
     if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
         return vec3<f32>(0.0);
@@ -1811,5 +1922,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let meteor_radiance_rgb = meteor_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
     // V-48 aurora insertion point (self-contained; zero when the layer is off).
     let aurora_radiance_rgb = aurora_radiance(ray_dir, zeropoint, pixel_arcsec2);
-    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance + planet_radiance + galilean_radiance + titan_radiance + satellite_radiance_rgb + meteor_radiance_rgb + aurora_radiance_rgb, 1.0);
+    // V-49 comet layer (self-contained; off when comet_params.y <= 0).
+    let comet_radiance_rgb = comet_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
+    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance + planet_radiance + galilean_radiance + titan_radiance + satellite_radiance_rgb + meteor_radiance_rgb + aurora_radiance_rgb + comet_radiance_rgb, 1.0);
 }

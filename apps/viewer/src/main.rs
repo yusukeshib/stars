@@ -6,12 +6,13 @@ use anyhow::Result;
 use astronomy::Observer;
 use clap::Parser;
 use renderer::{
-    Atmosphere, AuroraLayer, Camera, LightPollution, LocalView, MeteorLayer, OutputColourSpace,
-    OverlayConfig, Renderer, SatelliteLayer, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    Atmosphere, AuroraLayer, Camera, CometLayer, LightPollution, LocalView, MeteorLayer,
+    OutputColourSpace, OverlayConfig, Renderer, SatelliteLayer, StarInstance,
+    DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
-    atmosphere_from_args, aurora_from_args, curated_satellite_layer, eyepiece_from_args,
-    light_pollution_from_args, load_session, load_star_instances_from_file,
+    atmosphere_from_args, aurora_from_args, curated_comet_layer, curated_satellite_layer,
+    eyepiece_from_args, light_pollution_from_args, load_session, load_star_instances_from_file,
     overlay_config_from_args, parse_time_to_time_scales, resolve_goto_query,
     resolve_light_pollution, scene_from_preset, scene_preset_infos, scintillation_from_args,
     viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg, AuroraSeasonArg,
@@ -264,6 +265,11 @@ struct Args {
     #[arg(long, value_enum)]
     aurora_season: Option<AuroraSeasonArg>,
 
+    /// Enable the V-49 comet layer (curated JPL SBDB elements). Toggle at
+    /// runtime with the `C` key.
+    #[arg(long)]
+    comets: bool,
+
     /// Enable telescope eyepiece simulation. Supplying any telescope/eyepiece
     /// parameter also enables this mode.
     #[arg(long)]
@@ -410,6 +416,7 @@ fn main() -> Result<()> {
                 args.aurora_kp.unwrap_or(0.0),
                 args.aurora_season.unwrap_or_default(),
             ),
+            comets: curated_comet_layer(args.comets),
             projection: args.projection.into(),
             viewpoint,
             external_viewpoint,
@@ -490,6 +497,7 @@ fn main() -> Result<()> {
         scene.satellites.clone(),
         scene.meteors.clone(),
         scene.aurora,
+        scene.comets.clone(),
         scene.projection,
         scene.viewpoint,
         scene.external_viewpoint,
@@ -560,6 +568,9 @@ struct App {
     meteors: MeteorLayer,
     /// V-48 aurora layer (toggle with the `A` key).
     aurora: AuroraLayer,
+    /// V-49 comet layer (curated elements are always loaded so the `C` key can
+    /// toggle the layer on/off at runtime).
+    comets: CometLayer,
     projection: renderer::SkyProjection,
     viewpoint: renderer::SkyViewpoint,
     external_viewpoint: renderer::ExternalViewpoint,
@@ -643,6 +654,7 @@ impl App {
         satellites: SatelliteLayer,
         meteors: MeteorLayer,
         aurora: AuroraLayer,
+        comets: CometLayer,
         projection: renderer::SkyProjection,
         viewpoint: renderer::SkyViewpoint,
         external_viewpoint: renderer::ExternalViewpoint,
@@ -655,6 +667,12 @@ impl App {
         let satellites = SatelliteLayer {
             tles: curated_satellite_layer(true, satellites.exposure_seconds).tles,
             ..satellites
+        };
+        // Likewise keep the curated comet elements loaded so the `C` key works
+        // even when the layer starts disabled.
+        let comets = CometLayer {
+            comets: curated_comet_layer(true).comets,
+            ..comets
         };
         Self {
             gpu: None,
@@ -672,6 +690,7 @@ impl App {
             satellites,
             meteors,
             aurora,
+            comets,
             projection,
             viewpoint,
             external_viewpoint,
@@ -807,6 +826,7 @@ impl ApplicationHandler for App {
         camera.satellites = self.satellites.clone();
         camera.meteors = self.meteors.clone();
         camera.aurora = self.aurora;
+        camera.comets = self.comets.clone();
         camera.projection = self.projection;
         camera.viewpoint = self.viewpoint;
         camera.external_viewpoint = self.external_viewpoint;
@@ -1019,6 +1039,18 @@ impl ApplicationHandler for App {
                                     "off"
                                 },
                                 gpu.camera.aurora.kp
+                            );
+                        }
+                        Some(KeyCode::KeyC) => {
+                            // V-49: toggle the comet layer.
+                            gpu.camera.comets.enabled = !gpu.camera.comets.enabled;
+                            log::info!(
+                                "comets {}",
+                                if gpu.camera.comets.enabled {
+                                    "on"
+                                } else {
+                                    "off"
+                                }
                             );
                         }
                         Some(KeyCode::Space) => self.sky_clock.toggle_pause(),

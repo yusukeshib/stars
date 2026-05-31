@@ -88,6 +88,10 @@ Owns scientific and geometric models:
   and packs `aurora_geometry` / `aurora_params` rows appended at the end of
   `CameraUniform`; `shaders/skyglow.wgsl::aurora_radiance` composites the
   green / red / magenta emission near the horizon;
+- comet osculating-element two-body propagation (elliptical / parabolic /
+  hyperbolic), J2000-equatorial geocentric reduction sharing the Earth's
+  VSOP87D position, Bobrovnikoff-Bowell coma photometry, and anti-solar ion /
+  β = 0.6 dust-syndyne tail directions (`comets.rs`, V-49);
 - planning helpers such as rise / transit / set, twilight bands, and the
   `L-09` observation-planning layer: Krisciunas-Schaefer 1991 Moon-impact
   (`moon_impact`), visibility scoring (`visibility_score`), recommended-
@@ -363,7 +367,14 @@ The exact pass layout can change, but responsibilities should stay separated:
   pipeline, and packs them into a `meteor_segments` block appended at the END
   of `CameraUniform`; the self-contained `meteor_radiance` evaluator reuses the
   great-circle `satellite_streak_mask` from a single composition insertion
-  point. The V-52d Galilean-shadow producer
+  point. Comets (V-49) ride the same skyglow pass: `Camera::comet_uniforms`
+  propagates the `CometLayer`'s osculating elements two-body every frame, maps
+  each nucleus through the same `apparent_disk_direction_j2000` pipeline, and
+  packs nucleus direction+magnitude, coma radius, and ion (anti-solar) / dust
+  (β = 0.6 syndyne) tail-tip sky directions into an appended comet uniform
+  block; `comet_radiance` draws a soft 1/ρ coma plus great-circle ion / dust
+  tail streaks. The V-52d Galilean-shadow producer
+
   (`astronomy::galilean_shadow_disks_at`) feeds the same uniform; it
   also drives a CPU-side "moon behind Jupiter" cull on the V-52b
   Galilean-moon sprite path via a negative-radius sentinel in

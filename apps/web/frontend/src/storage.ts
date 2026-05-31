@@ -23,6 +23,7 @@ import {
   type PlanetsConfig,
   type ProjectionConfig,
   type SatellitesConfig,
+  type CometsConfig,
   type ScintillationConfig,
   type View,
   type EyepieceConfig,
@@ -43,6 +44,7 @@ export type PersistedConfig = {
   satellites?: SatellitesConfig;
   meteors?: MeteorsConfig;
   aurora?: AuroraConfig;
+  comets?: CometsConfig;
   projection?: ProjectionConfig;
   eyepiece?: EyepieceConfig;
   outputColourspace?: OutputColourspace;
@@ -70,6 +72,7 @@ export function loadConfig(): PartialPersistedConfig | null {
       satellites?: unknown;
       meteors?: unknown;
       aurora?: unknown;
+      comets?: unknown;
       projection?: unknown;
       eyepiece?: unknown;
       outputColourspace?: unknown;
@@ -90,6 +93,8 @@ export function loadConfig(): PartialPersistedConfig | null {
     if (meteors) out.meteors = meteors;
     const aurora = parseAuroraConfig(obj.aurora);
     if (aurora) out.aurora = aurora;
+    const comets = parseCometsConfig(obj.comets);
+    if (comets) out.comets = comets;
     const projection = parseProjectionConfig(obj.projection);
     if (projection) out.projection = projection;
     const eyepiece = parseEyepieceConfig(obj.eyepiece);
@@ -224,6 +229,11 @@ function parseAuroraConfig(v: unknown): AuroraConfig | null {
   };
 }
 
+function parseCometsConfig(v: unknown): CometsConfig | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Partial<CometsConfig>;
+  return typeof o.enabled === "boolean" ? { enabled: o.enabled } : null;
+}
 
 function parseVec3(v: unknown, range: [number, number]): { x: number; y: number; z: number } | null {
   if (!v || typeof v !== "object") return null;

@@ -119,6 +119,7 @@ pub async fn render_scene_pixels(
     camera.planets_enabled = scene.planets_enabled;
     camera.satellites = scene.satellites.clone();
     camera.meteors = scene.meteors.clone();
+    camera.comets = scene.comets.clone();
     camera.projection = scene.projection;
     camera.viewpoint = scene.viewpoint;
     camera.external_viewpoint = scene.external_viewpoint;

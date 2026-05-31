@@ -119,8 +119,8 @@ via `V-39`, including the `V-39-Atlas` Falchi 2016 World Atlas loader),
 niche visual
 features (`V-45` telescope-side optical artifacts, `V-46` galactic structural
 model, and `V-50` output colour management have all shipped), and rare
-phenomena (`V-47` meteor showers and `V-48` aurora display have shipped;
-`V-49` comets remain).
+phenomena (`V-47` meteor showers, `V-48` aurora display, and `V-49` comet
+rendering have all shipped). Every `V-45`–`V-50` item is now complete.
 
 **High priority next:** the visual-richness gaps `V-51`–`V-56` (eclipses /
 occultations, planetary rings and moons, resolved star clusters, double
@@ -217,7 +217,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-46` | **Galactic structural model for external viewpoints** | ✅ |
 | `V-47` | **Meteor shower display** | ✅ |
 | `V-48` | **Aurora display** | ✅ |
-| `V-49` | **Comet rendering** | ⬜ |
+| `V-49` | **Comet rendering** | ✅ |
 | `V-50` | **Output colour management (sRGB / P3 / Rec.2020)** | ✅ |
 | `V-51` | **Unified eclipse / occultation pass** (`a` + `b` + `c` + `d` + `e` + `f` done) | ✅ |
 | `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** (all rungs `a`–`d` done; Galilean at Lainey 2006 L1.2, Titan at TASS1.7) | ✅ |
@@ -1711,7 +1711,7 @@ for the supplied Kp.
 
 ---
 
-### `V-49` Comet rendering — ⬜
+### `V-49` Comet rendering — ✅ done
 
 **Item.** Render named comets from a documented orbital-element snapshot
 (JPL Small-Body Database / Minor Planet Center MPCORB) with both coma and
@@ -1755,6 +1755,44 @@ direction projected with solar-wind aberration.
 **Deliberate non-goal scope.** No fragmentation, no outburst modelling,
 no jet structure. Single-epoch element sets are regenerated when the
 manifest version bumps.
+
+**Implementation (as shipped).**
+- `crates/astronomy/src/comets.rs`: `CometElements` osculating-element
+  struct (Marsden / MPC convention, J2000 ecliptic), two-body Keplerian
+  propagation covering elliptical / parabolic (Barker) / hyperbolic conics,
+  the Gauss-vector heliocentric state (position + velocity), a J2000
+  equatorial reduction that shares one frame with the Earth's VSOP87D
+  position (de-precessed to J2000 by the inverse IAU 2006 matrix),
+  one-iteration light-time correction, topocentric parallax, the
+  Bobrovnikoff-Bowell magnitude law `m1 = M1 + 5 log Δ + K1 log r`, and the
+  anti-solar ion-tail / β = 0.6 dust-syndyne tail directions. A
+  `parse_comet_elements` CSV reader backs the curated snapshot.
+- `crates/renderer/src/camera.rs`: `CometLayer` on `Camera`, a
+  `comet_uniforms()` producer that packs per-comet nucleus direction,
+  magnitude, coma radius, and ion / dust tail-tip sky directions, and the
+  appended `CameraUniform` comet block.
+- `crates/renderer/src/shaders/skyglow.wgsl`: a self-contained
+  `comet_radiance` pass (coma surface brightness ∝ 1/ρ + great-circle ion /
+  dust tail streaks) summed once into the fragment output.
+- `crates/common`: curated, manifest-pinned JPL SBDB element snapshot
+  (`data/comets/elements.csv`, Halley / Hale-Bopp / C/2023 A3),
+  `curated_comet_layer`, a backward-compatible `comets` session field
+  (`#[serde(default)]`, no schema-version bump), and the `bright-comet`
+  scene preset.
+- Hosts: CLI `--comets`, viewer `--comets` + runtime `C`-key toggle, web
+  `StarView.set_comets` WASM binding with a settings-panel checkbox,
+  localStorage persistence, and shareable-URL state.
+
+**Tests / validation.**
+- `astronomy::comets`: perihelion radius equals `q` exactly at `Tp`;
+  heliocentric distance grows after perihelion; Halley at the 1986-04-10
+  close approach lands at RA ≈ 15.5 h, Dec ≈ −47°, Δ ≈ 0.42 AU (matching the
+  recorded apparition to arcminutes); the magnitude law matches its
+  closed form; tail directions are unit-length and anti-solar; the
+  parabolic / hyperbolic branches stay finite; the CSV parser skips
+  comments / malformed rows.
+- `data/manifest.toml`: the element snapshot and the `bright-comet` preset
+  are pinned by `make manifest-check`.
 
 **Hosts wired.** CLI / viewer / web.
 

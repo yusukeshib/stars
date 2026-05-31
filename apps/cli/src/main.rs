@@ -10,14 +10,14 @@ use renderer::{
     LocalView, MeteorLayer, OutputColourSpace, SkyViewpoint, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
-    atmosphere_from_args, aurora_from_args, curated_satellite_layer, eyepiece_from_args,
-    hyg_catalog_snapshot, light_pollution_from_args, load_session, overlay_config_from_args,
-    parse_time_to_time_scales, render_scene_from_catalog_path, resolve_goto_query, save_session,
-    scene_from_preset, scene_preset_infos, scintillation_from_args, viewpoint_from_args,
-    AtmosphereOverrides, AtmospherePresetArg, AuroraSeasonArg, CorrectionSnapshot,
-    ExternalViewpointOverrides, EyepieceOverrides, LightPollutionOverrides, OpticalDesign,
-    OutputColourspaceArg, OverlayArg, ProjectionArg, RenderOptions, ScenePresetArg,
-    ScintillationOverrides, SessionScene, StarSession, ViewpointArg,
+    atmosphere_from_args, aurora_from_args, curated_comet_layer, curated_satellite_layer,
+    eyepiece_from_args, hyg_catalog_snapshot, light_pollution_from_args, load_session,
+    overlay_config_from_args, parse_time_to_time_scales, render_scene_from_catalog_path,
+    resolve_goto_query, save_session, scene_from_preset, scene_preset_infos,
+    scintillation_from_args, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
+    AuroraSeasonArg, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides,
+    LightPollutionOverrides, OpticalDesign, OutputColourspaceArg, OverlayArg, ProjectionArg,
+    RenderOptions, ScenePresetArg, ScintillationOverrides, SessionScene, StarSession, ViewpointArg,
 };
 
 /// Resolve the V-45 optical design from the `--telescope-design` /
@@ -280,6 +280,12 @@ struct Args {
     #[arg(long, default_value_t = 120.0)]
     meteor_window_seconds: f32,
 
+    /// Enable the V-49 comet layer using the curated, manifest-pinned JPL SBDB
+    /// osculating-element snapshot (Halley, Hale-Bopp, C/2023 A3). Off by
+    /// default so the dark-sky composition is unchanged.
+    #[arg(long)]
+    comets: bool,
+
     /// Enable telescope eyepiece simulation. Supplying any telescope/eyepiece
     /// parameter also enables this mode.
     #[arg(long)]
@@ -488,6 +494,7 @@ fn main() -> Result<()> {
                 args.aurora_kp.unwrap_or(0.0),
                 args.aurora_season.unwrap_or_default(),
             ),
+            comets: curated_comet_layer(args.comets),
             projection: args.projection.into(),
             viewpoint,
             external_viewpoint,

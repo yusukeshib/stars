@@ -6,6 +6,7 @@ import {
   DEFAULT_PLANETS_CONFIG,
   DEFAULT_PROJECTION_CONFIG,
   DEFAULT_OUTPUT_COLOURSPACE,
+  DEFAULT_COMETS_CONFIG,
   DEFAULT_SATELLITES_CONFIG,
   DEFAULT_SCINTILLATION_CONFIG,
   MAX_FOV_DEG,
@@ -25,6 +26,7 @@ import {
   type OverlayConfig,
   type PlanetsConfig,
   type ProjectionConfig,
+  type CometsConfig,
   type SatellitesConfig,
   type ScintillationConfig,
   type Vec3,
@@ -74,6 +76,7 @@ export type StarSession = {
   satellites: SatellitesConfig;
   meteors: MeteorsConfig;
   aurora: AuroraConfig;
+  comets: CometsConfig;
   eyepiece: EyepieceConfig;
   outputColourspace: OutputColourspace;
   catalog: {
@@ -105,6 +108,7 @@ export type SessionState = {
   satellites: SatellitesConfig;
   meteors: MeteorsConfig;
   aurora: AuroraConfig;
+  comets: CometsConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   outputColourspace: OutputColourspace;
@@ -183,6 +187,7 @@ export function buildStarSession(state: SessionState): StarSession {
     satellites: state.satellites,
     meteors: state.meteors,
     aurora: state.aurora,
+    comets: state.comets,
     eyepiece: state.eyepiece,
     outputColourspace: state.outputColourspace,
     catalog: {
@@ -225,6 +230,7 @@ export function parseStarSessionJson(raw: string): SessionState {
   const satellites = parseSatellites(s.satellites);
   const meteors = parseMeteors(s.meteors);
   const aurora = parseAurora(s.aurora);
+  const comets = parseComets((s as { comets?: unknown }).comets);
   const projection = parseProjection(s.projection);
   const eyepiece = parseEyepiece(s.eyepiece);
   const outputColourspace = isOutputColourspace(s.outputColourspace)
@@ -241,6 +247,7 @@ export function parseStarSessionJson(raw: string): SessionState {
     satellites,
     meteors,
     aurora,
+    comets,
     projection,
     eyepiece,
     outputColourspace,
@@ -336,6 +343,14 @@ function parseMeteors(value: unknown): MeteorsConfig {
     seed: num(v.seed, 0, DEFAULT_METEORS_CONFIG.seed),
     rateScale: num(v.rateScale, 0, DEFAULT_METEORS_CONFIG.rateScale),
     windowSeconds: num(v.windowSeconds, 0, DEFAULT_METEORS_CONFIG.windowSeconds),
+  };
+}
+
+function parseComets(value: unknown): CometsConfig {
+  if (!value || typeof value !== "object") return DEFAULT_COMETS_CONFIG;
+  const v = value as Partial<CometsConfig>;
+  return {
+    enabled: typeof v.enabled === "boolean" ? v.enabled : DEFAULT_COMETS_CONFIG.enabled,
   };
 }
 
