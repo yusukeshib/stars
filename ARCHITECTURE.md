@@ -202,12 +202,18 @@ Python interpreter via `maturin develop --features extension-module`;
 `cargo check -p stars-py` is the plain `make ci` gate via
 `make pyo3-check`. The binding sits **outside** the engine tier: it
 calls `Observer`, `apparent_sun_moon`, `apparent_planets`,
-`apparent_galilean_moons`, `apparent_titan`, and `StarCatalog`, plus
-`.altaz(observer)` projections, but does not pull in `renderer`,
-`common`, or any host crate. Notebook reviewers can therefore
-reproduce the exact apparent positions and magnitudes the renderer
-consumes without dragging in WGPU. Wheel-matrix CI and the
-notebook-side consumer port are tracked as the L-21 follow-up.
+`apparent_galilean_moons`, `apparent_titan`, `StarCatalog`, the
+observation-planning surface (`evening_plan`, `rise_transit_set`,
+`twilight_*`), the occultation / eclipse finders (`active_occluders`,
+`find_lunar_occultation`, `find_solar_eclipse`, `find_planet_transit`,
+`find_mutual_planetary_occultation`), and a `serde_json`-only `Session`
+round-trip of the `crates/common` JSON schema, plus `.altaz(observer)`
+projections — but does not pull in `renderer`, `common`, or any host
+crate. Notebook reviewers can therefore reproduce the exact apparent
+positions, magnitudes, planning windows, and eclipse circumstances the
+renderer consumes without dragging in WGPU. The only out-of-scope
+follow-up is a maturin wheel-matrix CI job (needs a Python toolchain in
+CI); the API surface itself is complete.
 
 ## Coordinate and time conventions
 

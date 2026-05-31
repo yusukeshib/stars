@@ -2883,6 +2883,66 @@ Files touched: `bindings/python/Cargo.toml`,
 `bindings/python/src/lib.rs`, `bindings/python/tests/smoke.py`,
 `bindings/python/README.md`, `ROADMAP.md`, `PROGRESS.md`.
 
+### `L-21` rung 3 — occultation / eclipse surface (item complete)
+
+Final rung: the binding now covers the V-51 occultation / eclipse
+planning surface, closing the last API gap, so `L-21` moves to ✅.
+
+What shipped (all in `bindings/python/`):
+
+- Six free functions wrapping `astronomy` 1:1: `active_occluders(observer)`
+  → `list[Occluder]` (the per-frame occlusion geometry the renderer
+  consumes); `find_lunar_occultation(observer, planet, start_jd, end_jd)`
+  (planet target) and `find_lunar_star_occultation(observer, dir_eq,
+  start_jd, end_jd)` (date-equatorial unit-vector star target);
+  `find_solar_eclipse`; `find_planet_transit` (Mercury / Venus only);
+  and `find_mutual_planetary_occultation`. Each returns `Optional[...]`
+  and validates body names with a Python `ValueError` (never a panic); a
+  `end <= start` window returns `None`.
+- Six new `#[pyclass]` wrappers — `ContactTimes` (P1..P4 as
+  `Optional[float]` + `.as_tuple()`), `LunarOccultation`, `SolarEclipse`
+  (with `.is_central()`), `PlanetTransit`, `MutualPlanetaryOccultation`,
+  and `Occluder` (`target` / `kind` / `obscuration` / `front_radius_rad`
+  / `front_dir_eq`). `kind` is the stable kebab label from the astronomy
+  classifier. Added `planet_from_name` / `occluder_target_name` helpers
+  (the latter maps `OccluderTarget::Planet(i)` through `Planet::ALL[i]`).
+- `glam` added (workspace-pinned) only to build the date-equatorial unit
+  direction for `find_lunar_star_occultation`.
+- `bindings/python/examples/reproduce_session.py` — a binding-native
+  reproducibility cross-check that loads a committed scene preset,
+  rebuilds its `Observer`, and prints the apparent / planning /
+  occultation numbers in-process (no CLI shell-out). The stdlib-only
+  `examples/notebooks/session_reproducibility.py` is left untouched so
+  `make notebook-check` keeps working without a Python extension build.
+
+Validation: two new in-crate Rust unit tests (eleven total) —
+`occultation_finders_validate_and_map_options` (name validation + Option
+mapping across all five finders, including the star path and the
+identical-planet rejection) and `active_occluders_are_bounded_and_labelled`
+(count ≤ `MAX_OCCLUDERS`, every target label resolvable, obscuration in
+[0,1]). `smoke.py` extended to exercise the occultation / eclipse calls.
+`make fmt` then `make ci` pass (`cargo check -p stars-py`,
+`cargo clippy --all-targets -D warnings`, `cargo test --workspace`,
+`make notebook-check`, frontend typecheck).
+
+Honest residual (out of scope, ⬜): a `pip install stars-py` wheel matrix
+built via maturin in CI for Linux / macOS / Windows. This is packaging
+infrastructure that needs a Python toolchain provisioned in the GitHub
+Actions job; the binding API, docs, and tests are complete and local
+`maturin develop` is documented, so the row is ✅ with the wheel matrix
+tracked as a separate CI-infra task.
+
+Docs updated: `ROADMAP.md` (`L-21` row → ✅, block reworded with the
+occultation surface + distribution follow-up), `ARCHITECTURE.md`
+(`bindings/python` row), `bindings/python/README.md` (occultation / eclipse
+API table + example), this entry.
+
+Files touched: `bindings/python/Cargo.toml`,
+`bindings/python/src/lib.rs`, `bindings/python/tests/smoke.py`,
+`bindings/python/examples/reproduce_session.py`,
+`bindings/python/README.md`, `ROADMAP.md`, `ARCHITECTURE.md`,
+`PROGRESS.md`.
+
 ## Headless HTTP server host (`L-22`)
 
 A new native host, `stars-server` (`apps/server/`), wraps the existing

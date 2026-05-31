@@ -105,6 +105,32 @@ def main() -> None:
         f"(fov={reloaded.fov_deg:.1f}°)"
     )
 
+    # --- Occultations & eclipses (V-51 planning surface) ---
+    jd0 = obs.jd_utc
+    occ = stars_py.active_occluders(obs)
+    print(f"Active occluders right now: {len(occ)}")
+    for o in occ:
+        print(
+            f"  {o.target:<8s} kind={o.kind:<18s} obscuration={o.obscuration:.3f}"
+        )
+    # Search a 1-day window for a few event classes. Any of these may be
+    # None for this epoch — the point is the call surface.
+    lunar = stars_py.find_lunar_occultation(obs, "venus", jd0, jd0 + 1.0)
+    print(f"Lunar occultation of Venus in [jd0, jd0+1d]: {lunar!r}")
+    eclipse = stars_py.find_solar_eclipse(obs, jd0, jd0 + 1.0)
+    print(f"Solar eclipse in [jd0, jd0+1d]: {eclipse!r}")
+    if eclipse is not None:
+        print(
+            f"  central={eclipse.is_central()} "
+            f"contacts={eclipse.contacts.as_tuple()}"
+        )
+    transit = stars_py.find_planet_transit(obs, "mercury", jd0, jd0 + 1.0)
+    print(f"Mercury transit in [jd0, jd0+1d]: {transit!r}")
+    mutual = stars_py.find_mutual_planetary_occultation(
+        obs, "venus", "jupiter", jd0, jd0 + 1.0
+    )
+    print(f"Venus/Jupiter mutual occultation in [jd0, jd0+1d]: {mutual!r}")
+
 
 if __name__ == "__main__":
     main()

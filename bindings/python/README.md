@@ -72,6 +72,32 @@ identifiers (`hyg_id`, `hip_id`) are surfaced as `Optional[int]`.
 default planning body) and `.twilight` (the ordered band timeline);
 `RiseTransitSet` times are `Optional[float]` UTC Julian Dates.
 
+### Occultations and eclipses (V-51 planning surface)
+
+| Python symbol | Wraps |
+|---|---|
+| `active_occluders(observer)` → `list[Occluder]` | `astronomy::active_occluders` |
+| `find_lunar_occultation(observer, planet, start_jd, end_jd)` → `Optional[LunarOccultation]` | `astronomy::find_lunar_occultation` (planet target) |
+| `find_lunar_star_occultation(observer, dir_eq, start_jd, end_jd)` → `Optional[LunarOccultation]` | same, star target (date-equatorial unit vector) |
+| `find_solar_eclipse(observer, start_jd, end_jd)` → `Optional[SolarEclipse]` | `astronomy::find_solar_eclipse` |
+| `find_planet_transit(observer, planet, start_jd, end_jd)` → `Optional[PlanetTransit]` | `astronomy::find_planet_transit` (Mercury/Venus) |
+| `find_mutual_planetary_occultation(observer, a, b, start_jd, end_jd)` → `Optional[MutualPlanetaryOccultation]` | `astronomy::find_mutual_planetary_occultation` |
+
+Each event object exposes a `kind` label (`"partial"`,
+`"annular-or-transit"`/`"annular"`, `"total"`), a `peak_jd_utc`, a peak
+metric (`peak_obscuration` or `min_separation_rad`), and a `contacts`
+→ `ContactTimes` with `p1`…`p4` as `Optional[float]` plus `.as_tuple()`.
+`SolarEclipse.is_central()` flags annular/total events. `Occluder`
+exposes `target` (`"sun"`/`"moon"`/planet name/`"stars"`), `kind`,
+`obscuration`, `front_radius_rad`, and `front_dir_eq`. The finders
+validate body names and raise `ValueError` (never panic) on bad input;
+a window with `end <= start` returns `None`.
+
+`examples/reproduce_session.py` shows the whole surface end-to-end:
+loading a committed scene preset, rebuilding its `Observer`, and
+cross-checking the apparent / planning / occultation numbers in-process
+(no CLI shell-out).
+
 ### Session round-trip (`crates/common` JSON schema)
 
 | Python symbol | Behaviour |
@@ -95,8 +121,11 @@ round-trip.
 - **No schema duplication.** `Session` wraps the parsed JSON value and
   seeds new documents from the committed `dark-sky` preset, so it tracks
   the real `SESSION_SCHEMA_VERSION` without re-declaring fields.
-- **No wheels in CI yet.** The wheel-build matrix is tracked under the
-  L-21 follow-up scope; `make pyo3-check` is the present gate.
+- **No wheels in CI yet.** The wheel-build matrix (maturin on
+  Linux/macOS/Windows for `pip install stars-py`) is the one remaining
+  L-21 follow-up; it needs a Python toolchain in the GitHub Actions job.
+  Locally, `maturin develop` is documented above and `make pyo3-check`
+  is the present CI gate.
 - **Identifier preservation** through the renderer is still under
   `L-18`; `Star.hyg_id` reflects what the embedded backend records,
   which is currently `None` for the compact catalog rows.
