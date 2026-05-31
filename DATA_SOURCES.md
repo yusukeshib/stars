@@ -315,6 +315,67 @@ Maintenance rules:
   keep the same column shape so the manifest re-hash works without
   schema churn.
 
+### Washington Double Star showpiece table (`V-54`)
+
+Repository location:
+
+- `crates/catalog/data/double_stars.csv`
+
+Used for:
+
+- `crates/catalog::doubles` (visual double / binary resolution lookup);
+- `crates/catalog::resolve_doubles` (catalog-load-time component split,
+  applied on both the HYG-CSV and embedded paths).
+
+Manifest id:
+
+- `wds-double-stars-bootstrap` in `data/manifest.toml`.
+
+Source:
+
+- Mason, B. D., Wycoff, G. L., Hartkopf, W. I., Douglass, G. G.,
+  Worley, C. E. 2001, AJ 122, 3466, "The 2001 US Naval Observatory
+  Double Star CD-ROM. I. The Washington Double Star Catalog"
+  (DOI 10.1086/323920); USNO-maintained updates,
+  `http://www.astro.gsu.edu/wds/`. Separation `ρ`, position angle `θ`,
+  and component magnitudes per epoch.
+
+License:
+
+- Public domain (US Naval Observatory). See
+  `http://www.astro.gsu.edu/wds/`.
+
+Implementation areas:
+
+- `crates/catalog/src/doubles.rs` (parser + `resolve_doubles`);
+- `crates/catalog/src/catalog.rs` (both load paths call `resolve_doubles`);
+- `scripts/extract-double-stars.py` (deterministic regenerator).
+
+V-54 first slice (hand-curated showpiece bootstrap) — the visual doubles
+HYG v4.2 merges into one row:
+
+- Algieba (γ Leo, HYG id 50440): golden K-type A/B, ρ = 4.6″, θ = 126°.
+- ε Lyrae "Double Double" (HYG ids 91633 / 91639): each row is itself an
+  unresolved pair, so resolution yields four sprites total.
+
+Pairs HYG already ships as two distinct rows are intentionally omitted to
+avoid double-counting: Albireo (β1 / β2 Cyg), Castor (α Gem A/B), and
+Mizar (A = id 65173, B = id 118887 at ~19″, with Alcor = id 65272 at
+~12′).
+
+Maintenance rules:
+
+- Re-running `python scripts/extract-double-stars.py` must produce the
+  committed CSV byte-identically; the bootstrap row list lives in the
+  script and is the single source of truth.
+- Only add a pair here if HYG merges its components into a single row;
+  pairs HYG already resolves must stay out to avoid a phantom third
+  component.
+- The full-catalog WDS extraction lives behind
+  `scripts/extract-double-stars.py --from-wds` (stubbed) and must keep
+  the same column shape so the manifest re-hash works without schema
+  churn.
+
 ### IAU / Delporte constellation boundaries
 
 Repository location:

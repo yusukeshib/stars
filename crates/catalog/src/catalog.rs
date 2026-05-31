@@ -107,6 +107,11 @@ pub fn load_from_csv(data: &str) -> Vec<Star> {
         });
     }
 
+    // V-54: resolve merged WDS visual doubles (Algieba, the epsilon Lyrae
+    // Double Double) into their component sprites. No-op for any catalog that
+    // does not contain a bootstrap primary.
+    let stars = crate::doubles::resolve_doubles(stars);
+
     log::info!(
         "Loaded {} stars (mag <= {DEFAULT_MAX_MAGNITUDE})",
         stars.len()
@@ -160,6 +165,11 @@ fn load_from_binary(data: &[u8]) -> Result<Vec<Star>, String> {
             color: bv_to_rgb(ci),
         });
     }
+
+    // V-54: resolve merged WDS visual doubles on the embedded path too. The
+    // compact binary drops identifiers, so the resolver matches primaries by
+    // position.
+    let stars = crate::doubles::resolve_doubles(stars);
 
     log::info!("Loaded {} embedded stars (compact binary)", stars.len());
     Ok(stars)
