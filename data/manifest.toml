@@ -1010,6 +1010,47 @@ selected coordinates enter the current browser session — no observer query
 is sent to first-party `stars` services.
 """
 
+# ---------------------------------------------------------------------------
+# Optional external dataset (V-39-Atlas): Falchi 2016 World Atlas GeoTIFF.
+# Modelled as a runtime-service (no committed local bytes) because the raster
+# is ~1 GB — far too large to commit. It is fetched on demand and converted to
+# the compact FALATL01 grid the loader reads; the default render path never
+# requires it (Atlas2016 falls back to the rural Bortle-1 floor when absent).
+# ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "falchi-2016-world-atlas"
+description = """
+Falchi et al. 2016 World Atlas of Artificial Night Sky Brightness (2015 data
+release) GeoTIFF: per-pixel ratio of artificial zenith sky brightness to the
+natural background (~0.174 mcd/m², V≈21.6 mag/arcsec²) at ~750 m resolution.
+Optional, not committed: scripts/fetch-falchi-atlas.sh downloads it and
+scripts/build-falchi-atlas.py resamples it into the compact FALATL01 grid the
+V-39-Atlas loader (astronomy::FalchiAtlas) samples by observer lat/lng.
+"""
+kind = "runtime-service"
+endpoint = "https://doi.org/10.5880/GFZ.1.4.2016.001"
+source = "https://doi.org/10.5880/GFZ.1.4.2016.001"
+archive_id = "doi:10.5880/GFZ.1.4.2016.001"
+citation = "Falchi, F. et al. 2016, Science Advances 2, e1600377 (doi:10.1126/sciadv.1600377); data release GFZ Data Services, doi:10.5880/GFZ.1.4.2016.001."
+license = "see-upstream"
+license_url = "https://doi.org/10.5880/GFZ.1.4.2016.001"
+fields_used = ["band 1: artificial/natural zenith brightness ratio"]
+used_by = [
+    "scripts/fetch-falchi-atlas.sh",
+    "scripts/build-falchi-atlas.py",
+    "crates/astronomy/src/light_pollution_atlas.rs",
+    "crates/common/src/lib.rs",
+]
+limitations = """
+Not a live API and not committed: an optional ~1 GB GeoTIFF the user downloads
+and converts locally. Accept the upstream licence terms at the DOI landing
+page before use; this manifest records `see-upstream` because the release
+terms must be confirmed at download time. The shipped default render path does
+not read it — Atlas2016 falls back to the Bortle-1 floor when STARS_FALCHI_ATLAS
+is unset.
+"""
+
 # Demo gallery (L-14): curated public demo PNGs.
 
 [[artifact]]

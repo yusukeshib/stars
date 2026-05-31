@@ -70,7 +70,10 @@ Owns scientific and geometric models:
   GMST-defined inertial frame (`observer_equatorial_position_km`), so the
   satellite reduction reuses the same equatorial → horizontal path as the
   Sun / Moon / planets;
-- photometry, illuminants, atmosphere, twilight, and skyglow reference models;
+- photometry, illuminants, atmosphere, twilight, and skyglow reference models,
+  including the V-39 light-pollution model and the V-39-Atlas `FalchiAtlas`
+  parser + bilinear sampler for a compact `FALATL01` zenith-brightness grid
+  (`light_pollution_atlas.rs`, IO-free; the host crate does the file read);
 - planning helpers such as rise / transit / set, twilight bands, and the
   `L-09` observation-planning layer: Krisciunas-Schaefer 1991 Moon-impact
   (`moon_impact`), visibility scoring (`visibility_score`), recommended-
@@ -134,7 +137,12 @@ Owns native-host convenience only:
 - RFC3339 / now time parsing;
 - schema-versioned JSON session load/save and conversion into native render state;
 - deterministic named scene presets that compile to normal sessions;
-- filesystem catalog loading plus conversion to renderer `StarInstance`s.
+- filesystem catalog loading plus conversion to renderer `StarInstance`s;
+- the V-39-Atlas light-pollution resolver: `load_falchi_atlas` reads the
+  optional Falchi 2016 grid named by `STARS_FALCHI_ATLAS`, and
+  `resolve_light_pollution` maps a `LightPollution::Atlas2016 { lat, lng }`
+  scene value to a sampled `LightPollution::Sqm` at render time (the session
+  keeps the `Atlas2016` lat/lng). File IO lives here, not in `astronomy`.
 
 Do not put core astronomical or rendering logic here.
 

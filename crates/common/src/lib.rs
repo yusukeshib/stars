@@ -8,9 +8,10 @@
 //! only the host apps under `apps/` consume it.
 
 use std::path::Path;
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
-use astronomy::TimeScales;
+use astronomy::{FalchiAtlas, TimeScales};
 use catalog::{load_from_file, CatalogSource};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
@@ -435,18 +436,97 @@ pub fn light_pollution_from_args(
         return LightPollution::Sqm(sqm);
     }
     if let Some((lat, lng)) = overrides.atlas_lat_lng_deg {
-        // Surface the deferred-loader notice once at the host side; the
-        // astronomy crate stays log-free so its dependency surface stays
-        // minimal.
-        log::info!(
-            "TODO(V-39-Atlas): Falchi 2016 atlas sampling at ({lat}, {lng}) is not yet implemented; falling back to Bortle 1"
-        );
+        // The session keeps the `Atlas2016 { lat, lng }` intent for
+        // reproducibility; the zenith brightness is sampled at render time by
+        // [`resolve_light_pollution`] when a Falchi atlas grid is configured.
         return LightPollution::Atlas2016 {
             latitude_deg: lat,
             longitude_deg: lng,
         };
     }
     LightPollution::DARK_SKY
+}
+
+/// Environment variable naming the compact Falchi 2016 atlas grid file
+/// (`FALATL01` binary produced by `scripts/build-falchi-atlas.py`). Native
+/// hosts read it once to resolve [`LightPollution::Atlas2016`] samples.
+pub const FALCHI_ATLAS_ENV: &str = "STARS_FALCHI_ATLAS";
+
+/// Load the compact Falchi 2016 atlas grid named by [`FALCHI_ATLAS_ENV`], if
+/// set. Returns `None` (with a log line) when the variable is unset, the file
+/// is unreadable, or the bytes do not parse — in which case `Atlas2016` keeps
+/// the rural Bortle-1 floor. The result is cached after the first call so the
+/// (potentially large) grid is read at most once per process.
+pub fn load_falchi_atlas() -> Option<&'static FalchiAtlas> {
+    static CELL: OnceLock<Option<FalchiAtlas>> = OnceLock::new();
+    CELL.get_or_init(|| {
+        let path = std::env::var_os(FALCHI_ATLAS_ENV)?;
+        match std::fs::read(&path) {
+            Ok(bytes) => match FalchiAtlas::from_bytes(&bytes) {
+                Ok(atlas) => {
+                    let (rows, cols) = atlas.dimensions();
+                    log::info!(
+                        "V-39-Atlas: loaded Falchi 2016 grid {}x{} from {}",
+                        rows,
+                        cols,
+                        Path::new(&path).display()
+                    );
+                    Some(atlas)
+                }
+                Err(err) => {
+                    log::warn!(
+                        "V-39-Atlas: {} is not a valid FALATL01 grid ({err}); keeping Bortle-1 floor",
+                        Path::new(&path).display()
+                    );
+                    None
+                }
+            },
+            Err(err) => {
+                log::warn!(
+                    "V-39-Atlas: cannot read {} ({err}); keeping Bortle-1 floor",
+                    Path::new(&path).display()
+                );
+                None
+            }
+        }
+    })
+    .as_ref()
+}
+
+/// Resolve a [`LightPollution`] for rendering, sampling the Falchi 2016 atlas
+/// for the [`LightPollution::Atlas2016`] variant when a grid is configured via
+/// [`FALCHI_ATLAS_ENV`]. Non-atlas variants pass through unchanged.
+pub fn resolve_light_pollution(pollution: LightPollution) -> LightPollution {
+    resolve_light_pollution_with_atlas(pollution, load_falchi_atlas())
+}
+
+/// Pure resolver behind [`resolve_light_pollution`]: when `pollution` is
+/// [`LightPollution::Atlas2016`] and `atlas` yields a sample at the observer
+/// location, return an equivalent [`LightPollution::Sqm`] zenith brightness;
+/// otherwise return `pollution` unchanged so the renderer keeps the rural
+/// floor. Exposed (and IO-free) so the resolution rule is unit-testable.
+pub fn resolve_light_pollution_with_atlas(
+    pollution: LightPollution,
+    atlas: Option<&FalchiAtlas>,
+) -> LightPollution {
+    if let LightPollution::Atlas2016 {
+        latitude_deg,
+        longitude_deg,
+    } = pollution
+    {
+        match atlas.and_then(|a| {
+            a.sample_zenith_mag_per_arcsec2(latitude_deg as f64, longitude_deg as f64)
+        }) {
+            Some(mu) => return LightPollution::Sqm(mu as f32),
+            None => {
+                log::info!(
+                    "V-39-Atlas: no Falchi sample at ({latitude_deg}, {longitude_deg}); \
+                     keeping Bortle-1 floor (set {FALCHI_ATLAS_ENV} to a built grid)"
+                );
+            }
+        }
+    }
+    pollution
 }
 
 /// Optional scintillation overrides parsed by native hosts (V-24).
@@ -541,6 +621,72 @@ pub fn parse_time_to_time_scales(time: Option<&str>) -> Result<TimeScales> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Build a tiny synthetic `FALATL01` grid for resolver tests. The values
+    /// are a fixture, not Falchi data; they only exercise the resolution rule.
+    fn test_atlas() -> FalchiAtlas {
+        let mut b = Vec::new();
+        b.extend_from_slice(b"FALATL01");
+        b.extend_from_slice(&2u32.to_le_bytes());
+        b.extend_from_slice(&2u32.to_le_bytes());
+        for v in [10.0f64, 0.0, 0.0, 10.0] {
+            b.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [18.0f32, 18.0, 18.0, 18.0] {
+            b.extend_from_slice(&v.to_le_bytes());
+        }
+        FalchiAtlas::from_bytes(&b).unwrap()
+    }
+
+    #[test]
+    fn atlas_resolves_to_sampled_sqm() {
+        let atlas = test_atlas();
+        let resolved = resolve_light_pollution_with_atlas(
+            LightPollution::Atlas2016 {
+                latitude_deg: 5.0,
+                longitude_deg: 5.0,
+            },
+            Some(&atlas),
+        );
+        match resolved {
+            LightPollution::Sqm(mu) => assert!((mu - 18.0).abs() < 1e-4, "mu={mu}"),
+            other => panic!("expected Sqm sample, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn atlas_without_grid_keeps_variant() {
+        // No atlas configured → Atlas2016 passes through unchanged so the
+        // renderer applies the rural Bortle-1 floor.
+        let lp = LightPollution::Atlas2016 {
+            latitude_deg: 5.0,
+            longitude_deg: 5.0,
+        };
+        assert_eq!(resolve_light_pollution_with_atlas(lp, None), lp);
+    }
+
+    #[test]
+    fn atlas_out_of_coverage_keeps_variant() {
+        // A location outside the grid bounds is not sampled; keep the variant.
+        let atlas = test_atlas();
+        let lp = LightPollution::Atlas2016 {
+            latitude_deg: 80.0,
+            longitude_deg: 5.0,
+        };
+        assert_eq!(resolve_light_pollution_with_atlas(lp, Some(&atlas)), lp);
+    }
+
+    #[test]
+    fn non_atlas_pollution_passes_through() {
+        let atlas = test_atlas();
+        for lp in [
+            LightPollution::Bortle(5),
+            LightPollution::Sqm(20.0),
+            LightPollution::DARK_SKY,
+        ] {
+            assert_eq!(resolve_light_pollution_with_atlas(lp, Some(&atlas)), lp);
+        }
+    }
 
     /// If `OverlayKind` grows a variant without a matching `OverlayArg`, this
     /// test fails. Vice versa is enforced by the `From<OverlayArg>` match

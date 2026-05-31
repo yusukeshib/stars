@@ -12,11 +12,11 @@ use renderer::{
 use stars_host_common::{
     atmosphere_from_args, curated_satellite_layer, eyepiece_from_args, light_pollution_from_args,
     load_session, load_star_instances_from_file, overlay_config_from_args,
-    parse_time_to_time_scales, resolve_goto_query, scene_from_preset, scene_preset_infos,
-    scintillation_from_args, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
-    CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides,
-    LightPollutionOverrides, OutputColourspaceArg, OverlayArg, ProjectionArg, ScenePresetArg,
-    ScintillationOverrides, SessionScene, ViewpointArg,
+    parse_time_to_time_scales, resolve_goto_query, resolve_light_pollution, scene_from_preset,
+    scene_preset_infos, scintillation_from_args, viewpoint_from_args, AtmosphereOverrides,
+    AtmospherePresetArg, CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides,
+    EyepieceOverrides, LightPollutionOverrides, OutputColourspaceArg, OverlayArg, ProjectionArg,
+    ScenePresetArg, ScintillationOverrides, SessionScene, ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -385,7 +385,9 @@ fn main() -> Result<()> {
         scene.catalog.limiting_magnitude,
         scene.atmosphere,
         scene.scintillation,
-        scene.light_pollution,
+        // V-39-Atlas: sample the Falchi 2016 grid for the `Atlas2016` variant
+        // when one is configured; the session still records the (lat, lng).
+        resolve_light_pollution(scene.light_pollution),
         scene.planets_enabled,
         scene.satellites.clone(),
         scene.projection,

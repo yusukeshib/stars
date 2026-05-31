@@ -12,6 +12,7 @@ mod ephemeris;
 mod horizontal;
 pub mod illuminants;
 pub mod jupiter_shadows;
+pub mod light_pollution_atlas;
 pub mod moons;
 mod observer;
 pub mod occultation;
@@ -40,6 +41,7 @@ pub use jupiter_shadows::{
     galilean_shadow_disks, galilean_shadow_disks_at, galilean_shadow_states, GalileanShadowDisk,
     GalileanShadowState, JUPITER_OCCLUDER_TARGET, JUPITER_PLANET_INDEX, SHADOW_TRANSIT_KIND,
 };
+pub use light_pollution_atlas::{AtlasError, FalchiAtlas};
 pub use moons::{
     apparent_galilean_moons, apparent_galilean_moons_topocentric, apparent_titan,
     apparent_titan_topocentric, GalileanMoon, GalileanMoonApparent, TitanApparent,
