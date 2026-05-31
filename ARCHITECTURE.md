@@ -85,6 +85,12 @@ Owns star catalog ingestion, deep-sky catalogues, and catalog-space conversions:
   `NgcBrightCatalog` implementations consumed by the renderer's deep-sky
   overlay (`V-42`); the trait is the slot for the planned runtime
   full-OpenNGC streaming backend;
+- visual double / binary resolution (`V-54`): `doubles::resolve_doubles`
+  runs inside both load paths (`load_from_csv` and the embedded
+  `load_from_binary`) and replaces each merged HYG primary that matches
+  the WDS bootstrap table (`double_stars.csv`) with two component `Star`s
+  at the catalog separation / position angle. Because it sits in the
+  catalog layer, every host gets the split with no host-specific code;
 - B−V colour conversion and RA/Dec-to-Cartesian helpers.
 
 Catalog stars are renderer-independent. They should not know about `wgpu`,

@@ -4,6 +4,7 @@ mod clusters;
 mod color;
 mod coords;
 mod deepsky;
+mod doubles;
 pub mod search;
 
 pub use backend::{
@@ -20,6 +21,7 @@ pub use deepsky::{
     DeepSkyCatalog, DeepSkyId, DeepSkyKind, DeepSkyObject, MessierCatalog, NgcBrightCatalog,
     NO_PHOTOMETRY_SENTINEL_MAG,
 };
+pub use doubles::{double_stars, resolve_doubles, DoubleStar};
 pub use search::{search, SearchId, SearchKind, SearchMatch, SEARCH_LIMIT_DEFAULT};
 
 #[cfg(feature = "filesystem")]
