@@ -3703,6 +3703,50 @@ object info panel consume.
    decoder, matching the `L-17` cross-ID outputs end to end.
 5. **Hosts wired.** CLI `--goto` metadata, web info-panel click-to-copy.
 
+## `L-20` Variable star light curves — ◑ (elements + light-curve model + web panel + CLI Δm shipped; renderer override deferred)
+
+Known variable stars now carry standardised light-curve elements and a
+phase-folded magnitude prediction, surfaced in the web info panel as an inline
+light curve and in the CLI GoTo metadata as the predicted Δm.
+
+1. **What changed.** New `crates/catalog/src/variables.rs` defines
+   `VariableType` (Mira / semiregular / Cepheid / RR Lyrae / Algol-EA),
+   `VariableStar` (the AAVSO VSX / GCVS elements: type, period `P`, epoch
+   `T0`, bright/faint V, eclipse depth/half-width), and a `VariableSummary`
+   snapshot. `predicted_magnitude(jd)` phase-folds the elements — a smoothed
+   raised-cosine pulsation (bright at phase 0, faint at 0.5) for pulsators and
+   a raised-cosine primary + shallow secondary eclipse for Algol-type binaries
+   — with `delta_magnitude`, `phase`, and `light_curve_samples` helpers.
+   `variable_for(hip, hd, name)` joins a catalogue star to its elements. The
+   showpiece table is `crates/catalog/data/variable_stars.csv` (Mira, Algol,
+   delta Cephei, Betelgeuse, chi Cygni, RR Lyrae), pinned in the manifest.
+2. **Why it is ◑, not ✅.** The model, the web visualisation surface (the
+   ROADMAP's "web first"), and the CLI Δm export are complete and tested. The
+   ROADMAP also lists an *optional* renderer `current_magnitude_override` so a
+   rendered Mira / Algol sprite dims with the session epoch; that requires the
+   variable's identifiers to reach the per-star instance buffer, so it is
+   deferred to ride on the `L-18` identifier-through-renderer work rather than
+   duplicate that plumbing (and risk colliding with it).
+3. **Where it lives.** `crates/catalog/src/variables.rs` (+ `lib.rs`
+   re-export); `crates/common/src/goto.rs` (`GotoTarget.variable` +
+   `info_summary`); `apps/cli/src/main.rs` (`--goto` `Variable {…}` JSON
+   line); `apps/web/src/lib.rs` (`goto_object` `variable` block with a
+   one-period `curve`) + `apps/web/frontend/src/components/SearchPanel.tsx`
+   (inline SVG light curve + caption/reference). New fields are appended to
+   `GotoTarget` / `GotoRecord`; no per-star `Star`/`StarInstance` widening.
+4. **Tests / validation.** `catalog::variables` (8): table load + matching by
+   HIP/HD/name; Algol primary minimum returns Δm = 1.27 (ROADMAP acceptance);
+   Algol out-of-eclipse at maximum + shallow secondary; Mira phase folding
+   between extremes at a fixed session time; predicted magnitude stays within
+   [bright, faint] for all rows; one-period sample curve reaches the eclipse.
+   `stars_host_common::goto` (2): Algol surfaces the light-curve state and the
+   summary line, Sirius does not. `make manifest-check` pins the CSV bytes.
+5. **Data provenance.** `data/manifest.toml` id `vsx-variable-stars-bootstrap`
+   (AAVSO VSX + GCVS 5.1, hand-curated elements; `see-upstream` licence);
+   `DATA_SOURCES.md` records the model limitations.
+6. **Hosts wired.** Web (info-panel light curve), CLI (`--goto` Δm metadata);
+   viewer follows with the deferred renderer override.
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

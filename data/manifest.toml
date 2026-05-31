@@ -340,6 +340,56 @@ carries the stubbed `--from-wds` switch for that work).
 """
 
 [[artifact]]
+id = "vsx-variable-stars-bootstrap"
+description = "Hand-curated variable-star light-curve elements (type, period, epoch, bright/faint V magnitude) for the L-20 phase-folded magnitude prediction: Mira, Algol, delta Cephei, Betelgeuse, chi Cygni, RR Lyrae."
+kind = "embedded"
+path = "crates/catalog/data/variable_stars.csv"
+sha256 = "01bed4165a1b96f0a007591c5ef538c68e1798f4270119c8eb77973632bb16c4"
+bytes = 1976
+source = "https://www.aavso.org/vsx/"
+archive_id = "AAVSO International Variable Star Index (VSX) + GCVS 5.1, selected showpiece variables (hand-curated elements)"
+citation = """
+Watson, C. L. 2006, SASS 25, 47, "The International Variable Star Index (VSX)";
+Samus', N. N. et al. 2017, ARep 61, 80, "General Catalogue of Variable Stars
+(GCVS 5.1)".
+"""
+version = "bootstrap-1"
+retrieved = "2026-05"
+license = "see-upstream"
+license_url = "https://www.aavso.org/vsx/"
+preprocessing = "hand-curated from published VSX / GCVS elements; no script"
+fields_used = [
+    "name",
+    "hip",
+    "hd",
+    "var_type",
+    "period_days",
+    "epoch_jd",
+    "mag_bright",
+    "mag_faint",
+    "secondary_depth_mag",
+    "eclipse_half_width",
+    "reference",
+]
+used_by = [
+    "crates/catalog/src/variables.rs",
+]
+limitations = """
+L-20 first slice: a six-star showpiece table of light-curve elements. The
+predicted magnitude is a first-order *visual* model -- a smoothed raised-cosine
+pulsation between maximum and minimum light for Mira / semiregular / Cepheid /
+RR Lyrae stars and a raised-cosine eclipse for Algol-type (EA) eclipsing
+binaries -- not a Fourier light-curve fit, so the predicted shape (notably the
+asymmetric Cepheid / RR Lyrae rise and the true Mira amplitude variation) is
+illustrative. Semiregular periods (Betelgeuse) are not strictly periodic; the
+listed period/epoch are representative. Epochs are treated as plain JD (HJD /
+light-time differences <= ~8 min are negligible against the multi-day to
+multi-hundred-day periods). The renderer whole-scene current-magnitude override
+(Mira / Algol visibly dimming the rendered sprite) is a deferred follow-up that
+rides on the L-18 identifier-through-renderer path.
+"""
+
+[[artifact]]
 id = "iau-delporte-constellation-boundaries"
 description = "IAU / Delporte constellation boundary vertices precessed to J2000."
 kind = "embedded"

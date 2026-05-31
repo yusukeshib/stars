@@ -151,6 +151,12 @@ Owns star catalog ingestion, deep-sky catalogues, and catalog-space conversions:
   the WDS bootstrap table (`double_stars.csv`) with two component `Star`s
   at the catalog separation / position angle. Because it sits in the
   catalog layer, every host gets the split with no host-specific code;
+- variable-star light curves (`L-20`): `variables::variable_for` joins a star
+  (by HIP / HD / proper name) to its AAVSO VSX / GCVS light-curve elements
+  (`variable_stars.csv`), and `VariableStar::{predicted_magnitude,
+  delta_magnitude, light_curve_samples, summary_at}` phase-fold those elements
+  to the session time. This is a side table, not a `Star` field — hosts look a
+  star up only when its info panel is opened (CLI GoTo metadata, web panel);
 - B−V colour conversion and RA/Dec-to-Cartesian helpers.
 
 Catalog stars are renderer-independent. They should not know about `wgpu`,

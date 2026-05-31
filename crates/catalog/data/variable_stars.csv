@@ -1,0 +1,30 @@
+# Variable-star showpiece table for L-20 (light-curve / current-phase model).
+#
+# Hand-curated from the AAVSO International Variable Star Index (VSX, Watson
+# 2006) and the General Catalogue of Variable Stars (GCVS, Samus+ 2017). Each
+# row carries the standardised light-curve elements (type, period, epoch,
+# bright/faint V magnitude) needed to predict a star's magnitude at a session
+# time by phase folding. Matched to a rendered/searched star by Hipparcos (HIP)
+# or Henry Draper (HD) number, or failing that by proper name.
+#
+# Columns:
+#   name                 informational label
+#   hip                  Hipparcos number for matching (0 = none)
+#   hd                   Henry Draper number for matching (0 = none)
+#   var_type             GCVS-style class: mira | semiregular | cepheid |
+#                        rrlyrae | algol  (algol = EA eclipsing)
+#   period_days          pulsation / orbital period P (days)
+#   epoch_jd             epoch T0 (JD): maximum light for pulsators, primary
+#                        minimum for eclipsing binaries
+#   mag_bright           brightest (maximum-light) V magnitude
+#   mag_faint            faintest (minimum-light) V magnitude
+#   secondary_depth_mag  eclipsing only: secondary-eclipse depth below mag_bright
+#   eclipse_half_width   eclipsing only: half-width of an eclipse in phase units
+#   reference            literature key (VSX / GCVS)
+name,hip,hd,var_type,period_days,epoch_jd,mag_bright,mag_faint,secondary_depth_mag,eclipse_half_width,reference
+Mira (omicron Ceti),10826,14386,mira,332.0,2453990.0,3.4,9.3,0.0,0.0,VSX
+Algol (beta Persei),14576,19356,algol,2.8673043,2445641.5135,2.12,3.39,0.06,0.07,GCVS
+delta Cephei,110991,213306,cepheid,5.366266,2436075.445,3.48,4.37,0.0,0.0,GCVS
+Betelgeuse (alpha Orionis),27989,39801,semiregular,400.0,2458360.0,0.0,1.3,0.0,0.0,VSX
+chi Cygni,97629,187796,mira,408.05,2452180.0,3.3,14.2,0.0,0.0,VSX
+RR Lyrae,95497,182989,rrlyrae,0.5668378,2442923.4193,7.06,8.12,0.0,0.0,GCVS

@@ -37,6 +37,25 @@ export type GotoRecord = {
   // archives do not catalogue.
   simbadUrl: string | null;
   vizierUrl: string | null;
+  // L-20 variable-star light-curve state at the session time. Null unless the
+  // target is a known variable star.
+  variable: VariableInfo | null;
+};
+
+// L-20: variable-star light-curve elements + current predicted state.
+export type VariableInfo = {
+  name: string;
+  type: string;
+  periodDays: number;
+  epochJd: number;
+  magBright: number;
+  magFaint: number;
+  phase: number;
+  currentMagnitude: number;
+  deltaMagnitude: number;
+  reference: string;
+  // One-period (phase, magnitude) samples for the panel light curve.
+  curve: [number, number][];
 };
 
 /// L-19: opt-in flag for showing external CDS catalogue links in the info
@@ -293,6 +312,24 @@ const LINKS_BLOCK_STYLE: CSSProperties = {
   borderTop: "1px solid rgba(255,255,255,0.12)",
 };
 
+const VARIABLE_BLOCK_STYLE: CSSProperties = {
+  marginTop: 10,
+  paddingTop: 10,
+  borderTop: "1px solid rgba(255,255,255,0.12)",
+};
+
+const VARIABLE_TITLE_STYLE: CSSProperties = {
+  fontSize: 11,
+  opacity: 0.8,
+};
+
+const VARIABLE_CAPTION_STYLE: CSSProperties = {
+  fontSize: 10,
+  opacity: 0.65,
+  marginTop: 6,
+  lineHeight: 1.4,
+};
+
 const LINKS_TOGGLE_STYLE: CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -313,6 +350,42 @@ const LINK_STYLE: CSSProperties = {
   fontSize: 12,
   textDecoration: "none",
 };
+
+// L-20: a small SVG light curve (magnitude vs phase) with the current phase
+// marked. Magnitude axis is inverted (brighter = up), matching convention.
+function VariableLightCurve({ variable }: { variable: VariableInfo }) {
+  const w = 240;
+  const h = 96;
+  const pad = 6;
+  const { curve, magBright, magFaint, phase, currentMagnitude } = variable;
+  const span = Math.max(1e-6, magFaint - magBright);
+  const x = (p: number) => pad + p * (w - 2 * pad);
+  // Brighter (smaller mag) at the top.
+  const y = (m: number) => pad + ((m - magBright) / span) * (h - 2 * pad);
+  const path = curve.length
+    ? curve.map(([p, m], i) => `${i === 0 ? "M" : "L"}${x(p).toFixed(1)},${y(m).toFixed(1)}`).join(" ")
+    : "";
+  return (
+    <svg
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      role="img"
+      aria-label={`Light curve for ${variable.name}: V ${magBright.toFixed(1)} to ${magFaint.toFixed(1)} over ${variable.periodDays.toFixed(2)} days`}
+      style={{ background: "#0b1016", borderRadius: 4, display: "block", marginTop: 6 }}
+    >
+      <path d={path} fill="none" stroke="#9ecbff" strokeWidth={1.5} />
+      <line x1={x(phase)} y1={pad} x2={x(phase)} y2={h - pad} stroke="#ffcc66" strokeWidth={1} />
+      <circle cx={x(phase)} cy={y(currentMagnitude)} r={3} fill="#ffcc66" />
+      <text x={pad} y={pad + 8} fill="#7f8c99" fontSize={9}>
+        V {magBright.toFixed(1)}
+      </text>
+      <text x={pad} y={h - pad - 2} fill="#7f8c99" fontSize={9}>
+        V {magFaint.toFixed(1)}
+      </text>
+    </svg>
+  );
+}
 
 interface SearchPanelProps {
   /// Returns the lookup response JSON for the given query.
@@ -490,6 +563,23 @@ export function SearchPanel({ onLookup, onGoto, onApplyView }: SearchPanelProps)
               </>
             )}
           </dl>
+          {selected.variable != null && (
+            <div style={VARIABLE_BLOCK_STYLE}>
+              <div style={VARIABLE_TITLE_STYLE}>
+                Variable star · {selected.variable.type} · P&nbsp;
+                {selected.variable.periodDays.toFixed(selected.variable.periodDays < 10 ? 4 : 1)}&nbsp;d
+              </div>
+              <VariableLightCurve variable={selected.variable} />
+              <div style={VARIABLE_CAPTION_STYLE}>
+                Predicted V&nbsp;{selected.variable.currentMagnitude.toFixed(2)} (Δm&nbsp;
+                {selected.variable.deltaMagnitude.toFixed(2)}, phase&nbsp;
+                {selected.variable.phase.toFixed(2)}) · range V&nbsp;
+                {selected.variable.magBright.toFixed(1)}–{selected.variable.magFaint.toFixed(1)} ·{" "}
+                {selected.variable.reference}. Elements from AAVSO VSX / GCVS; phase-folded prediction
+                (epoch {selected.variable.epochJd.toFixed(0)}).
+              </div>
+            </div>
+          )}
           {(selected.simbadUrl !== null || selected.vizierUrl !== null) && (
             <div style={LINKS_BLOCK_STYLE}>
               <label style={LINKS_TOGGLE_STYLE}>

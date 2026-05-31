@@ -9,8 +9,8 @@ use astronomy::{
 };
 use catalog::load_embedded;
 use catalog::{
-    simbad_query_url, vizier_query_url, DeepSkyCatalog, DeepSkyId, DeepSkyObject, MessierCatalog,
-    NgcBrightCatalog, StarIdentifiers,
+    simbad_query_url, variable_for, vizier_query_url, DeepSkyCatalog, DeepSkyId, DeepSkyObject,
+    MessierCatalog, NgcBrightCatalog, StarIdentifiers, VariableSummary,
 };
 use catalog::search::{
     named_star, search as catalog_search, SearchId, SearchKind, SearchMatch, SOLAR_SYSTEM_BODIES,
@@ -124,6 +124,9 @@ struct GotoRecord {
     simbad_url: Option<String>,
     /// L-19 VizieR cone-search URL. `None` for solar-system bodies.
     vizier_url: Option<String>,
+    /// L-20 variable-star light-curve state at the session time, `None` unless
+    /// the target is a known variable star.
+    variable: Option<VariableSummary>,
 }
 
 fn resolve(id: SearchId, observer: Observer) -> Option<GotoRecord> {
@@ -161,6 +164,8 @@ fn resolve(id: SearchId, observer: Observer) -> Option<GotoRecord> {
                 primary_id: ids.preferred_identifier(),
                 simbad_url: Some(simbad_query_url(&ids)),
                 vizier_url: Some(vizier_query_url(&ids)),
+                variable: variable_for(star.hip, star.hd, star.proper.as_deref())
+                    .map(|v| v.summary_at(observer.time.jd_utc)),
             })
         }
         SearchId::Messier(n) => {
@@ -250,6 +255,7 @@ fn resolve(id: SearchId, observer: Observer) -> Option<GotoRecord> {
                 primary_id: None,
                 simbad_url: None,
                 vizier_url: None,
+                variable: None,
             })
         }
     }
@@ -302,6 +308,7 @@ fn deepsky_goto(id: SearchId, object: DeepSkyObject) -> GotoRecord {
         },
         distance: None,
         planning: None,
+        variable: None,
     }
 }
 
@@ -379,7 +386,55 @@ fn push_goto_record(out: &mut String, record: &GotoRecord, observer: Observer) {
     } else {
         out.push_str("null");
     }
+    // L-20: variable-star light-curve state + one-period sample curve.
+    out.push_str(",\"variable\":");
+    match &record.variable {
+        Some(v) => {
+            out.push_str("{\"name\":");
+            push_json_string(out, &v.name);
+            out.push_str(",\"type\":");
+            push_json_string(out, v.kind);
+            out.push_str(",\"periodDays\":");
+            push_num(out, v.period_days);
+            out.push_str(",\"epochJd\":");
+            push_num(out, v.epoch_jd);
+            out.push_str(",\"magBright\":");
+            push_num(out, v.mag_bright);
+            out.push_str(",\"magFaint\":");
+            push_num(out, v.mag_faint);
+            out.push_str(",\"phase\":");
+            push_num(out, v.phase);
+            out.push_str(",\"currentMagnitude\":");
+            push_num(out, v.current_magnitude);
+            out.push_str(",\"deltaMagnitude\":");
+            push_num(out, v.delta_magnitude);
+            out.push_str(",\"reference\":");
+            push_json_string(out, &v.reference);
+            // One-period (phase, magnitude) light curve for the panel canvas.
+            out.push_str(",\"curve\":[");
+            if let Some(star) = variable_for_summary(&v.name) {
+                for (i, (phase, mag)) in star.light_curve_samples(96).into_iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    out.push('[');
+                    push_num(out, phase);
+                    out.push(',');
+                    push_num(out, mag);
+                    out.push(']');
+                }
+            }
+            out.push_str("]}");
+        }
+        None => out.push_str("null"),
+    }
     out.push('}');
+}
+
+/// Re-find the variable-star elements by display name so the JSON emitter can
+/// attach a one-period light curve without widening [`GotoRecord`].
+fn variable_for_summary(name: &str) -> Option<&'static catalog::VariableStar> {
+    catalog::variable_stars().iter().find(|v| v.name == name)
 }
 
 struct RenderState {
