@@ -62,7 +62,13 @@ Owns scientific and geometric models:
 - proper-motion epoch math, annual aberration, IAU 2006 precession, compact
   IAU-2000-style nutation, and atmospheric refraction;
 - Sun, Moon, planet, Saturn-ring, Galilean-moon, and Titan apparent /
-  topocentric helpers (`ephemeris.rs`, `moons.rs`);
+  topocentric helpers (`ephemeris.rs`, `moons.rs`). The default source is the
+  `astro` crate's truncated VSOP87 / ELP2000 series (visual tier);
+- a DAF/SPK Chebyshev kernel reader (`spk.rs`, `astronomy::SpkKernel`, `L-06`):
+  parses NAIF DAF/SPK Type 2 / Type 3 segments from real JPL DE440 kernels and
+  evaluates barycentric / geocentric states with body-id center chaining. It
+  is dependency-free and feeds no host yet (no kernel is committed; default and
+  WASM keep the VSOP87 / ELP2000 fallback) — see ROADMAP `L-06`;
 - artificial-satellite TLE parsing + SGP4 propagation, TEME→topocentric
   reduction, conical Earth-shadow visibility, and amateur-grade apparent
   magnitude (`satellites.rs`, V-55; SGP4 via the vendored `sgp4` crate).

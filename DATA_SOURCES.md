@@ -883,6 +883,37 @@ Rules:
    `kind = "generated"`, the SHA-256, and the regeneration command in
    `preprocessing`.
 
+## DE440 ephemeris kernel (`L-06`) — external, not committed
+
+`stars` ships a DAF/SPK Chebyshev kernel reader
+(`crates/astronomy/src/spk.rs`, `astronomy::SpkKernel`) capable of loading
+JPL DE440 / DE441 binary SPK kernels and evaluating Type 2 / Type 3
+Chebyshev segments. **No DE440 kernel is committed to this repository**, so
+there is no `data/manifest.toml` row for it: the kernels are large binaries
+(`de440s.bsp` ≈ 32 MB for 1849–2150; full `de440.bsp` ≈ 110 MB) and the
+default / WASM build deliberately keeps the analytic VSOP87 / ELP2000
+fallback (`astronomy::ephemeris`).
+
+- **Source / archive:** NASA NAIF generic kernels,
+  `https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp`
+  (and `de440.bsp`).
+- **Version / release:** DE440 (Park et al. 2021, AJ 161, 105); NAIF SPK
+  format per Acton 1996.
+- **License / terms:** U.S. Government work / NAIF public domain; redistribute
+  per NAIF terms. Because it is not redistributed here, no license obligation
+  is incurred by this repo.
+- **Local path:** user-supplied at runtime (e.g. `build/de440/de440s.bsp`); not
+  tracked by git.
+- **Retrieval command:** `scripts/fetch-de440-subset.sh [OUT_BSP]`.
+- **Fields used:** geocentric / barycentric Chebyshev position (Type 2) and
+  position+velocity (Type 3) for the Sun, Moon, and planet barycenters.
+- **Known limitations / status:** the reader is implemented and unit-tested
+  against a synthetic, spec-accurate in-memory SPK. Wiring a fetched DE440
+  kernel into the apparent-place pipeline and the JPL Horizons sub-arcsecond
+  cross-check are **deferred** (they require the external kernel); see
+  `ROADMAP.md` `L-06`. Until then the renderer's Sun/Moon/planet output is the
+  VSOP87 / ELP2000 visual tier.
+
 ## Future data sources to document
 
 When these roadmap items are implemented, add details here **and** append a
@@ -891,7 +922,6 @@ row to `data/manifest.toml`:
 - Hipparcos catalog;
 - Tycho-2 catalog;
 - Gaia DR3 catalog;
-- DE440 ephemeris data;
 - AAVSO variable-star light curves;
 - full OpenNGC ~14,000-entry NGC / IC catalog (runtime-loaded streaming
   backend, the V-42 follow-up to the shipped bright subset);
