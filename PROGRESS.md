@@ -2294,6 +2294,40 @@ Validation:
   selection;
 - Rust workspace check and frontend TypeScript check cover host wiring.
 
+### Galactic structural model for external viewpoints (`V-46`)
+
+Upgraded the external galactic viewpoint (`V-41` / `V-44`) from a single
+analytic Milky Way disc plane to a Drimmel & Spergel 2001 style multi-component
+volume model, so the external view is a defensible educational graphic of the
+Galaxy's structure rather than a generic ellipse.
+
+- `crates/astronomy/src/galaxy.rs` is the reference implementation:
+  `milky_way_luminosity_density(x, y, z)` sums a thin disk (sech² vertical
+  profile) modulated by a Reid 2019 four-arm log-spiral enhancement
+  (`spiral_arm_enhancement` / `SPIRAL_ARMS`), an exponential thick disk, and a
+  rotated triaxial boxy bar/bulge; `dust_extinction_az(distance, l, b)`
+  integrates a double-exponential dust disk along the line of sight.
+  Galactocentric IAU parsecs with the Sun on `+x` at `R_SUN_PC = 8122`,
+  `Z_SUN_PC = 20.8`.
+- `crates/renderer/src/shaders/skyglow.wgsl` external-viewpoint branch now
+  emission-absorption ray-marches `gal_density` attenuated by `gal_dust_density`
+  instead of intersecting one plane, resolving the bar, spiral arms, and dark
+  dust lanes. The WGSL constants mirror `astronomy::galaxy` value-for-value
+  (kept in lock-step like the ISL model) and the pinned Rust tests guard the
+  shared model.
+- No new host control, session field, or `CameraUniform` slot: the existing
+  external viewpoint toggle drives the upgrade across CLI / viewer / web. The
+  model is closed-form, so no new data artifact / manifest row.
+
+Validation:
+
+- `astronomy::galaxy` pins the solar-neighbourhood density (≈ 0.1 M_sun/pc³),
+  the fall-off with height and radius, the bar dominating the centre, the
+  on-arm vs inter-arm contrast, and the dust screen's monotonicity /
+  plane-concentration / ≈ 1 mag/kpc local gradient;
+- the `skyglow.wgsl` change was validated through the naga WGSL front-end
+  during development and is exercised by the existing renderer build.
+
 ### Telescope eyepiece simulation
 
 Implemented the telescope eyepiece model (`V-43`, legacy `P4-06`). Hosts can enable an optical

@@ -9,6 +9,7 @@
 pub mod atmosphere;
 pub mod corrections;
 mod ephemeris;
+pub mod galaxy;
 mod horizontal;
 pub mod illuminants;
 pub mod jupiter_shadows;
@@ -35,6 +36,10 @@ pub use ephemeris::{
     apparent_planets_topocentric, apparent_saturn_ring, apparent_saturn_ring_topocentric,
     apparent_sun, apparent_sun_topocentric, MoonApparent, Planet, PlanetApparent,
     SaturnRingApparent, SunApparent, SunMoonApparent,
+};
+pub use galaxy::{
+    dust_extinction_az, milky_way_luminosity_density, spiral_arm_enhancement, SpiralArm, R_SUN_PC,
+    SPIRAL_ARMS, Z_SUN_PC,
 };
 pub use horizontal::{equatorial_to_horizontal, equatorial_to_horizontal_matrix, AltAz};
 pub use jupiter_shadows::{
