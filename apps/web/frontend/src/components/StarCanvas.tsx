@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { StarView } from "stars-web";
-import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type EyepieceConfig, type Observer, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type ScintillationConfig, type View } from "../observer";
+import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type EyepieceConfig, type Observer, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type SatellitesConfig, type ScintillationConfig, type View } from "../observer";
 
 type Props = {
   observer: Observer;
@@ -11,6 +11,7 @@ type Props = {
   atmosphere: AtmosphereConfig;
   scintillation: ScintillationConfig;
   planets: PlanetsConfig;
+  satellites: SatellitesConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   onDrag: (deltaAzDeg: number, deltaAltDeg: number) => void;
@@ -46,6 +47,7 @@ export function StarCanvas({
   atmosphere,
   scintillation,
   planets,
+  satellites,
   projection,
   eyepiece,
   onDrag,
@@ -71,6 +73,7 @@ export function StarCanvas({
   const atmosphereRef = useRef(atmosphere);
   const scintillationRef = useRef(scintillation);
   const planetsRef = useRef(planets);
+  const satellitesRef = useRef(satellites);
   const projectionRef = useRef(projection);
   const eyepieceRef = useRef(eyepiece);
   observerRef.current = observer;
@@ -80,6 +83,7 @@ export function StarCanvas({
   atmosphereRef.current = atmosphere;
   scintillationRef.current = scintillation;
   planetsRef.current = planets;
+  satellitesRef.current = satellites;
   projectionRef.current = projection;
   eyepieceRef.current = eyepiece;
 
@@ -101,6 +105,10 @@ export function StarCanvas({
   useEffect(() => {
     handleRef.current?.set_planets_enabled(planets.enabled);
   }, [planets]);
+
+  useEffect(() => {
+    handleRef.current?.set_satellites(satellites.enabled, satellites.exposureSeconds);
+  }, [satellites]);
 
   useEffect(() => {
     handleRef.current?.set_eyepiece_simulation(
@@ -187,6 +195,8 @@ export function StarCanvas({
       const sc = scintillationRef.current;
       handle.set_scintillation(sc.enabled, sc.cN2Scale, sc.seed);
       handle.set_planets_enabled(planetsRef.current.enabled);
+      const sat = satellitesRef.current;
+      handle.set_satellites(sat.enabled, sat.exposureSeconds);
       const ep = eyepieceRef.current;
       handle.set_eyepiece_simulation(
         ep.enabled,

@@ -123,7 +123,18 @@ struct CameraUniform {
     // V-39 sodium / LED warm-orange RGB tint. xyz is a linear-RGB triple
     // normalised to a Rec.709 luminance of 1.0; w is reserved.
     light_pollution_tint: vec4<f32>,
+    // V-55 artificial-satellite sprites: xyz = J2000-equatorial unit
+    // direction at the frame instant, w = apparent visual magnitude.
+    satellite_dir_radius: array<vec4<f32>, 32>,
+    // V-55 artificial-satellite streak endpoints: xyz = J2000-equatorial unit
+    // direction satellite_params.z seconds later, w = visible flag (1.0 when
+    // above horizon AND sunlit).
+    satellite_streak: array<vec4<f32>, 32>,
+    // V-55 satellite header: [count, enabled, exposure_seconds, reserved].
+    satellite_params: vec4<f32>,
 };
+
+const MAX_SATELLITES: u32 = 32u;
 
 // Stable shader codes for `OccluderTarget` (mirrors Rust).
 const OCCLUDER_TARGET_SUN: i32 = 0;
@@ -903,6 +914,81 @@ fn titan_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_s
     return camera.titan_rgb_magnitude.xyz * flux * mask / footprint_pixels;
 }
 
+// V-55 streak mask: angular falloff for a satellite that moved from `a` to `b`
+// (unit directions) during the exposure. Returns the disk mask of the nearest
+// point on the great-circle segment a..b. Degenerate (no motion) falls back to
+// a point disk at `a`.
+fn satellite_streak_mask(
+    ray_dir: vec3<f32>,
+    a: vec3<f32>,
+    b: vec3<f32>,
+    radius_rad: f32,
+    pixel_sr: f32,
+) -> f32 {
+    let n = cross(a, b);
+    let nlen = length(n);
+    if nlen < 1e-7 {
+        return disk_mask(ray_dir, a, radius_rad, pixel_sr);
+    }
+    let nn = n / nlen;
+    // Angular distance from the ray to the great-circle plane.
+    let dist_to_plane = abs(asin(clamp(dot(ray_dir, nn), -1.0, 1.0)));
+    // Project the ray onto the plane and test whether it lies within the arc.
+    let proj = normalize(ray_dir - nn * dot(ray_dir, nn));
+    let ab = acos(clamp(dot(a, b), -1.0, 1.0));
+    let ap = acos(clamp(dot(a, proj), -1.0, 1.0));
+    let bp = acos(clamp(dot(b, proj), -1.0, 1.0));
+    var d = dist_to_plane;
+    if ap + bp - ab > 1e-4 {
+        // Outside the arc: distance to the nearer endpoint.
+        let da = acos(clamp(dot(ray_dir, a), -1.0, 1.0));
+        let db = acos(clamp(dot(ray_dir, b), -1.0, 1.0));
+        d = min(da, db);
+    }
+    let aa = max(sqrt(max(pixel_sr, 1e-12)), radius_rad * 0.08);
+    return 1.0 - smoothstep01(radius_rad - aa, radius_rad + aa, d);
+}
+
+// V-55 artificial satellites (TLE / SGP4). Renders each sunlit, above-horizon
+// satellite as a neutral (reflected-sunlight) point sprite, or a motion streak
+// when satellite_params.z (exposure seconds) is positive. Eclipsed or
+// below-horizon members carry a zero visible flag and are skipped.
+fn satellite_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_sr: f32) -> vec3<f32> {
+    if camera.satellite_params.y <= 0.0 || sin_alt <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    var rgb = vec3<f32>(0.0);
+    let pixel_radius = sqrt(max(pixel_sr, 1e-12));
+    let visual_radius = pixel_radius;
+    let footprint_pixels = max((visual_radius * visual_radius) / max(pixel_sr, 1e-12), 1.0);
+    let exposure = camera.satellite_params.z;
+    for (var i = 0u; i < MAX_SATELLITES; i = i + 1u) {
+        if f32(i) >= camera.satellite_params.x {
+            break;
+        }
+        let entry = camera.satellite_dir_radius[i];
+        let streak = camera.satellite_streak[i];
+        // Skip eclipsed / below-horizon satellites (visible flag in streak.w).
+        if streak.w <= 0.0 {
+            continue;
+        }
+        let dir = normalize(entry.xyz);
+        if dot(dir, camera.zenith_eq.xyz) <= 0.0 {
+            continue;
+        }
+        let flux = magnitude_to_flux(entry.w, zeropoint);
+        var mask: f32;
+        if exposure > 0.0 {
+            mask = satellite_streak_mask(ray_dir, dir, normalize(streak.xyz), visual_radius, pixel_sr);
+        } else {
+            mask = disk_mask(ray_dir, dir, visual_radius, pixel_sr);
+        }
+        // Reflected sunlight reads near-white; keep the sprite neutral.
+        rgb += vec3<f32>(1.0) * flux * mask / footprint_pixels;
+    }
+    return rgb;
+}
+
 fn henyey_greenstein(cos_angle: f32, g: f32) -> f32 {
     let gg = g * g;
     let denom = pow(max(1.0 + gg - 2.0 * g * cos_angle, 1e-3), 1.5);
@@ -1458,5 +1544,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let planet_radiance = planet_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
     let galilean_radiance = galilean_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
     let titan_radiance = titan_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
-    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance + planet_radiance + galilean_radiance + titan_radiance, 1.0);
+    let satellite_radiance_rgb = satellite_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
+    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance + planet_radiance + galilean_radiance + titan_radiance + satellite_radiance_rgb, 1.0);
 }

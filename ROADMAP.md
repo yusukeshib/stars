@@ -139,8 +139,11 @@ title-bar info panel — so `V-56` has shipped. `V-54` (double / binary
 star resolution) has now shipped: a WDS-derived bootstrap table resolves the
 visual doubles HYG merges into one row (Algieba and the ε Lyrae "Double
 Double") into per-component sprites at catalog-load time, so all three hosts
-get the split for free. The only remaining open `V-51`–`V-56` item is `V-55`
-(artificial satellites).
+get the split for free. `V-55` (artificial satellites, TLE / SGP4) has also
+shipped end-to-end: an `astronomy` SGP4 propagator + topocentric /
+Earth-shadow / magnitude pipeline, a renderer satellite point/streak layer, a
+manifest-pinned curated TLE snapshot, an `iss-pass` preset, and CLI / viewer /
+web host controls. With both shipped, every `V-51`–`V-56` item is now done.
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
@@ -214,7 +217,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `V-52` | **Planetary rings and moons (Saturn / Galilean / Titan)** (all rungs `a`–`d` done; Galilean at Lainey 2006 L1.2, Titan at TASS1.7) | ✅ |
 | `V-53` | **Resolved star clusters (Pleiades, Hyades, …)** (showpiece bootstrap done) | ✅ |
 | `V-54` | **Double / binary star resolution** | ✅ |
-| `V-55` | **Artificial satellites (TLE / SGP4)** | ⬜ |
+| `V-55` | **Artificial satellites (TLE / SGP4)** | ✅ |
 | `V-56` | **Object search, GoTo, and info panel** | ✅ |
 
 ### Library track
@@ -2459,7 +2462,7 @@ position is used as-is).
 
 ## Earth orbit
 
-### `V-55` Artificial satellites (TLE / SGP4) — ⬜
+### `V-55` Artificial satellites (TLE / SGP4) — ✅ done
 
 **Item.** ISS, Starlink trains, the geostationary belt, and bright
 LEO satellites are visible most clear nights and absent from the
@@ -2525,6 +2528,39 @@ snapshot only). Document live-fetch caveats in
 utility with `V-36`.
 
 **Hosts wired.** CLI / viewer / web.
+
+**Implementation (shipped).**
+- `crates/astronomy/src/satellites.rs`: TLE parser + SGP4 propagation
+  via the vendored pure-Rust `sgp4` crate (Vallado et al. 2006), returning
+  geocentric TEME position. Topocentric reduction reuses
+  `observer_equatorial_position_km` (shared GMST rotation) so the TEME
+  position and the WGS84 observer share one frame; RA/Dec + local sidereal
+  time give alt/az and slant range. A conical umbra/penumbra Earth-shadow
+  test (built from the apparent Sun) gives the sunlit fraction, and the
+  McCants/QuickSat standard-magnitude convention gives apparent magnitude.
+- `crates/renderer`: a `SatelliteLayer` on `Camera` plus a per-frame
+  satellite uniform block (direction + magnitude, streak endpoint +
+  visibility flag, count/enabled/exposure header). `shaders/skyglow.wgsl`
+  renders each sunlit, above-horizon satellite as a neutral point sprite,
+  or a great-circle motion streak when the exposure field is positive.
+- `crates/common`: a manifest-pinned curated TLE snapshot
+  (`data/satellites/curated_tle.txt`: ISS, HST, NOAA-20, a Starlink, and
+  geostationary GOES-16), embedded via `include_str!`; session schema v6
+  adds the `satellites` block; an `iss-pass` scene preset (dark-sky
+  near-zenith ISS pass) exercises the layer.
+- Hosts: CLI `--satellites` / `--satellite-exposure-seconds`; viewer `L`
+  key toggle (+ same flags); web `StarView.set_satellites` WASM binding and
+  a settings-panel toggle / exposure control with session + URL
+  round-trip. Live TLE fetch is opt-in only (see
+  `docs/standards-compliance.md`); the default render path uses the pinned
+  snapshot for deterministic renders.
+
+**Tests / validation (shipped).** `astronomy::satellites` unit tests pin
+the SGP4 position against the AIAA 2006-6753 catalog-88888 reference
+vector (sub-km), the conical Earth-shadow umbra/penumbra classification,
+and the standard-magnitude reference geometry; the renderer pins the
+satellite uniform packing for a visible ISS pass; `make manifest-check`
+pins the TLE snapshot bytes.
 
 ---
 

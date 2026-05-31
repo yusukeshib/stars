@@ -15,6 +15,7 @@ import {
   type OverlayConfig,
   type PlanetsConfig,
   type ProjectionConfig,
+  type SatellitesConfig,
   type ScintillationConfig,
   type View,
   type EyepieceConfig,
@@ -32,6 +33,7 @@ export type PersistedConfig = {
   atmosphere?: AtmosphereConfig;
   scintillation?: ScintillationConfig;
   planets?: PlanetsConfig;
+  satellites?: SatellitesConfig;
   projection?: ProjectionConfig;
   eyepiece?: EyepieceConfig;
 };
@@ -55,6 +57,7 @@ export function loadConfig(): PartialPersistedConfig | null {
       atmosphere?: unknown;
       scintillation?: unknown;
       planets?: unknown;
+      satellites?: unknown;
       projection?: unknown;
       eyepiece?: unknown;
     };
@@ -68,6 +71,8 @@ export function loadConfig(): PartialPersistedConfig | null {
     if (scintillation) out.scintillation = scintillation;
     const planets = parsePlanetsConfig(obj.planets);
     if (planets) out.planets = planets;
+    const satellites = parseSatellitesConfig(obj.satellites);
+    if (satellites) out.satellites = satellites;
     const projection = parseProjectionConfig(obj.projection);
     if (projection) out.projection = projection;
     const eyepiece = parseEyepieceConfig(obj.eyepiece);
@@ -163,6 +168,17 @@ function parsePlanetsConfig(v: unknown): PlanetsConfig | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Partial<PlanetsConfig>;
   return typeof o.enabled === "boolean" ? { enabled: o.enabled } : null;
+}
+
+function parseSatellitesConfig(v: unknown): SatellitesConfig | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Partial<SatellitesConfig>;
+  if (typeof o.enabled !== "boolean") return null;
+  const exposureSeconds =
+    typeof o.exposureSeconds === "number" && Number.isFinite(o.exposureSeconds) && o.exposureSeconds >= 0
+      ? o.exposureSeconds
+      : 0;
+  return { enabled: o.enabled, exposureSeconds };
 }
 
 function parseVec3(v: unknown, range: [number, number]): { x: number; y: number; z: number } | null {

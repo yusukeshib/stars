@@ -407,6 +407,68 @@ Maintenance rule:
 - Keep the coordinate epoch and preprocessing method explicit. Boundary data is
   easy to misuse if B1875 and J2000 coordinates are mixed.
 
+## Artificial-satellite orbital elements (V-55)
+
+### Curated CelesTrak TLE snapshot
+
+Repository location:
+
+- `crates/common/data/satellites/curated_tle.txt`
+
+Used for:
+
+- the V-55 artificial-satellite layer (TLE / SGP4) in `astronomy::satellites`,
+  embedded via `include_str!` into `crates/common/src/satellites.rs` and
+  `apps/web/src/lib.rs`.
+
+Manifest id:
+
+- `celestrak-tle-curated-2026-05` in `data/manifest.toml`.
+
+Source / version / license:
+
+- CelesTrak GP service (`https://celestrak.org/NORAD/elements/gp.php`),
+  retrieved 2026-05-31 (TLE epoch ~2026-05-30, day-of-year 150).
+- A curated representative set: ISS (ZARYA), HST, NOAA-20 (polar LEO),
+  STARLINK-1008, and the geostationary GOES-16.
+- License: US Space Force orbital data redistributed by CelesTrak is in the
+  public domain.
+
+References:
+
+- Vallado, D. A. et al. 2006, AIAA 2006-6753, *Revisiting Spacetrack Report #3*
+  (SGP4 reference implementation, matched by the `sgp4` crate).
+- Hoots, F. R. & Roehrich, R. L. 1980, Spacetrack Report #3.
+
+Preprocessing / regeneration:
+
+- `scripts/fetch-satellite-tle.sh` re-fetches the snapshot from CelesTrak.
+  After regenerating, refresh the `sha256` + `retrieved` date in
+  `data/manifest.toml` and this file, then run `make manifest-check`.
+
+Intrinsic magnitudes:
+
+- Per-satellite intrinsic (“standard”) visual magnitudes are a small
+  hand-curated table in `crates/astronomy/src/satellites.rs`
+  (`CURATED_STD_MAGNITUDES`), following the McCants / QuickSat convention
+  (mmccants.org) — the V magnitude at 1000 km range and 50 % illuminated
+  phase. This is deliberately a small hand table for the curated set, not a
+  bulk import of McCants’ MCNAMES file.
+
+Maintenance rule:
+
+- TLEs are only accurate near their epoch (SGP4 drifts over weeks). The
+  snapshot is for deterministic demonstration / validation of the SGP4
+  pipeline, **not** operational tracking. Live TLE fetch is an opt-in host
+  concern only (see `docs/standards-compliance.md`); the default render path
+  uses this pinned snapshot so renders stay reproducible.
+
+Implementation areas:
+
+- `crates/astronomy/src/satellites.rs`
+- `crates/common/src/satellites.rs`
+- `crates/renderer/src/camera.rs`, `crates/renderer/src/shaders/skyglow.wgsl`
+
 ## Runtime web services
 
 ### OpenStreetMap Nominatim search API

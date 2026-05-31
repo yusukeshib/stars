@@ -17,6 +17,7 @@ mod observer;
 pub mod occultation;
 pub mod photometry;
 mod planning;
+pub mod satellites;
 pub mod scintillation;
 pub mod skyglow;
 mod time;
@@ -56,6 +57,10 @@ pub use planning::{
     MutualPlanetaryOccultationEvent, PlanetTransitEvent, PlanningBody, RiseTransitSet,
     SolarEclipseEvent, SolarEclipseKind, SolarEclipseState, TwilightBand, TwilightIndicator,
     DEFAULT_PLANNING_BODIES,
+};
+pub use satellites::{
+    apparent_satellites, parse_tle_set, Satellite, SatelliteApparent, SatelliteError, Tle,
+    DEFAULT_STD_MAGNITUDE,
 };
 pub use time::{
     approximate_tdb_from_tt, gmst_radians, julian_date_from_unix_seconds, lmst_radians,

@@ -3,37 +3,35 @@
   "appVersion": "0.1.0",
   "createdBy": "stars-cli",
   "observer": {
-    "latitudeDeg": 35.68,
-    "longitudeDeg": 139.69
+    "latitudeDeg": -45.0,
+    "longitudeDeg": 0.0
   },
   "time": {
-    "jdUtc": 2461266.0,
-    "jdUt1": 2461266.0,
-    "jdTai": 2461266.0004282407,
-    "jdTt": 2461266.000800741,
-    "jdTdb": 2461266.0008007293,
+    "jdUtc": 2461190.747916667,
+    "jdUt1": 2461190.747916667,
+    "jdTai": 2461190.7483449075,
+    "jdTt": 2461190.7487174077,
+    "jdTdb": 2461190.7487174184,
     "taiMinusUtcSeconds": 37.0,
     "dut1Seconds": 0.0
   },
   "view": {
-    "azimuthDeg": 180.0,
-    "altitudeDeg": 35.0,
-    "fovDeg": 90.0
+    "azimuthDeg": 242.0,
+    "altitudeDeg": 82.0,
+    "fovDeg": 70.0
   },
   "overlays": {
     "layers": [
-      "equatorial-grid",
-      "ecliptic",
-      "galactic-equator",
-      "constellation-lines",
-      "constellation-boundaries"
+      "horizon",
+      "cardinal-labels",
+      "constellation-lines"
     ],
     "gridStepDeg": 15.0,
     "opacity": 0.6,
     "deepSkyMagnitudeLimit": 7.0
   },
   "projection": {
-    "projection": "hammer",
+    "projection": "perspective",
     "viewpoint": "earth",
     "external": {
       "originPc": {
@@ -77,7 +75,7 @@
     "enabled": true
   },
   "satellites": {
-    "enabled": false,
+    "enabled": true,
     "exposureSeconds": 0.0
   },
   "eyepiece": {

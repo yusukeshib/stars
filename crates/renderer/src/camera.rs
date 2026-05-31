@@ -353,6 +353,22 @@ pub(crate) struct CameraUniform {
     /// is a linear-RGB triple normalised to a Rec.709 luminance of 1.0; `w`
     /// is unused.
     pub light_pollution_tint: [f32; 4],
+    /// V-55 artificial-satellite sprites. `xyz` is the J2000-equatorial unit
+    /// direction toward the satellite at the frame instant; `w` is its
+    /// apparent visual magnitude. Padded rows past `satellite_params.x` stay
+    /// zero and are never sampled.
+    pub satellite_dir_radius: SatelliteUniform,
+    /// V-55 artificial-satellite streak endpoints. `xyz` is the
+    /// J2000-equatorial unit direction toward the satellite
+    /// `satellite_params.z` seconds later (the streak's far end when frame
+    /// integration is on); `w` is `1.0` when the satellite is above the
+    /// horizon **and** sunlit (naked-eye-visible), `0.0` otherwise.
+    pub satellite_streak: SatelliteUniform,
+    /// V-55 satellite header: `[count, enabled, exposure_seconds, reserved]`.
+    /// `count <= MAX_SATELLITES` as an `f32`; `enabled` is `1.0` when the
+    /// satellite layer should render. `exposure_seconds > 0` switches the
+    /// shader from point sprites to streaks.
+    pub satellite_params: [f32; 4],
 }
 
 /// Lower bound of the V-51c totality smoothstep on obscuration.
@@ -371,6 +387,12 @@ const TOTALITY_ENVELOPE_HIGH: f32 = 0.998;
 
 pub(crate) const HW_COEFFS_PER_CHANNEL: usize = 9;
 pub(crate) type HosekWilkieCoefficientsUniform = [[f32; 4]; HW_COEFFS_PER_CHANNEL];
+
+/// V-55: maximum number of artificial satellites rendered per frame. The
+/// shipped curated snapshot has a handful; the cap bounds the uniform block
+/// and the WGSL iteration in `shaders/skyglow.wgsl`.
+pub const MAX_SATELLITES: usize = 32;
+pub(crate) type SatelliteUniform = [[f32; 4]; MAX_SATELLITES];
 
 pub(crate) const PLANET_UNIFORM_COUNT: usize = 7;
 pub(crate) type PlanetEqRadiusUniform = [[f32; 4]; PLANET_UNIFORM_COUNT];
@@ -861,6 +883,13 @@ fn refracted_local_direction(local: Vec3, pressure_hpa: f32, temperature_c: f32)
     Vec3::new(az.sin() * cos_alt, az.cos() * cos_alt, apparent_alt.sin()).normalize_or_zero()
 }
 
+/// J2000-equatorial unit vector for a right ascension / declination pair.
+fn eq_unit_vector(ra: f64, dec: f64) -> Vec3 {
+    let (sra, cra) = ra.sin_cos();
+    let (sd, cd) = dec.sin_cos();
+    Vec3::new((cd * cra) as f32, (cd * sra) as f32, sd as f32)
+}
+
 fn apparent_disk_direction_j2000(
     direction_date: Vec3,
     refract: bool,
@@ -999,6 +1028,27 @@ pub struct Camera {
     /// horizon glow, while a Bortle 1 / rural site renders pixel-identically
     /// to the pre-V-39 dark-sky pipeline.
     pub light_pollution: astronomy::skyglow::LightPollution,
+    /// V-55 artificial-satellite layer (TLE / SGP4). Off by default so the
+    /// dark-sky composition stays identical to the pre-V-55 pipeline; hosts
+    /// opt in and supply the curated (or live) TLE snapshot.
+    pub satellites: SatelliteLayer,
+}
+
+/// V-55 host-tier satellite layer configuration carried on [`Camera`].
+///
+/// The renderer propagates each [`astronomy::Tle`] with SGP4 every frame and
+/// renders the sunlit, above-horizon members as point sprites (or motion
+/// streaks when `exposure_seconds > 0`).
+#[derive(Debug, Clone, Default)]
+pub struct SatelliteLayer {
+    /// Master on/off. Off by default.
+    pub enabled: bool,
+    /// Frame-integration exposure in seconds. `0` renders point sprites; a
+    /// positive value renders a streak whose length is the apparent angular
+    /// motion over the exposure.
+    pub exposure_seconds: f32,
+    /// Two-line element sets to propagate and render.
+    pub tles: Vec<astronomy::Tle>,
 }
 
 impl Camera {
@@ -1016,6 +1066,7 @@ impl Camera {
             scintillation: Scintillation::default(),
             limiting_magnitude: NAKED_EYE_LIMITING_MAGNITUDE,
             light_pollution: astronomy::skyglow::LightPollution::default(),
+            satellites: SatelliteLayer::default(),
         }
     }
 
@@ -1423,6 +1474,104 @@ impl Camera {
         }
     }
 
+    /// V-55: propagate the satellite layer with SGP4 and pack per-satellite
+    /// directions, magnitudes, streak endpoints, and visibility flags. Unlike
+    /// the VSOP87 planet block this is recomputed every frame because LEO
+    /// satellites sweep the sky in seconds. Returns all-zero / disabled when
+    /// the layer is off, empty, or an external viewpoint is active.
+    pub(crate) fn satellite_uniforms(&self) -> (SatelliteUniform, SatelliteUniform, [f32; 4]) {
+        let mut dir_radius = [[0.0; 4]; MAX_SATELLITES];
+        let mut streak = [[0.0; 4]; MAX_SATELLITES];
+        if !self.satellites.enabled
+            || self.satellites.tles.is_empty()
+            || self.viewpoint.is_external()
+        {
+            return (dir_radius, streak, [0.0, 0.0, 0.0, 0.0]);
+        }
+
+        let pressure_hpa = if self.atmosphere.pressure_hpa.is_finite() {
+            self.atmosphere.pressure_hpa.clamp(0.0, 1100.0)
+        } else {
+            Atmosphere::DEFAULT.pressure_hpa
+        };
+        let temperature_c = if self.atmosphere.temperature_c.is_finite() {
+            self.atmosphere.temperature_c.clamp(-80.0, 60.0)
+        } else {
+            Atmosphere::DEFAULT.temperature_c
+        };
+        let refract = self.atmosphere.sunlit_scattering;
+        let date_to_local = self.equatorial_to_horizontal();
+        let local_to_date = date_to_local.transpose();
+        let date_to_j2000 = self.j2000_to_date().transpose();
+
+        let exposure = self.satellites.exposure_seconds.max(0.0);
+        // Observer state `exposure` seconds later for the streak's far end.
+        let end_observer = if exposure > 0.0 {
+            let time = astronomy::TimeScales::from_utc_julian_date_with_dut1(
+                self.observer.time.jd_utc + exposure as f64 / 86_400.0,
+                self.observer.time.dut1_seconds,
+            );
+            Some(Observer {
+                latitude_rad: self.observer.latitude_rad,
+                longitude_rad: self.observer.longitude_rad,
+                julian_date: time.jd_ut1,
+                time,
+            })
+        } else {
+            None
+        };
+
+        let to_j2000 = |ra: f64, dec: f64| -> Vec3 {
+            apparent_disk_direction_j2000(
+                eq_unit_vector(ra, dec),
+                refract,
+                pressure_hpa,
+                temperature_c,
+                date_to_local,
+                local_to_date,
+                date_to_j2000,
+            )
+        };
+
+        let mut count = 0usize;
+        for tle in &self.satellites.tles {
+            if count >= MAX_SATELLITES {
+                break;
+            }
+            let Ok(sat) = astronomy::Satellite::from_tle(tle) else {
+                continue;
+            };
+            let Some(app) = sat.apparent(self.observer) else {
+                continue;
+            };
+            let dir = to_j2000(app.right_ascension_rad, app.declination_rad);
+            let end_dir = match end_observer {
+                Some(obs) => sat
+                    .apparent(obs)
+                    .map(|a| to_j2000(a.right_ascension_rad, a.declination_rad))
+                    .unwrap_or(dir),
+                None => dir,
+            };
+            let visible = app.above_horizon && app.sunlit;
+            dir_radius[count] = [dir.x, dir.y, dir.z, app.apparent_magnitude as f32];
+            streak[count] = [
+                end_dir.x,
+                end_dir.y,
+                end_dir.z,
+                if visible { 1.0 } else { 0.0 },
+            ];
+            count += 1;
+        }
+
+        let params = [
+            count as f32,
+            if count > 0 { 1.0 } else { 0.0 },
+            exposure,
+            0.0,
+        ];
+        (dir_radius, streak, params)
+    }
+
     pub(crate) fn uniform_with_planets(
         &self,
         width: u32,
@@ -1430,6 +1579,7 @@ impl Camera {
         planet_uniforms: &PlanetUniforms,
     ) -> CameraUniform {
         let zenith = self.zenith_in_equatorial();
+        let (satellite_dir_radius, satellite_streak, satellite_params) = self.satellite_uniforms();
         let observer_altitude_m = if self.atmosphere.observer_altitude_m.is_finite() {
             self.atmosphere.observer_altitude_m.max(0.0)
         } else {
@@ -1765,6 +1915,9 @@ impl Camera {
                 let [r, g, b] = astronomy::skyglow::LightPollution::artificial_rgb_tint();
                 [r, g, b, 0.0]
             },
+            satellite_dir_radius,
+            satellite_streak,
+            satellite_params,
         }
     }
 
@@ -1791,6 +1944,36 @@ impl Camera {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn satellite_uniforms_pack_visible_iss() {
+        let observer = Observer::from_degrees_with_time(
+            35.68,
+            139.69,
+            astronomy::TimeScales::from_utc_julian_date(2_461_190.912_5),
+        );
+        let mut cam = Camera::new(observer, LocalView::default(), 16.0 / 9.0);
+        cam.satellites = SatelliteLayer {
+            enabled: true,
+            exposure_seconds: 0.0,
+            tles: vec![astronomy::Tle {
+                name: "ISS (ZARYA)".to_string(),
+                line1: "1 25544U 98067A   26150.51748228  .00011776  00000+0  21767-3 0  9998"
+                    .to_string(),
+                line2: "2 25544  51.6337  27.5746 0007245 114.7080 245.4664 15.49496548569014"
+                    .to_string(),
+                std_magnitude: -1.8,
+            }],
+        };
+        let (dir_radius, streak, params) = cam.satellite_uniforms();
+        assert_eq!(params[0], 1.0, "one satellite packed");
+        assert_eq!(params[1], 1.0, "layer enabled");
+        // Visible flag set (above horizon AND sunlit) and a finite magnitude.
+        assert_eq!(streak[0][3], 1.0, "ISS should be visible at this epoch");
+        let dir = Vec3::new(dir_radius[0][0], dir_radius[0][1], dir_radius[0][2]);
+        assert!((dir.length() - 1.0).abs() < 1e-3, "unit direction");
+        assert!(dir_radius[0][3] < 0.0, "ISS apparent magnitude is bright");
+    }
 
     /// V-25: the per-channel Edlén dispersion ratios are declared as
     /// `f32` constants in `shaders/star.wgsl` and `shaders/skyglow.wgsl`.

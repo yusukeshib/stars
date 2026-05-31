@@ -4,6 +4,7 @@ import {
   DEFAULT_OVERLAY_CONFIG,
   DEFAULT_PLANETS_CONFIG,
   DEFAULT_PROJECTION_CONFIG,
+  DEFAULT_SATELLITES_CONFIG,
   DEFAULT_SCINTILLATION_CONFIG,
   MAX_FOV_DEG,
   MIN_FOV_DEG,
@@ -18,6 +19,7 @@ import {
   type OverlayConfig,
   type PlanetsConfig,
   type ProjectionConfig,
+  type SatellitesConfig,
   type ScintillationConfig,
   type Vec3,
   type View,
@@ -57,6 +59,7 @@ export type StarSession = {
   atmosphere: AtmosphereConfig;
   scintillation: ScintillationConfig;
   planets: PlanetsConfig;
+  satellites: SatellitesConfig;
   eyepiece: EyepieceConfig;
   catalog: {
     backend: string;
@@ -84,6 +87,7 @@ export type SessionState = {
   atmosphere: AtmosphereConfig;
   scintillation: ScintillationConfig;
   planets: PlanetsConfig;
+  satellites: SatellitesConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   timeMs: number;
@@ -158,6 +162,7 @@ export function buildStarSession(state: SessionState): StarSession {
     atmosphere: state.atmosphere,
     scintillation: state.scintillation,
     planets: state.planets,
+    satellites: state.satellites,
     eyepiece: state.eyepiece,
     catalog: {
       backend: "hyg-embedded-wasm",
@@ -196,10 +201,11 @@ export function parseStarSessionJson(raw: string): SessionState {
   const atmosphere = parseAtmosphere(s.atmosphere);
   const scintillation = parseScintillation(s.scintillation);
   const planets = parsePlanets(s.planets);
+  const satellites = parseSatellites(s.satellites);
   const projection = parseProjection(s.projection);
   const eyepiece = parseEyepiece(s.eyepiece);
   const timeMs = parseTimeMs(s.time);
-  return { observer, view, overlays, atmosphere, scintillation, planets, projection, eyepiece, timeMs };
+  return { observer, view, overlays, atmosphere, scintillation, planets, satellites, projection, eyepiece, timeMs };
 }
 
 function parseObserver(value: unknown): Observer {
@@ -265,6 +271,18 @@ function parseScintillation(value: unknown): ScintillationConfig {
     enabled: typeof v.enabled === "boolean" ? v.enabled : DEFAULT_SCINTILLATION_CONFIG.enabled,
     cN2Scale: inRange(v.cN2Scale, 0, 10) ? v.cN2Scale : DEFAULT_SCINTILLATION_CONFIG.cN2Scale,
     seed: Number.isFinite(v.seed) ? (v.seed as number) >>> 0 : DEFAULT_SCINTILLATION_CONFIG.seed,
+  };
+}
+
+function parseSatellites(value: unknown): SatellitesConfig {
+  if (!value || typeof value !== "object") return DEFAULT_SATELLITES_CONFIG;
+  const v = value as Partial<SatellitesConfig>;
+  return {
+    enabled: typeof v.enabled === "boolean" ? v.enabled : DEFAULT_SATELLITES_CONFIG.enabled,
+    exposureSeconds:
+      typeof v.exposureSeconds === "number" && Number.isFinite(v.exposureSeconds) && v.exposureSeconds >= 0
+        ? v.exposureSeconds
+        : DEFAULT_SATELLITES_CONFIG.exposureSeconds,
   };
 }
 

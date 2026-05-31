@@ -5,8 +5,8 @@ use astronomy::Observer;
 use clap::Parser;
 use renderer::{LocalView, SkyViewpoint, DEFAULT_SCREEN_LIMITING_MAGNITUDE};
 use stars_host_common::{
-    atmosphere_from_args, eyepiece_from_args, hyg_catalog_snapshot, light_pollution_from_args,
-    load_session, overlay_config_from_args, parse_time_to_time_scales,
+    atmosphere_from_args, curated_satellite_layer, eyepiece_from_args, hyg_catalog_snapshot,
+    light_pollution_from_args, load_session, overlay_config_from_args, parse_time_to_time_scales,
     render_scene_from_catalog_path, resolve_goto_query, save_session, scene_from_preset,
     scene_preset_infos, scintillation_from_args, viewpoint_from_args, AtmosphereOverrides,
     AtmospherePresetArg, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides,
@@ -226,6 +226,18 @@ struct Args {
     #[arg(long)]
     no_planets: bool,
 
+    /// Enable the V-55 artificial-satellite layer (TLE / SGP4) using the
+    /// curated, manifest-pinned CelesTrak snapshot. Off by default so the
+    /// dark-sky composition is unchanged.
+    #[arg(long)]
+    satellites: bool,
+
+    /// Frame-integration exposure (seconds) for satellite motion streaks.
+    /// 0 (default) renders point sprites; a positive value renders a streak
+    /// whose length is the apparent angular motion over the exposure.
+    #[arg(long, default_value_t = 0.0)]
+    satellite_exposure_seconds: f32,
+
     /// Enable telescope eyepiece simulation. Supplying any telescope/eyepiece
     /// parameter also enables this mode.
     #[arg(long)]
@@ -366,6 +378,7 @@ fn main() -> Result<()> {
             light_pollution,
             scintillation,
             planets_enabled: !args.no_planets,
+            satellites: curated_satellite_layer(args.satellites, args.satellite_exposure_seconds),
             projection: args.projection.into(),
             viewpoint,
             external_viewpoint,

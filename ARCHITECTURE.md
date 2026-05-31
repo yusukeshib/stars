@@ -63,6 +63,13 @@ Owns scientific and geometric models:
   IAU-2000-style nutation, and atmospheric refraction;
 - Sun, Moon, planet, Saturn-ring, Galilean-moon, and Titan apparent /
   topocentric helpers (`ephemeris.rs`, `moons.rs`);
+- artificial-satellite TLE parsing + SGP4 propagation, TEME→topocentric
+  reduction, conical Earth-shadow visibility, and amateur-grade apparent
+  magnitude (`satellites.rs`, V-55; SGP4 via the vendored `sgp4` crate).
+  The TEME position and the WGS84 observer position share the one
+  GMST-defined inertial frame (`observer_equatorial_position_km`), so the
+  satellite reduction reuses the same equatorial → horizontal path as the
+  Sun / Moon / planets;
 - photometry, illuminants, atmosphere, twilight, and skyglow reference models;
 - planning helpers such as rise / transit / set and twilight bands.
 
@@ -299,7 +306,16 @@ The exact pass layout can change, but responsibilities should stay separated:
   directions — so any front-disk on back-disk pair (solar eclipse, planetary
   transit, mutual planetary occultation, Galilean shadow transit on
   Jupiter) is one shader uniform write away with no depth or stencil
-  attachments. The V-52d Galilean-shadow producer
+  attachments. Artificial satellites (V-55) ride the same skyglow pass:
+  `Camera::satellite_uniforms` propagates the `SatelliteLayer`'s TLEs with
+  SGP4 every frame (LEO satellites sweep the sky in seconds, so unlike the
+  cached VSOP87 planet block this is recomputed per frame), maps each
+  satellite direction through the same `apparent_disk_direction_j2000`
+  pipeline as the planets, and packs direction+magnitude, a streak endpoint
+  (the direction one exposure later), and an above-horizon-and-sunlit
+  visibility flag into a satellite uniform block; `satellite_radiance` draws
+  each visible satellite as a neutral point sprite (or a great-circle motion
+  streak when the exposure field is positive). The V-52d Galilean-shadow producer
   (`astronomy::galilean_shadow_disks_at`) feeds the same uniform; it
   also drives a CPU-side "moon behind Jupiter" cull on the V-52b
   Galilean-moon sprite path via a negative-radius sentinel in

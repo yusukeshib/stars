@@ -166,6 +166,45 @@ Current limitation:
   `astro` crate) and the fixture's 0.01ˢ/0.1″ quantization, not the
   TASS1.7 Titan model.
 
+### Artificial satellites (`V-55`)
+
+What is tested:
+
+- SGP4 propagation is pinned against the AIAA 2006-6753 / Spacetrack
+  Report #3 reference verification object (catalog 88888) at its epoch:
+  the propagated TEME position must agree with the published reference
+  vector (2328.97048951, −5995.22076416, 1719.97067261 km) to sub-km. The
+  residual (a few tens of metres) is the expected WGS-84 vs. WGS-72 gravity
+  constant difference between the `sgp4` crate's default and the WGS-72
+  reference run — well inside the documented sub-km budget.
+- The conical Earth-shadow classifier is pinned at three geometries: a
+  sunward-side satellite is fully lit, an on-anti-solar-axis satellite is
+  in the umbra (zero illumination), and a far-off-axis satellite behind
+  Earth is fully lit.
+- The McCants / QuickSat apparent-magnitude relation reproduces the
+  standard magnitude at its reference geometry (1000 km range, 90° phase)
+  and dims monotonically with range.
+- The renderer's satellite uniform packing is pinned for a known visible
+  ISS pass (above horizon + sunlit → visibility flag set, bright
+  magnitude, unit direction).
+
+Model limits and what is **not** claimed:
+
+- TLEs are accurate only near their epoch; the curated snapshot
+  (`celestrak-tle-curated-2026-05`) is a deterministic demonstration /
+  validation set, **not** operational tracking, and is not re-validated
+  against live Heavens-Above / Space-Track pass predictions (which drift
+  as new elements are published). The defensible numerical claim is the
+  SGP4 reference-vector agreement above, not a 5-second pass-time match
+  against an external service that cannot be reproduced offline.
+- Apparent magnitudes use a small hand-curated intrinsic-magnitude table
+  (McCants convention), not a cross-section / BRDF physical model — this
+  is the agreed amateur-grade approximation (see ROADMAP `V-55` non-goals).
+- The TEME frame is treated as the renderer's J2000-ish equatorial frame
+  to within the precession/nutation difference (sub-degree over decades),
+  which is negligible for a naked-eye satellite track that sweeps degrees
+  per second.
+
 ### Eclipse / occultation geometry (`V-51`)
 
 Current implementation:

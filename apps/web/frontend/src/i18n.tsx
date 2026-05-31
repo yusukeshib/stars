@@ -128,6 +128,8 @@ const en: Dictionary = {
   "card.view.description":
     "Choose the map projection and the solar-system bodies drawn with the stars.",
   "card.view.mercuryToNeptune": "Mercury → Neptune",
+  "card.view.satellites": "Artificial satellites (ISS / Starlink)",
+  "card.view.satelliteExposure": "Satellite streak exposure (s)",
   "card.view.viewpoint": "Viewpoint",
   "card.view.screenProjection": "Screen projection",
   "card.view.helper":
@@ -328,6 +330,8 @@ const ja: Dictionary = {
   "card.view.title": "視点と天体",
   "card.view.description": "地図投影と、星と一緒に描画する太陽系天体を選択します。",
   "card.view.mercuryToNeptune": "水星 → 海王星",
+  "card.view.satellites": "人工衛星（ISS / Starlink）",
+  "card.view.satelliteExposure": "衛星の軌跡露出（秒）",
   "card.view.viewpoint": "視点",
   "card.view.screenProjection": "画面投影",
   "card.view.helper":

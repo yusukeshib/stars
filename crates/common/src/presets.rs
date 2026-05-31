@@ -12,13 +12,13 @@ use anyhow::Result;
 use clap::ValueEnum;
 use renderer::{
     Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView,
-    OverlayConfig, OverlayKind, Scintillation, SkyProjection, SkyViewpoint,
+    OverlayConfig, OverlayKind, SatelliteLayer, Scintillation, SkyProjection, SkyViewpoint,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    hyg_catalog_snapshot, parse_time_to_time_scales, CatalogSnapshot, CorrectionSnapshot,
-    SessionScene, StarSession,
+    curated_satellite_layer, hyg_catalog_snapshot, parse_time_to_time_scales, CatalogSnapshot,
+    CorrectionSnapshot, SessionScene, StarSession,
 };
 
 /// CLI-facing stable identifiers for built-in deterministic scenes.
@@ -42,6 +42,7 @@ pub enum ScenePresetArg {
     SolarEclipse,
     VenusTransit,
     JupiterShadowTransit,
+    IssPass,
     AllSkyHammer,
     AllSkyMollweide,
     GalacticNorth,
@@ -65,6 +66,7 @@ impl ScenePresetArg {
         Self::SolarEclipse,
         Self::VenusTransit,
         Self::JupiterShadowTransit,
+        Self::IssPass,
         Self::AllSkyHammer,
         Self::AllSkyMollweide,
         Self::GalacticNorth,
@@ -88,6 +90,7 @@ impl ScenePresetArg {
             Self::SolarEclipse => "solar-eclipse",
             Self::VenusTransit => "venus-transit",
             Self::JupiterShadowTransit => "jupiter-shadow-transit",
+            Self::IssPass => "iss-pass",
             Self::AllSkyHammer => "all-sky-hammer",
             Self::AllSkyMollweide => "all-sky-mollweide",
             Self::GalacticNorth => "galactic-north",
@@ -201,6 +204,12 @@ pub const SCENE_PRESET_INFOS: &[ScenePresetInfo] = &[
         title: "Jupiter Galilean shadow transit",
         description: "2008-12-20 ~14:00 UT Io shadow transit on Jupiter observed from Roque de los Muchachos, Canary Islands (Io ingress at 13:14 UT, mid-transit ~14:30 UT; Jupiter rides at altitude ~39° SE from this site). Wires the V-52d Galilean-shadow producer onto the V-51b analytic-mask Planet-on-Planet path so Io's silhouette darkens the Jovian disk inside the eyepiece field.",
         validation_focus: "V-52d Galilean-shadow pipeline: Sun-projected moon position emits a small Planet(Jupiter)-targeted occluder; V-52b moon sprites unaffected outside Jupiter's disk",
+    },
+    ScenePresetInfo {
+        id: ScenePresetArg::IssPass,
+        title: "ISS pass (dark-sky)",
+        description: "2026-05-30 ~05:57 UTC near-zenith International Space Station pass from a fixed 45°S / 0° observer (alt ≈ 82°, az ≈ 242°, fully sunlit) at astronomical twilight from the curated CelesTrak TLE snapshot. Wires the V-55 SGP4 satellite layer: TEME→topocentric reduction, Earth-shadow visibility, and McCants apparent magnitude.",
+        validation_focus: "V-55 satellite layer: SGP4 propagation, sunlit/above-horizon gating, apparent-magnitude sprite against a dark sky at the curated TLE epoch",
     },
     ScenePresetInfo {
         id: ScenePresetArg::AllSkyHammer,
@@ -527,6 +536,32 @@ pub fn scene_from_preset(
             AtmospherePreset::HighAltitude,
             catalog,
         )?,
+        ScenePresetArg::IssPass => {
+            // V-55 validation: a real, sunlit, near-zenith ISS pass at the
+            // curated TLE snapshot epoch from a fixed Southern-Ocean observer
+            // (45°S, 0°) where the Sun sits 15° below the horizon (astronomical
+            // twilight) so the bright sunlit ISS lands against a dark sky
+            // rather than washing out in bright twilight. The satellite layer
+            // is enabled with the curated CelesTrak snapshot; the view is
+            // framed on the ISS (alt ≈ 82°, az ≈ 242°).
+            let mut scene = earth_scene(
+                -45.0,
+                0.0,
+                "2026-05-30T05:57:00Z",
+                242.0,
+                82.0,
+                70.0,
+                overlay_config(&[
+                    OverlayKind::Horizon,
+                    OverlayKind::CardinalLabels,
+                    OverlayKind::ConstellationLines,
+                ]),
+                AtmospherePreset::ClearRural,
+                catalog,
+            )?;
+            scene.satellites = curated_satellite_layer(true, 0.0);
+            scene
+        }
         ScenePresetArg::AllSkyHammer => {
             all_sky_scene("2026-08-13T12:00:00Z", SkyProjection::Hammer, catalog)?
         }
@@ -594,6 +629,7 @@ fn earth_scene(
         light_pollution: LightPollution::default(),
         scintillation: Scintillation::default(),
         planets_enabled: true,
+        satellites: SatelliteLayer::default(),
         projection: SkyProjection::Perspective,
         viewpoint: SkyViewpoint::Earth,
         external_viewpoint: ExternalViewpoint::GALACTIC_NORTH,
@@ -655,6 +691,7 @@ fn external_scene(
         light_pollution: LightPollution::default(),
         scintillation: Scintillation::OFF,
         planets_enabled: false,
+        satellites: SatelliteLayer::default(),
         projection,
         viewpoint,
         external_viewpoint,
@@ -710,7 +747,7 @@ mod tests {
             )
             .unwrap_or_else(|error| panic!("{preset} failed: {error:#}"));
             let json = serde_json::to_string(&session).unwrap();
-            assert!(json.contains("\"schemaVersion\":5"));
+            assert!(json.contains("\"schemaVersion\":6"));
             let parsed: StarSession = serde_json::from_str(&json).unwrap();
             let restored = parsed
                 .to_scene()

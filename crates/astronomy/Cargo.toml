@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 astro = "2"
 glam = { workspace = true }
+sgp4 = "2"

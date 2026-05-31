@@ -11,6 +11,7 @@ import {
   DEFAULT_EYEPIECE_CONFIG,
   DEFAULT_OVERLAY_CONFIG,
   DEFAULT_PLANETS_CONFIG,
+  DEFAULT_SATELLITES_CONFIG,
   DEFAULT_PROJECTION_CONFIG,
   MIN_FOV_DEG,
   MAX_FOV_DEG,
@@ -27,6 +28,7 @@ import {
   type PlanetsConfig,
   type PlanningTable,
   type ProjectionConfig,
+  type SatellitesConfig,
   type View,
 } from "./observer";
 import { loadConfig, saveConfig } from "./storage";
@@ -149,6 +151,8 @@ function loadSessionFromUrl(): UrlSession | null {
     "overlayOpacity",
     "deepSkyMag",
     "planets",
+    "satellites",
+    "satExposure",
     "projection",
     "viewpoint",
     "originPc",
@@ -219,6 +223,10 @@ function loadSessionFromUrl(): UrlSession | null {
     overlays,
     atmosphere: loadAtmosphereFromUrl(params) ?? undefined,
     planets: { enabled: params.get("planets") !== "off" },
+    satellites: {
+      enabled: params.get("satellites") === "on",
+      exposureSeconds: numberParam(params, "satExposure", DEFAULT_SATELLITES_CONFIG.exposureSeconds, 0, 600),
+    },
     projection: {
       projection: isSkyProjection(projectionParam)
         ? projectionParam
@@ -244,12 +252,13 @@ function loadSessionFromUrl(): UrlSession | null {
   };
 }
 
-function sessionUrl({ observer, view, overlays, atmosphere, planets, projection, eyepiece, timeMs }: {
+function sessionUrl({ observer, view, overlays, atmosphere, planets, satellites, projection, eyepiece, timeMs }: {
   observer: Observer;
   view: View;
   overlays: OverlayConfig;
   atmosphere: AtmosphereConfig;
   planets: PlanetsConfig;
+  satellites: SatellitesConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   timeMs: number;
@@ -267,6 +276,8 @@ function sessionUrl({ observer, view, overlays, atmosphere, planets, projection,
   url.searchParams.set("overlayOpacity", overlays.opacity.toFixed(2));
   url.searchParams.set("deepSkyMag", overlays.deepSkyMagnitudeLimit.toFixed(1));
   url.searchParams.set("planets", planets.enabled ? "on" : "off");
+  url.searchParams.set("satellites", satellites.enabled ? "on" : "off");
+  url.searchParams.set("satExposure", satellites.exposureSeconds.toFixed(1));
   url.searchParams.set("projection", projection.projection);
   url.searchParams.set("viewpoint", projection.viewpoint);
   url.searchParams.set("originPc", vec3SearchParam(projection.external.originPc));
@@ -315,6 +326,9 @@ export function App() {
   const [planets, setPlanets] = useState<PlanetsConfig>(
     URL_SESSION?.planets ?? PERSISTED?.planets ?? DEFAULT_PLANETS_CONFIG,
   );
+  const [satellites, setSatellites] = useState<SatellitesConfig>(
+    URL_SESSION?.satellites ?? PERSISTED?.satellites ?? DEFAULT_SATELLITES_CONFIG,
+  );
   const [projection, setProjection] = useState<ProjectionConfig>(
     URL_SESSION?.projection ?? PERSISTED?.projection ?? DEFAULT_PROJECTION_CONFIG,
   );
@@ -340,11 +354,11 @@ export function App() {
   // next load would silently mislead the user.
   useEffect(() => {
     const handle = setTimeout(
-      () => saveConfig({ observer, view, overlays, atmosphere, scintillation, planets, projection, eyepiece }),
+      () => saveConfig({ observer, view, overlays, atmosphere, scintillation, planets, satellites, projection, eyepiece }),
       250,
     );
     return () => clearTimeout(handle);
-  }, [observer, view, overlays, atmosphere, scintillation, planets, projection, eyepiece]);
+  }, [observer, view, overlays, atmosphere, scintillation, planets, satellites, projection, eyepiece]);
 
   // Mirror the current session into the address bar so the user can copy the
   // URL at any time without going through the explicit "Copy URL" action.
@@ -357,12 +371,12 @@ export function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handle = setTimeout(() => {
-      const url = sessionUrl({ observer, view, overlays, atmosphere, planets, projection, eyepiece, timeMs });
+      const url = sessionUrl({ observer, view, overlays, atmosphere, planets, satellites, projection, eyepiece, timeMs });
       window.history.replaceState(null, "", url);
     }, 250);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- timeMs deliberately excluded; see comment above.
-  }, [observer, view, overlays, atmosphere, scintillation, planets, projection, eyepiece]);
+  }, [observer, view, overlays, atmosphere, scintillation, planets, satellites, projection, eyepiece]);
 
   // Clock always ticks. When the user picks a custom moment via the quick time
   // popup we simply rebase `timeMs`; the same loop keeps advancing from there.
@@ -386,6 +400,7 @@ export function App() {
     atmosphere,
     scintillation,
     planets,
+    satellites,
     projection,
     eyepiece,
     timeMs,
@@ -398,6 +413,7 @@ export function App() {
     setAtmosphere(session.atmosphere);
     setScintillation(session.scintillation);
     setPlanets(session.planets);
+    setSatellites(session.satellites);
     setProjection(session.projection);
     setEyepiece(session.eyepiece);
     setTimeMs(session.timeMs);
@@ -424,6 +440,7 @@ export function App() {
         atmosphere={atmosphere}
         scintillation={scintillation}
         planets={planets}
+        satellites={satellites}
         projection={projection}
         eyepiece={eyepiece}
         onDrag={(daz, dalt) =>
@@ -465,6 +482,7 @@ export function App() {
         overlays={overlays}
         atmosphere={atmosphere}
         planets={planets}
+        satellites={satellites}
         projection={projection}
         eyepiece={eyepiece}
         planning={planning}
@@ -473,6 +491,7 @@ export function App() {
         onSetOverlays={setOverlays}
         onSetAtmosphere={setAtmosphere}
         onSetPlanets={setPlanets}
+        onSetSatellites={setSatellites}
         onSetProjection={setProjection}
         onSetEyepiece={setEyepiece}
         onSetView={setView}
