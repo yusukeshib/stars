@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ATMOSPHERE_PRESET_DEFAULTS,
   ATMOSPHERE_PRESETS,
+  OPTICAL_DESIGNS,
   OUTPUT_COLOURSPACES,
   SKY_PROJECTIONS,
   SKY_VIEWPOINTS,
@@ -16,6 +17,7 @@ import {
   type AtmospherePreset,
   type EyepieceConfig,
   type Observer,
+  type OpticalDesign,
   type OverlayConfig,
   type PlanetsConfig,
   type SatellitesConfig,
@@ -935,6 +937,53 @@ function SettingsPanel({
             decimals={1}
             onChange={(fieldStopMm) =>
               onSetEyepiece({ ...eyepiece, enabled: true, fieldStopMm: clamp(fieldStopMm, 0, 120) })
+            }
+          />
+          {/* V-45 telescope optical design driving the diffraction artifacts. */}
+          <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 8 }}>
+            <span>{t("card.telescope.design")}</span>
+            <select
+              value={eyepiece.opticalDesign}
+              onChange={(e) =>
+                onSetEyepiece({
+                  ...eyepiece,
+                  enabled: true,
+                  opticalDesign: e.target.value as OpticalDesign,
+                })
+              }
+              style={{ background: "#11151f", color: "#dde6f5", border: "1px solid #2b3550", borderRadius: 4, padding: "2px 6px" }}
+            >
+              {OPTICAL_DESIGNS.map((d) => (
+                <option key={d} value={d}>
+                  {t(`card.telescope.design.${d}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {eyepiece.opticalDesign === "newtonian" && (
+            <SliderNumberRow
+              id="eyepiece-spider-vanes"
+              label={t("card.telescope.spiderVanes")}
+              value={eyepiece.spiderVanes}
+              min={1}
+              max={8}
+              step={1}
+              decimals={0}
+              onChange={(spiderVanes) =>
+                onSetEyepiece({ ...eyepiece, enabled: true, spiderVanes: clamp(Math.round(spiderVanes), 1, 8) })
+              }
+            />
+          )}
+          <SliderNumberRow
+            id="eyepiece-ota-rotation"
+            label={t("card.telescope.otaRotation")}
+            value={eyepiece.otaRotationDeg}
+            min={0}
+            max={360}
+            step={5}
+            decimals={0}
+            onChange={(otaRotationDeg) =>
+              onSetEyepiece({ ...eyepiece, enabled: true, otaRotationDeg: clamp(otaRotationDeg, 0, 360) })
             }
           />
         </div>

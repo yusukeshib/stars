@@ -99,6 +99,21 @@ export const DEFAULT_SCINTILLATION_CONFIG: ScintillationConfig = {
   seed: 0x5C157107,
 };
 
+// V-45 telescope optical design driving the eyepiece diffraction artifacts.
+// Kebab spellings match the Rust `OpticalDesign::as_kebab_str`.
+export type OpticalDesign =
+  | "apo-refractor"
+  | "achromat-refractor"
+  | "newtonian"
+  | "schmidt-cassegrain";
+
+export const OPTICAL_DESIGNS: OpticalDesign[] = [
+  "apo-refractor",
+  "achromat-refractor",
+  "newtonian",
+  "schmidt-cassegrain",
+];
+
 export type EyepieceConfig = {
   enabled: boolean;
   apertureMm: number;
@@ -106,6 +121,11 @@ export type EyepieceConfig = {
   eyepieceFocalLengthMm: number;
   apparentFovDeg: number;
   fieldStopMm: number;
+  // V-45 telescope-side optics (live render state; not part of the shared
+  // JSON session schema this cycle).
+  opticalDesign: OpticalDesign;
+  spiderVanes: number;
+  otaRotationDeg: number;
 };
 
 // V-50 output colour management. Kebab spellings match the Rust
@@ -166,7 +186,15 @@ export const DEFAULT_EYEPIECE_CONFIG: EyepieceConfig = {
   eyepieceFocalLengthMm: 25,
   apparentFovDeg: 50,
   fieldStopMm: 21,
+  opticalDesign: "apo-refractor",
+  spiderVanes: 4,
+  otaRotationDeg: 0,
 };
+
+export const sanitizedOpticalDesign = (value: unknown): OpticalDesign =>
+  OPTICAL_DESIGNS.includes(value as OpticalDesign)
+    ? (value as OpticalDesign)
+    : DEFAULT_EYEPIECE_CONFIG.opticalDesign;
 
 export type PlanningRow = {
   name: string;
@@ -274,6 +302,11 @@ export const sanitizedEyepiece = (eyepiece: EyepieceConfig): EyepieceConfig => (
   ),
   apparentFovDeg: positiveOr(eyepiece.apparentFovDeg, DEFAULT_EYEPIECE_CONFIG.apparentFovDeg),
   fieldStopMm: Number.isFinite(eyepiece.fieldStopMm) ? Math.max(0, eyepiece.fieldStopMm) : DEFAULT_EYEPIECE_CONFIG.fieldStopMm,
+  opticalDesign: sanitizedOpticalDesign(eyepiece.opticalDesign),
+  spiderVanes: Number.isFinite(eyepiece.spiderVanes)
+    ? Math.max(1, Math.min(8, Math.round(eyepiece.spiderVanes)))
+    : DEFAULT_EYEPIECE_CONFIG.spiderVanes,
+  otaRotationDeg: Number.isFinite(eyepiece.otaRotationDeg) ? eyepiece.otaRotationDeg : 0,
 });
 
 export const eyepieceMagnification = (eyepiece: EyepieceConfig): number => {

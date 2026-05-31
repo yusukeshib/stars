@@ -369,6 +369,24 @@ pub(crate) struct CameraUniform {
     /// satellite layer should render. `exposure_seconds > 0` switches the
     /// shader from point sprites to streaks.
     pub satellite_params: [f32; 4],
+    /// V-45 telescope-side optics, part 1:
+    /// `[airy_radius_px, central_obstruction_ratio, spider_vanes, spike_angle_rad]`.
+    /// * `airy_radius_px` is `1.22 λ/D` (550 nm) converted to pixels at the
+    ///   current eyepiece FoV; `0` when the disc is sub-pixel (wide field).
+    /// * `central_obstruction_ratio` is the linear secondary obstruction
+    ///   `ε` (0 for refractors) that brightens the first Airy ring.
+    /// * `spider_vanes` is the vane count (0 = no spikes).
+    /// * `spike_angle_rad` rotates the spike pattern with the OTA.
+    pub instrument_optics: [f32; 4],
+    /// V-45 telescope-side optics, part 2:
+    /// `[enabled, chromatic_fraction, vignette_strength, reserved]`.
+    /// * `enabled` is `1.0` only when the eyepiece simulation is active in a
+    ///   perspective Earth view; `0.0` keeps the star PSF bit-identical to
+    ///   the pre-V-45 (naked-eye) pipeline.
+    /// * `chromatic_fraction` is the achromat residual-colour fringe scale.
+    /// * `vignette_strength` is the exit-pupil-relative field-illumination
+    ///   falloff toward the field stop.
+    pub instrument_optics2: [f32; 4],
 }
 
 /// Lower bound of the V-51c totality smoothstep on obscuration.
@@ -699,13 +717,126 @@ impl Default for LocalView {
     }
 }
 
+/// V-45 telescope optical-design family used to drive the instrument-side
+/// star PSF (Airy disc, central-obstruction rings, spider diffraction spikes,
+/// residual chromatic aberration). Geometric quantities (Airy radius, the
+/// linear central-obstruction ratio, the spike-arm count) are derived from
+/// these variants and uploaded to the star shader so the eyepiece view shows
+/// what an observer actually sees through each design.
+///
+/// References: Born & Wolf 1999 §8.5 (Airy / obstructed-aperture diffraction);
+/// Conrady 1929 (achromat secondary spectrum); Suiter 2008; Rutten & van
+/// Venrooij 1988.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OpticalDesign {
+    /// Lens telescope: unobstructed circular aperture (clean Airy disc, no
+    /// spikes). `achromat = true` adds a small residual secondary-spectrum
+    /// colour fringe (Conrady 1929); apochromats / ED set it `false`.
+    /// `focal_ratio` (f/D) scales the achromat chromatic blur.
+    Refractor { achromat: bool, focal_ratio: f32 },
+    /// Reflecting telescope with an `n`-vane spider holding the diagonal:
+    /// `2n` diffraction arms for odd `n`, `n` arms for even `n` (opposite
+    /// vanes are colinear), plus a representative central obstruction.
+    Newtonian { spider_vanes: u8 },
+    /// Catadioptric (SCT / Mak): the corrector plate holds the secondary, so
+    /// there are no spider spikes, but the central obstruction is large and
+    /// brightens the first Airy ring. `obstruction_pct` is the linear
+    /// (diameter) obstruction as a percentage.
+    SchmidtCassegrain { obstruction_pct: f32 },
+}
+
+impl OpticalDesign {
+    /// Representative linear central-obstruction ratio (secondary diameter /
+    /// aperture). Refractors are unobstructed; Newtonians use a typical 20 %
+    /// diagonal; SCTs read their explicit percentage.
+    pub fn central_obstruction_ratio(self) -> f32 {
+        match self {
+            OpticalDesign::Refractor { .. } => 0.0,
+            OpticalDesign::Newtonian { .. } => 0.20,
+            OpticalDesign::SchmidtCassegrain { obstruction_pct } => {
+                (obstruction_pct / 100.0).clamp(0.0, 0.8)
+            }
+        }
+    }
+
+    /// Number of spider vanes producing diffraction spikes. Only Newtonians
+    /// have a spider in this model (refractors and SCTs hold the secondary
+    /// without struts).
+    pub fn spider_vanes(self) -> u8 {
+        match self {
+            OpticalDesign::Newtonian { spider_vanes } => spider_vanes.min(8),
+            _ => 0,
+        }
+    }
+
+    /// Whether this design contributes a residual chromatic (lateral-colour)
+    /// fringe to bright stars.
+    pub fn is_achromat(self) -> bool {
+        matches!(self, OpticalDesign::Refractor { achromat: true, .. })
+    }
+
+    /// Focal ratio used to scale the achromat secondary-spectrum blur. Only
+    /// meaningful for an achromatic refractor; other designs return 0.
+    pub fn achromat_focal_ratio(self) -> f32 {
+        match self {
+            OpticalDesign::Refractor {
+                achromat: true,
+                focal_ratio,
+            } => focal_ratio.max(1.0),
+            _ => 0.0,
+        }
+    }
+
+    /// Stable lower-kebab identifier used by host flags / UI.
+    pub fn as_kebab_str(self) -> &'static str {
+        match self {
+            OpticalDesign::Refractor {
+                achromat: false, ..
+            } => "apo-refractor",
+            OpticalDesign::Refractor { achromat: true, .. } => "achromat-refractor",
+            OpticalDesign::Newtonian { .. } => "newtonian",
+            OpticalDesign::SchmidtCassegrain { .. } => "schmidt-cassegrain",
+        }
+    }
+
+    /// Parse a host flag / UI value into a design with representative defaults.
+    pub fn from_kebab_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "apo-refractor" | "refractor" | "apo" => OpticalDesign::Refractor {
+                achromat: false,
+                focal_ratio: 7.0,
+            },
+            "achromat-refractor" | "achromat" => OpticalDesign::Refractor {
+                achromat: true,
+                focal_ratio: 10.0,
+            },
+            "newtonian" | "newt" => OpticalDesign::Newtonian { spider_vanes: 4 },
+            "schmidt-cassegrain" | "sct" | "cassegrain" => OpticalDesign::SchmidtCassegrain {
+                obstruction_pct: 34.0,
+            },
+            _ => return None,
+        })
+    }
+}
+
+impl Default for OpticalDesign {
+    fn default() -> Self {
+        OpticalDesign::Refractor {
+            achromat: false,
+            focal_ratio: 7.0,
+        }
+    }
+}
+
 /// Telescope optical train used to derive an eyepiece true field of view.
 ///
 /// The model intentionally stays geometric: plate scale is `206264.806 /
 /// focal_length_mm` arcsec/mm, magnification is OTA focal length divided by
 /// eyepiece focal length, and the true field is either the eyepiece field-stop
 /// angle or the apparent-field / magnification approximation when no physical
-/// field stop is provided.
+/// field stop is provided. V-45 adds an `optical_design` (and OTA rotation)
+/// that the renderer turns into instrument-side diffraction artifacts in the
+/// star PSF when the eyepiece is active.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EyepieceSimulation {
     /// Whether the optical train should override [`LocalView::fov_y_rad`].
@@ -722,6 +853,14 @@ pub struct EyepieceSimulation {
     /// Eyepiece field-stop diameter in millimetres. Values `<= 0` select the
     /// apparent-field / magnification estimate.
     pub field_stop_mm: f32,
+    // --- V-45 telescope-side optics (appended at the END so parallel
+    //     branches that also extend this struct do not collide). ---
+    /// V-45 optical-design family driving the instrument-side star PSF.
+    pub optical_design: OpticalDesign,
+    /// V-45 OTA roll about the optical axis, degrees. Rotates the spider
+    /// diffraction spikes with the tube so a Newtonian's spikes track the
+    /// instrument orientation.
+    pub ota_rotation_deg: f32,
 }
 
 impl EyepieceSimulation {
@@ -732,6 +871,11 @@ impl EyepieceSimulation {
         eyepiece_focal_length_mm: 25.0,
         apparent_fov_deg: 50.0,
         field_stop_mm: 21.0,
+        optical_design: OpticalDesign::Refractor {
+            achromat: false,
+            focal_ratio: 7.0,
+        },
+        ota_rotation_deg: 0.0,
     };
 
     pub const DEFAULT_ENABLED: Self = Self {
@@ -765,6 +909,38 @@ impl EyepieceSimulation {
             } else {
                 Self::OFF.field_stop_mm
             },
+            optical_design: self.optical_design,
+            ota_rotation_deg: if self.ota_rotation_deg.is_finite() {
+                self.ota_rotation_deg
+            } else {
+                0.0
+            },
+        }
+    }
+
+    /// V-45 Airy radius (first dark ring) in radians for the clear aperture,
+    /// `1.22 · λ / D` from Fraunhofer diffraction (Born & Wolf 1999 §8.5).
+    /// `wavelength_nm` is the representative wavelength (550 nm for the visual
+    /// green channel).
+    pub fn airy_radius_rad(self, wavelength_nm: f32) -> f32 {
+        let d_mm = self.sanitized().aperture_mm;
+        let lambda_mm = wavelength_nm * 1.0e-6; // nm -> mm
+        1.22 * lambda_mm / d_mm
+    }
+
+    /// V-45 residual chromatic-aberration blur as a fraction of the Airy
+    /// scale, derived from the achromat secondary spectrum (larger / slower
+    /// achromats focus the colours closer together). Zero for apochromats,
+    /// Newtonians, and SCTs.
+    pub fn chromatic_fraction(self) -> f32 {
+        let f = self.optical_design.achromat_focal_ratio();
+        if f <= 0.0 {
+            0.0
+        } else {
+            // Conrady's secondary spectrum shrinks with focal ratio; a short
+            // f/5 achromat shows obvious violet fringing, an f/15 one almost
+            // none. The 1.5 scale puts an f/10 achromat near a 15 % fringe.
+            (1.5 / f).clamp(0.0, 0.4)
         }
     }
 
@@ -1328,6 +1504,39 @@ impl Camera {
         }
     }
 
+    /// V-45: pack the telescope-side optics into the two `instrument_optics`
+    /// uniform rows. Returns all-zero / disabled (`enabled = 0`) whenever the
+    /// eyepiece simulation is off, the external galactic viewpoint is active,
+    /// or a full-sky projection is selected, so the star PSF stays
+    /// bit-identical to the naked-eye pipeline outside eyepiece mode.
+    fn instrument_optics_uniforms(&self, height: u32) -> ([f32; 4], [f32; 4]) {
+        let active = self.eyepiece.enabled
+            && !self.viewpoint.is_external()
+            && !self.projection.is_full_sky();
+        if !active {
+            return ([0.0; 4], [0.0; 4]);
+        }
+        let rad_per_px = (self.effective_view().fov_y_rad / height.max(1) as f32).max(1e-12);
+        // Green-channel Airy radius in pixels, capped so an extreme zoom
+        // cannot blow the diffraction pattern past the sprite container.
+        let airy_px = (self.eyepiece.airy_radius_rad(550.0) / rad_per_px).clamp(0.0, 48.0);
+        let design = self.eyepiece.optical_design;
+        let obstruction = design.central_obstruction_ratio();
+        let vanes = design.spider_vanes() as f32;
+        let spike_angle = self.eyepiece.ota_rotation_deg.to_radians();
+        let chromatic = self.eyepiece.chromatic_fraction();
+        // Exit-pupil-relative vignette: a small exit pupil (high power) fills
+        // the eye pupil and vignettes little; a large exit pupil at the field
+        // stop darkens the edge more. Map exit pupil 0.5..5 mm to a mild
+        // 0.35..0.1 cos⁴-style field falloff.
+        let exit_pupil = self.eyepiece.exit_pupil_mm().clamp(0.3, 7.0);
+        let vignette = (0.40 - 0.05 * exit_pupil).clamp(0.08, 0.40);
+        (
+            [airy_px, obstruction, vanes, spike_angle],
+            [1.0, chromatic, vignette, 0.0],
+        )
+    }
+
     pub(crate) fn planet_uniforms(&self) -> PlanetUniforms {
         if !self.planets_enabled {
             return PlanetUniforms::disabled();
@@ -1586,6 +1795,7 @@ impl Camera {
     ) -> CameraUniform {
         let zenith = self.zenith_in_equatorial();
         let (satellite_dir_radius, satellite_streak, satellite_params) = self.satellite_uniforms();
+        let (instrument_optics_1, instrument_optics2) = self.instrument_optics_uniforms(height);
         let observer_altitude_m = if self.atmosphere.observer_altitude_m.is_finite() {
             self.atmosphere.observer_altitude_m.max(0.0)
         } else {
@@ -1924,6 +2134,8 @@ impl Camera {
             satellite_dir_radius,
             satellite_streak,
             satellite_params,
+            instrument_optics: instrument_optics_1,
+            instrument_optics2,
         }
     }
 
@@ -2195,6 +2407,7 @@ mod tests {
             eyepiece_focal_length_mm: 25.0,
             apparent_fov_deg: 50.0,
             field_stop_mm: 21.0,
+            ..EyepieceSimulation::OFF
         };
         assert!((sim.plate_scale_arcsec_per_mm() - 103.1324).abs() < 1e-3);
         assert!((sim.magnification() - 80.0).abs() < 1e-6);
@@ -2589,5 +2802,171 @@ mod tests {
         let ellipse_pixels = std::f32::consts::PI * 500.0 * 250.0;
         let total_sr = sr * ellipse_pixels;
         assert!((total_sr - std::f32::consts::TAU * 2.0).abs() < 1e-4);
+    }
+
+    // ----- V-45 telescope-side optics -----
+
+    /// ROADMAP V-45 pinned case: the Airy radius for D = 200 mm at
+    /// λ = 550 nm is 0.69″ within 1 % (`1.22 λ/D`, Born & Wolf §8.5).
+    #[test]
+    fn airy_radius_matches_born_and_wolf() {
+        let sim = EyepieceSimulation {
+            aperture_mm: 200.0,
+            ..EyepieceSimulation::DEFAULT_ENABLED
+        };
+        let arcsec = (sim.airy_radius_rad(550.0) as f64).to_degrees() * 3600.0;
+        assert!(
+            (arcsec - 0.69).abs() / 0.69 < 0.01,
+            "Airy radius {arcsec:.4}″ should be 0.69″ within 1%"
+        );
+        // Doubling the aperture halves the Airy radius (inverse-D scaling).
+        let big = EyepieceSimulation {
+            aperture_mm: 400.0,
+            ..sim
+        };
+        assert!((sim.airy_radius_rad(550.0) / big.airy_radius_rad(550.0) - 2.0).abs() < 1e-4);
+    }
+
+    /// Obstruction ratio and spike-vane count are design-dependent: a
+    /// refractor is unobstructed and spike-free, a Newtonian is obstructed
+    /// with a spider, and an SCT is obstructed without a spider.
+    #[test]
+    fn optical_design_obstruction_and_spikes() {
+        let refractor = OpticalDesign::Refractor {
+            achromat: false,
+            focal_ratio: 7.0,
+        };
+        assert_eq!(refractor.central_obstruction_ratio(), 0.0);
+        assert_eq!(refractor.spider_vanes(), 0);
+
+        let newt = OpticalDesign::Newtonian { spider_vanes: 4 };
+        assert!(newt.central_obstruction_ratio() > 0.0);
+        assert_eq!(newt.spider_vanes(), 4);
+
+        let sct = OpticalDesign::SchmidtCassegrain {
+            obstruction_pct: 34.0,
+        };
+        assert!((sct.central_obstruction_ratio() - 0.34).abs() < 1e-6);
+        assert_eq!(sct.spider_vanes(), 0);
+    }
+
+    /// Only an achromatic refractor contributes a chromatic fringe, and a
+    /// slower (larger f-number) achromat fringes less than a fast one.
+    #[test]
+    fn chromatic_fraction_only_for_achromats() {
+        let apo = EyepieceSimulation {
+            optical_design: OpticalDesign::Refractor {
+                achromat: false,
+                focal_ratio: 7.0,
+            },
+            ..EyepieceSimulation::DEFAULT_ENABLED
+        };
+        assert_eq!(apo.chromatic_fraction(), 0.0);
+
+        let fast = EyepieceSimulation {
+            optical_design: OpticalDesign::Refractor {
+                achromat: true,
+                focal_ratio: 5.0,
+            },
+            ..EyepieceSimulation::DEFAULT_ENABLED
+        };
+        let slow = EyepieceSimulation {
+            optical_design: OpticalDesign::Refractor {
+                achromat: true,
+                focal_ratio: 15.0,
+            },
+            ..EyepieceSimulation::DEFAULT_ENABLED
+        };
+        assert!(fast.chromatic_fraction() > slow.chromatic_fraction());
+        assert!(slow.chromatic_fraction() > 0.0);
+    }
+
+    /// The instrument uniform is disabled (all zero) unless the eyepiece is
+    /// active in a perspective Earth view, so the star PSF stays
+    /// bit-identical to the naked-eye pipeline outside eyepiece mode.
+    #[test]
+    fn instrument_uniform_gated_by_eyepiece_mode() {
+        let view = LocalView {
+            azimuth_rad: 0.0,
+            altitude_rad: 0.5,
+            fov_y_rad: std::f32::consts::FRAC_PI_4,
+        };
+        let mut cam = Camera::new(observer_at(35.0), view, 1.0);
+
+        // Off: disabled.
+        cam.eyepiece = EyepieceSimulation::OFF;
+        let (_o1, o2) = cam.instrument_optics_uniforms(1080);
+        assert_eq!(o2[0], 0.0, "instrument disabled when eyepiece off");
+
+        // On (Newtonian): enabled, with a finite Airy radius and 4 vanes.
+        cam.eyepiece = EyepieceSimulation {
+            optical_design: OpticalDesign::Newtonian { spider_vanes: 4 },
+            ..EyepieceSimulation::DEFAULT_ENABLED
+        };
+        let (o1, o2) = cam.instrument_optics_uniforms(1080);
+        assert_eq!(o2[0], 1.0, "instrument enabled in eyepiece mode");
+        assert!(o1[0] > 0.0, "Airy radius should be a positive pixel count");
+        assert_eq!(o1[2], 4.0, "spider vane count plumbed to the uniform");
+
+        // External galactic viewpoint must force it back off.
+        cam.viewpoint = SkyViewpoint::GalacticNorth;
+        let (_o1, o2) = cam.instrument_optics_uniforms(1080);
+        assert_eq!(o2[0], 0.0, "instrument disabled in external viewpoint");
+    }
+
+    /// The higher the magnification (narrower true field), the larger the
+    /// Airy disc in pixels: the diffraction pattern only resolves at high
+    /// power. The eyepiece overrides the view FoV, so power is varied through
+    /// the OTA focal length here.
+    #[test]
+    fn airy_pixels_grow_as_field_narrows() {
+        let observer = observer_at(35.0);
+        let view = LocalView {
+            azimuth_rad: 0.0,
+            altitude_rad: 0.5,
+            fov_y_rad: std::f32::consts::FRAC_PI_4,
+        };
+        let mut low_power = Camera::new(observer, view, 1.0);
+        let mut high_power = Camera::new(observer, view, 1.0);
+        // Same aperture (same physical Airy radius), different focal length:
+        // the long OTA gives a narrower true field, so the same Airy radius
+        // spans more pixels.
+        low_power.eyepiece = EyepieceSimulation {
+            focal_length_mm: 1000.0,
+            field_stop_mm: 0.0,
+            ..EyepieceSimulation::DEFAULT_ENABLED
+        };
+        high_power.eyepiece = EyepieceSimulation {
+            focal_length_mm: 4000.0,
+            field_stop_mm: 0.0,
+            ..EyepieceSimulation::DEFAULT_ENABLED
+        };
+        let low_px = low_power.instrument_optics_uniforms(1080).0[0];
+        let high_px = high_power.instrument_optics_uniforms(1080).0[0];
+        assert!(
+            high_px > low_px,
+            "Airy disc must enlarge at higher power: high={high_px} low={low_px}"
+        );
+    }
+
+    /// CPU-only CI has no GPU, so parse and validate both fragment-pass
+    /// shaders with naga. This catches WGSL syntax errors and, crucially,
+    /// any drift between the Rust `CameraUniform` layout and the WGSL
+    /// `CameraUniform` view introduced by the V-45 instrument-optics fields.
+    #[test]
+    fn shaders_parse_and_validate() {
+        use naga::valid::{Capabilities, ValidationFlags, Validator};
+        for (name, src) in [
+            ("star.wgsl", include_str!("shaders/star.wgsl")),
+            ("skyglow.wgsl", include_str!("shaders/skyglow.wgsl")),
+            ("overlay.wgsl", include_str!("shaders/overlay.wgsl")),
+            ("tonemap.wgsl", include_str!("shaders/tonemap.wgsl")),
+        ] {
+            let module = naga::front::wgsl::parse_str(src)
+                .unwrap_or_else(|e| panic!("{name} failed to parse: {e:?}"));
+            Validator::new(ValidationFlags::all(), Capabilities::all())
+                .validate(&module)
+                .unwrap_or_else(|e| panic!("{name} failed to validate: {e:?}"));
+        }
     }
 }

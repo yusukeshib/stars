@@ -90,6 +90,22 @@ struct CameraUniform {
     // (V-51d lunar occultation of catalog stars).
     occluders: array<vec4<f32>, 32>,
     occluder_params: vec4<f32>,
+    // V-39 light-pollution block. Padding only — the star pass does not add
+    // artificial sky-glow (that lands in the skyglow pass). Declared so the
+    // WGSL view of `CameraUniform` keeps reading later fields (V-55
+    // satellites, V-45 instrument optics) from the right offsets.
+    light_pollution_state_pad: vec4<f32>,
+    light_pollution_tint_pad: vec4<f32>,
+    // V-55 artificial-satellite block. Padding only — satellites render in
+    // the skyglow pass. `MAX_SATELLITES = 32`.
+    satellite_dir_radius_pad: array<vec4<f32>, 32>,
+    satellite_streak_pad: array<vec4<f32>, 32>,
+    satellite_params_pad: vec4<f32>,
+    // V-45 telescope-side optics (consumed by the star PSF below).
+    // [airy_radius_px, central_obstruction_ratio, spider_vanes, spike_angle_rad].
+    instrument_optics: vec4<f32>,
+    // [enabled, chromatic_fraction, vignette_strength, reserved].
+    instrument_optics2: vec4<f32>,
 };
 
 // Mirrors `astronomy::occultation::OccluderTarget::Stars.shader_code()`.
@@ -362,6 +378,10 @@ struct VertexOutput {
     // the red offset; `zw` the blue offset. Both zero when the atmosphere
     // is disabled or the star sits on an unrefracted path.
     @location(4) dispersion_px_rb: vec4<f32>,
+    // V-45 normalised field radius (0 at the optical axis, ~1 at the
+    // vertical field edge), used for the eyepiece vignette. Always 0 outside
+    // eyepiece mode so the naked-eye path is unaffected.
+    @location(5) field_radius: f32,
 };
 
 @vertex
@@ -490,6 +510,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
         out.brightness = 0.0;
         out.sprite_half_px = 0.0;
         out.dispersion_px_rb = vec4<f32>(0.0);
+        out.field_radius = 0.0;
         return out;
     }
 
@@ -502,6 +523,15 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     out.brightness = input.star_brightness;
     out.sprite_half_px = input.star_size;
     out.dispersion_px_rb = dispersion_px_rb;
+    // V-45 field radius for the eyepiece vignette: NDC distance of the star
+    // centre from the optical axis. Computed only when the instrument path
+    // is enabled; the naked-eye path leaves it at 0 (no vignette).
+    if camera.instrument_optics2.x > 0.5 {
+        let ndc = clip.xy / max(clip.w, 1e-6);
+        out.field_radius = length(ndc);
+    } else {
+        out.field_radius = 0.0;
+    }
     return out;
 }
 
@@ -630,6 +660,110 @@ fn apodize(r_norm: f32) -> f32 {
     return 1.0 - s;
 }
 
+// =============================================================================
+// V-45 telescope-side optics: Airy disc, central-obstruction rings, spider
+// diffraction spikes, achromat colour fringe, eyepiece vignette.
+// =============================================================================
+//
+// Only active when `camera.instrument_optics2.x > 0.5` (eyepiece mode in a
+// perspective Earth view). The instrument response is composited on top of
+// the Spencer eye PSF core/halo so the result is the eye PSF ⊗ instrument PSF
+// an observer sees at the eyepiece (Born & Wolf 1999 §8.5). Outside eyepiece
+// mode the whole block is skipped and the star PSF is bit-identical to the
+// naked-eye pipeline.
+
+// First zero of J1 (edge of the Airy disc), so x = AIRY_FIRST_ZERO maps to
+// one Airy radius.
+const AIRY_FIRST_ZERO: f32 = 3.831705970;
+
+// Bessel function of the first kind, order 1. Abramowitz & Stegun 9.4.4 /
+// 9.4.6 polynomial + asymptotic approximation (|error| < 1.3e-7), enough to
+// render the first several Airy rings faithfully.
+fn bessel_j1(x: f32) -> f32 {
+    let ax = abs(x);
+    if ax < 3.0 {
+        let y = (x / 3.0) * (x / 3.0);
+        let p = 0.5 + y * (-0.56249985 + y * (0.21093573 + y * (-0.03954289
+            + y * (0.00443319 + y * (-0.00031761 + y * 0.00001109)))));
+        return x * p;
+    }
+    let z = 3.0 / ax;
+    let f1 = 0.79788456 + z * (0.00000156 + z * (0.01659667 + z * (0.00017105
+        + z * (-0.00249511 + z * (0.00113653 + z * -0.00020033)))));
+    let theta1 = ax - 2.35619449 + z * (0.12499612 + z * (0.0000565 + z * (-0.00637879
+        + z * (0.00074348 + z * (0.00079824 + z * -0.00029166)))));
+    let j = f1 * cos(theta1) / sqrt(ax);
+    return select(j, -j, x < 0.0);
+}
+
+// Normalised aperture-diffraction amplitude 2*J1(x)/x, with the x->0 limit
+// of 1.
+fn airy_amplitude(x: f32) -> f32 {
+    if abs(x) < 1e-4 {
+        return 1.0;
+    }
+    return 2.0 * bessel_j1(x) / x;
+}
+
+// Obstructed-aperture Airy intensity (annular pupil). `eps` is the linear
+// central-obstruction ratio; eps = 0 gives the clean circular-aperture Airy
+// disc. `r_px` is the pixel radius and `airy_px` the Airy radius in pixels.
+fn instrument_airy(r_px: f32, airy_px: f32, eps: f32) -> f32 {
+    if airy_px <= 0.0 {
+        return 0.0;
+    }
+    let x = (r_px / airy_px) * AIRY_FIRST_ZERO;
+    let a_full = airy_amplitude(x);
+    let denom = max(1.0 - eps * eps, 1e-3);
+    let a = (a_full - eps * eps * airy_amplitude(eps * x)) / denom;
+    return a * a;
+}
+
+// Spider diffraction spikes. Sums one bidirectional ray per vane; opposite
+// vanes (even counts) overlap to give `vanes` arms, odd counts give `2*vanes`
+// arms, matching the Fourier transform of the obscuring vanes. Each ray is a
+// thin azimuthal lobe with a slow radial falloff so the spike reaches across
+// the sprite, gated by the apodization window like the rest of the PSF.
+const SPIKE_SHARPNESS: f32 = 120.0;
+const SPIKE_RADIAL_PER_PX: f32 = 0.06;
+const SPIKE_AMPLITUDE: f32 = 0.45;
+
+fn instrument_spikes(uv: vec2<f32>, r_px: f32, vanes: f32, base_angle: f32) -> f32 {
+    let n = i32(vanes + 0.5);
+    if n <= 0 {
+        return 0.0;
+    }
+    let phi = atan2(uv.y, uv.x);
+    var acc = 0.0;
+    for (var k: i32 = 0; k < n; k = k + 1) {
+        // Spike axis is perpendicular to vane k; vanes are spaced over the
+        // full circle. abs(cos) is bidirectional, so each axis is a 2-ray
+        // line and even vane counts collapse onto `n` arms.
+        let theta = base_angle + (f32(k) * 2.0 * PI / vanes) + HALF_PI;
+        acc = acc + pow(abs(cos(phi - theta)), SPIKE_SHARPNESS);
+    }
+    let falloff = exp(-r_px * SPIKE_RADIAL_PER_PX);
+    return SPIKE_AMPLITUDE * acc * falloff;
+}
+
+// Per-channel instrument intensity at a pixel offset, including the achromat
+// chromatic fringe (the colour channels focus at slightly different Airy
+// scales). `chan_scale` shifts the Airy argument: <1 pulls the rings inward
+// (red), >1 pushes them outward (blue).
+fn instrument_intensity(
+    offset_px: vec2<f32>,
+    airy_px: f32,
+    eps: f32,
+    vanes: f32,
+    base_angle: f32,
+    chan_scale: f32,
+) -> f32 {
+    let r_px = length(offset_px);
+    let airy = instrument_airy(r_px, airy_px * chan_scale, eps);
+    let spikes = instrument_spikes(offset_px, r_px, vanes, base_angle);
+    return airy + spikes;
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Quad-normalised radius -> pixel radius from the star centre.
@@ -653,6 +787,41 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let psf_r = radial_psf(length(r_px_xy - r_disp));
     let psf_g = radial_psf(r_px);
     let psf_b = radial_psf(length(r_px_xy - b_disp));
+
+    // V-45 telescope-side optics. When the eyepiece simulation is active the
+    // instrument PSF (Airy disc + obstruction rings + spider spikes, with the
+    // achromat colour fringe) is composited on top of the Spencer eye PSF and
+    // the eye's ciliary corona is replaced by the instrument's spider spikes.
+    // Outside eyepiece mode this branch is skipped and the return value is
+    // bit-identical to the pre-V-45 pipeline.
+    if camera.instrument_optics2.x > 0.5 {
+        let airy_px = camera.instrument_optics.x;
+        let eps = camera.instrument_optics.y;
+        let vanes = camera.instrument_optics.z;
+        let spike_angle = camera.instrument_optics.w;
+        let chromatic = camera.instrument_optics2.y;
+        let vignette_strength = camera.instrument_optics2.z;
+
+        // Per-channel chromatic scale: red rings pull in, blue push out.
+        let inst_r = instrument_intensity(r_px_xy, airy_px, eps, vanes, spike_angle, 1.0 - chromatic);
+        let inst_g = instrument_intensity(r_px_xy, airy_px, eps, vanes, spike_angle, 1.0);
+        let inst_b = instrument_intensity(r_px_xy, airy_px, eps, vanes, spike_angle, 1.0 + chromatic);
+
+        // Eye PSF halo underlay (no ciliary corona — the spider spikes are the
+        // instrument's own diffraction signature).
+        let eye_rgb = vec3<f32>(psf_r, psf_g, psf_b);
+        let inst_rgb = vec3<f32>(inst_r, inst_g, inst_b);
+        let combined = (eye_rgb + inst_rgb) * apod;
+
+        // Exit-pupil-relative vignette toward the field stop (cos⁴-style).
+        let fr = clamp(input.field_radius, 0.0, 1.0);
+        let vignette = 1.0 - vignette_strength * fr * fr * fr * fr;
+
+        let intensity_rgb = combined * input.brightness * vignette;
+        let coverage = (psf_g + inst_g) * apod * input.brightness * vignette;
+        return vec4<f32>(input.color * intensity_rgb, coverage);
+    }
+
     let psf_rgb = (vec3<f32>(psf_r, psf_g, psf_b) + vec3<f32>(ciliary)) * apod;
 
     let intensity_rgb = psf_rgb * input.brightness;

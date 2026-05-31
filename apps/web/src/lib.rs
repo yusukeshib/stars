@@ -17,7 +17,8 @@ use catalog::search::{
 };
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, ExternalViewpoint,
-    EyepieceSimulation, LightPollution, LocalView, OutputColourSpace, OverlayConfig, OverlayKind,
+    EyepieceSimulation, LightPollution, LocalView, OpticalDesign, OutputColourSpace, OverlayConfig,
+    OverlayKind,
     Renderer, SatelliteLayer, Scintillation, SkyProjection, SkyViewpoint, StarInstance,
     DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
@@ -600,14 +601,36 @@ impl StarView {
         apparent_fov_deg: f32,
         field_stop_mm: f32,
     ) {
-        self.state.borrow_mut().camera.eyepiece = EyepieceSimulation {
+        let mut state = self.state.borrow_mut();
+        // Preserve the V-45 telescope-side optics (set via
+        // `set_telescope_optics`); this call only updates the geometric train.
+        let prev = state.camera.eyepiece;
+        state.camera.eyepiece = EyepieceSimulation {
             enabled,
             aperture_mm,
             focal_length_mm,
             eyepiece_focal_length_mm,
             apparent_fov_deg,
             field_stop_mm,
+            optical_design: prev.optical_design,
+            ota_rotation_deg: prev.ota_rotation_deg,
         };
+    }
+
+    /// V-45: update the telescope optical design driving the eyepiece
+    /// diffraction artifacts. `design` is one of `apo-refractor`,
+    /// `achromat-refractor`, `newtonian`, or `schmidt-cassegrain`; unknown
+    /// names fall back to an apochromatic refractor. `spider_vanes` overrides
+    /// the Newtonian vane count, and `ota_rotation_deg` rolls the spikes with
+    /// the tube.
+    pub fn set_telescope_optics(&self, design: String, spider_vanes: u8, ota_rotation_deg: f32) {
+        let mut optical_design = OpticalDesign::from_kebab_str(&design).unwrap_or_default();
+        if let OpticalDesign::Newtonian { .. } = optical_design {
+            optical_design = OpticalDesign::Newtonian { spider_vanes };
+        }
+        let mut state = self.state.borrow_mut();
+        state.camera.eyepiece.optical_design = optical_design;
+        state.camera.eyepiece.ota_rotation_deg = ota_rotation_deg;
     }
 
     /// Select the active screen projection by kebab-case name: `perspective`,

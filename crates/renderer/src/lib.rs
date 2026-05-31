@@ -14,7 +14,7 @@ mod vertex;
 pub use astronomy::skyglow::LightPollution;
 pub use camera::{
     Atmosphere, AtmospherePreset, Camera, ExternalViewpoint, EyepieceSimulation, LocalView,
-    SatelliteLayer, Scintillation, SkyProjection, SkyViewpoint, MAX_SATELLITES,
+    OpticalDesign, SatelliteLayer, Scintillation, SkyProjection, SkyViewpoint, MAX_SATELLITES,
 };
 pub use colourspace::OutputColourSpace;
 pub use overlay::{OverlayConfig, OverlayKind, DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT};

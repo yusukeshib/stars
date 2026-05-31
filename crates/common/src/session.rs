@@ -680,6 +680,11 @@ impl SessionEyepiece {
                 120.0,
                 "eyepiece.fieldStopMm",
             )? as f32,
+            // V-45 telescope-side optics are a live host control this cycle
+            // (CLI / viewer / web), not yet a stored session field, so they
+            // default here. Persisting them is a documented follow-up that
+            // can append optional fields without a schema bump.
+            ..EyepieceSimulation::OFF
         })
     }
 }
@@ -780,6 +785,9 @@ impl From<SessionEyepiece> for EyepieceSimulation {
             eyepiece_focal_length_mm: e.eyepiece_focal_length_mm,
             apparent_fov_deg: e.apparent_fov_deg,
             field_stop_mm: e.field_stop_mm,
+            // V-45 fields are not yet persisted in the session schema (live
+            // host control only); default them here.
+            ..EyepieceSimulation::OFF
         }
     }
 }

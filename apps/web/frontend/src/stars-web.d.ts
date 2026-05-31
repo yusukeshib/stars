@@ -21,6 +21,11 @@ declare module "stars-web" {
       apparentFovDeg: number,
       fieldStopMm: number,
     ): void;
+    set_telescope_optics(
+      design: string,
+      spiderVanes: number,
+      otaRotationDeg: number,
+    ): void;
     set_projection(projection: string): void;
     set_viewpoint(viewpoint: string): void;
     set_external_viewpoint(

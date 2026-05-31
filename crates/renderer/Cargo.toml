@@ -9,3 +9,8 @@ catalog = { path = "../catalog" }
 wgpu = { workspace = true }
 bytemuck = { workspace = true }
 glam = { workspace = true }
+
+[dev-dependencies]
+# WGSL front-end + validator so `cargo test` (CPU-only CI) parses and
+# validates the shaders without a GPU. Pinned to the same version wgpu uses.
+naga = { version = "29", features = ["wgsl-in"] }
