@@ -151,15 +151,18 @@ web host controls. With both shipped, every `V-51`–`V-56` item is now done.
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`: the SPK Chebyshev kernel reader has shipped;
-kernel ingest + Horizons cross-check remain), variable-star library (`L-20`),
-and the accessibility pass (`L-24`). The Python bindings (`L-21`) and headless
-server (`L-22`) have both shipped. Large-catalog ingest (`L-17`) has landed at
-the catalog-backend layer (Hipparcos / Tycho-2 / Gaia DR3 CSV backends + fetch
-scripts + identifier cross-match); LOD streaming and host wiring remain the
-`L-17` follow-up. Observation-planning polish (`L-09`) has now shipped:
-Moon-impact and visibility scoring, recommended-object ranking, favourites,
-and iCalendar export. Guided education mode (`L-23`) has now shipped: a
-deterministic, cross-host "first night" guided tour.
+kernel ingest + Horizons cross-check remain) and the variable-star library
+(`L-20`). The Python bindings (`L-21`) and headless server (`L-22`) have both
+shipped. Large-catalog ingest (`L-17`) has landed at the catalog-backend layer
+(Hipparcos / Tycho-2 / Gaia DR3 CSV backends + fetch scripts + identifier
+cross-match); LOD streaming and host wiring remain the `L-17` follow-up.
+Observation-planning polish (`L-09`) has now shipped: Moon-impact and
+visibility scoring, recommended-object ranking, favourites, and iCalendar
+export. Guided education mode (`L-23`) has now shipped: a deterministic,
+cross-host "first night" guided tour. The `L-24` accessibility pass has
+shipped its web WCAG core (keyboard, ARIA, focus management, visible focus),
+with the renderer CVD-safe overlay palette and audio cues tracked as
+follow-ups.
 
 A row is `✅ done` only when the model named in its references is implemented,
 documented, tested, and wired into all relevant hosts.
@@ -258,7 +261,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-21` | Python bindings (PyO3) | ✅ |
 | `L-22` | Headless server mode | ✅ |
 | `L-23` | Guided education mode | ✅ |
-| `L-24` | Accessibility pass | ⬜ |
+| `L-24` | Accessibility pass (web WCAG core ✅; CVD overlay palette + audio cues ⬜) | ◑ |
 | `L-25` | `CITATION.cff` + Zenodo DOI | ✅ |
 | `L-26` | Standards-compliance document | ✅ |
 | `L-27` | Validation / demo gallery | ✅ |
@@ -3526,11 +3529,24 @@ as follow-ups; the schema is additive so neither needs a session-schema bump.
 
 ---
 
-### `L-24` Accessibility pass — ⬜
+### `L-24` Accessibility pass — ◑ (web WCAG core shipped)
 
 **Item.** ARIA labels on every web control, keyboard navigation,
 high-contrast / colour-vision-safe modes, screen-reader summaries, and
 optional Az / Alt audio cues.
+
+**Status.** The web-frontend WCAG 2.2 AA core has shipped: a visible
+focus ring on every control (`:focus-visible`), full keyboard operability
+of the star canvas (arrow-key pan, `+`/`-` zoom, focusable with an
+`aria-label`), modal focus management on the location / time / settings
+popovers (focus moves in on open, Tab is trapped, focus returns to the
+trigger on close), the WAI-ARIA tabs pattern on the settings panel
+(roving `tabindex`, arrow / Home / End keys, `tabpanel` wiring), a
+`prefers-reduced-motion` guard, and `prefers-contrast` / `forced-colors`
+focus reinforcement. Still open and tracked as follow-ups: the renderer
+CVD-safe overlay palette via `OverlayConfig` (needs a renderer/shader +
+schema change), the optional Web Audio Az/Alt cues, and an automated
+axe-core score gate (no JS test harness in the frontend yet).
 
 **Scientific basis.** WCAG 2.2 AA. Colour-blind safe palettes following
 Wong 2011, Nature Methods 8, 441.

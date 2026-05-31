@@ -3620,6 +3620,49 @@ reproducible scenes rather than ad-hoc panning.
    both files.
 7. **Hosts wired.** CLI, viewer, web.
 
+## `L-24` Accessibility pass — web WCAG 2.2 AA core shipped (◑)
+
+The web frontend now meets the WCAG 2.2 AA core that the `V-05` HUD note
+deferred here. No session-schema change and no new feature component — the
+pass is ARIA/keyboard/focus/contrast attributes layered onto existing
+components, so it stays separable from the parallel `L-23` education work.
+
+1. **What changed.**
+   - Global a11y CSS in `apps/web/frontend/index.html` (inline styles can't
+     express pseudo-classes): a high-contrast `:focus-visible` ring on every
+     control (WCAG 2.4.7), a `.sr-only` utility, a `prefers-reduced-motion`
+     guard (2.3.3), and `prefers-contrast` / `forced-colors` focus
+     reinforcement.
+   - `StarCanvas` is now keyboard-operable (WCAG 2.1.1): focusable
+     (`tabIndex=0`, `role="application"`, localized `aria-label`,
+     `aria-keyshortcuts`), with arrow-key pan and `+`/`-` zoom (Shift =
+     coarser step) mirroring the pointer drag + wheel handlers.
+   - `PopoverPanel` (location / time / settings) is a managed modal:
+     `aria-modal`, focus moves into the dialog on open, Tab is trapped, and
+     focus is restored to the triggering chip on close (WCAG 2.4.3 / 2.1.2).
+   - The settings panel implements the WAI-ARIA tabs pattern: roving
+     `tabIndex`, Arrow / Home / End selection, and `tab` ↔ `tabpanel`
+     wiring via `id` / `aria-controls` / `aria-labelledby`.
+   - Two i18n keys (`a11y.canvas.label`, `a11y.settings.tabpanel`) added to
+     `en` + `ja`.
+2. **Why it is ◑ not ✅.** Two ROADMAP sub-items are deferred as honest
+   follow-ups because they fall outside the "attributes on existing web
+   components" scope: the renderer CVD-safe overlay palette via
+   `OverlayConfig` (needs a renderer/shader + session-schema change) and the
+   optional Web Audio Az/Alt cues. An automated axe-core gate also waits on
+   the frontend gaining a JS test harness.
+3. **Where it lives.** `apps/web/frontend/index.html`,
+   `apps/web/frontend/src/components/StarCanvas.tsx`,
+   `apps/web/frontend/src/components/StatusBar.tsx`,
+   `apps/web/frontend/src/i18n.tsx`.
+4. **Tests / validation.** `make ci` (`tsc --noEmit` over the frontend)
+   passes; manual keyboard-only and screen-reader walk-through of the canvas
+   pan/zoom, the three popovers, and the settings tabs. The frontend has no
+   JS unit-test harness yet, so axe-core/Lighthouse scoring is deferred with
+   the rest of the frontend test infrastructure.
+5. **Reference.** W3C WCAG 2.2; WAI-ARIA Authoring Practices (dialog + tabs);
+   Wong 2011, Nature Methods 8, 441 (for the deferred CVD palette).
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

@@ -295,6 +295,11 @@ const en: Dictionary = {
   "planningBand.Nautical twilight": "Nautical twilight",
   "planningBand.Astronomical twilight": "Astronomical twilight",
   "planningBand.Night": "Night",
+
+  // Accessibility (L-24)
+  "a11y.canvas.label":
+    "Interactive sky map. Use the arrow keys to pan, plus and minus to zoom; hold Shift for larger steps.",
+  "a11y.settings.tabpanel": "{tab} settings",
 };
 
 const ja: Dictionary = {
@@ -514,6 +519,11 @@ const ja: Dictionary = {
   "planningBand.Nautical twilight": "航海薄明",
   "planningBand.Astronomical twilight": "天文薄明",
   "planningBand.Night": "夜",
+
+  // Accessibility (L-24)
+  "a11y.canvas.label":
+    "インタラクティブな星図。矢印キーで視点移動、プラス／マイナスで拡大縮小、Shift で大きく移動します。",
+  "a11y.settings.tabpanel": "{tab}の設定",
 };
 
 const DICTIONARIES: Record<Locale, Dictionary> = { en, ja };
