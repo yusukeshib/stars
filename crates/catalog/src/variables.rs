@@ -284,6 +284,29 @@ pub fn variable_stars() -> &'static [VariableStar] {
     parsed()
 }
 
+/// `L-20` renderer brightness override: the apparent V magnitude to *render*
+/// for a catalogue star at session time `jd` (Julian Date).
+///
+/// When the star matches a known variable (by HIP / HD / proper name) this is
+/// the variable's phase-folded [`VariableStar::predicted_magnitude`], so a
+/// rendered Mira / Algol sprite dims and brightens with the session epoch.
+/// Non-variable stars (and the absence of a session time at the call site)
+/// keep their static catalogue `base_magnitude`, preserving catalogue purity
+/// for the rest of the sky. This is the single source of truth the native and
+/// WASM instance builders share so they cannot drift.
+pub fn render_magnitude_at(
+    hip: Option<u32>,
+    hd: Option<u32>,
+    proper_name: Option<&str>,
+    base_magnitude: f32,
+    jd: f64,
+) -> f32 {
+    match variable_for(hip, hd, proper_name) {
+        Some(v) => v.predicted_magnitude(jd) as f32,
+        None => base_magnitude,
+    }
+}
+
 /// Find the variable-star elements for a catalogue star, matching by HIP, then
 /// HD, then case-insensitive proper name. Returns `None` for non-variable
 /// stars.
@@ -362,6 +385,41 @@ mod tests {
         // One full period later it is back at minimum (periodicity).
         let m_next = v.predicted_magnitude(v.epoch_jd + v.period_days);
         assert!((m_next - m_min).abs() < 1.0e-6, "periodic");
+    }
+
+    /// L-20 renderer override (`render_magnitude_at`): at Algol's primary
+    /// minimum a star matched by HIP renders at the faint magnitude (3.39),
+    /// fully one magnitude dimmer than the catalogue maximum; an unmatched
+    /// star keeps its catalogue magnitude unchanged.
+    #[test]
+    fn render_magnitude_override_dims_variable_at_minimum() {
+        let v = algol();
+        // Matched by HIP at primary minimum -> faint magnitude, not the
+        // catalogue base (2.12) we pass as the would-be static value.
+        let rendered = render_magnitude_at(Some(14576), None, None, 2.12, v.epoch_jd);
+        assert!(
+            (rendered - 3.39).abs() < 1.0e-3,
+            "Algol should render at minimum V=3.39, got {rendered}"
+        );
+        // A quarter period later it is back at maximum.
+        let max = render_magnitude_at(
+            Some(14576),
+            None,
+            None,
+            2.12,
+            v.epoch_jd + 0.25 * v.period_days,
+        );
+        assert!(
+            (max - v.mag_bright as f32).abs() < 1.0e-4,
+            "Algol max {max}"
+        );
+        // A non-variable star (Sirius HIP 32349) passes its catalogue
+        // magnitude through untouched -> catalogue purity preserved.
+        let unchanged = render_magnitude_at(Some(32349), Some(48915), None, -1.46, v.epoch_jd);
+        assert!(
+            (unchanged - (-1.46)).abs() < 1.0e-9,
+            "non-variable unchanged"
+        );
     }
 
     #[test]

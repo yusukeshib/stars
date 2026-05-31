@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use astronomy::{FalchiAtlas, TimeScales};
-use catalog::{load_from_file, CatalogSource};
+use catalog::{load_from_file, render_magnitude_at, CatalogObjectId, CatalogSource};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
@@ -636,17 +636,38 @@ pub fn load_star_instances_from_file(
     path: impl AsRef<Path>,
     limiting_magnitude: f32,
 ) -> Result<Vec<StarInstance>> {
+    load_star_instances_from_file_at(path, limiting_magnitude, None)
+}
+
+/// As [`load_star_instances_from_file`], but when `variable_jd` is
+/// `Some(jd)` the `L-20` renderer brightness override is applied: every star
+/// matching a known variable (by HIP / HD) renders at its phase-folded
+/// predicted magnitude for that Julian Date, so Mira / Algol visibly change
+/// between session epochs. `None` keeps the static catalogue magnitudes
+/// (default — catalogue purity), so existing headless / preset renders are
+/// byte-identical.
+pub fn load_star_instances_from_file_at(
+    path: impl AsRef<Path>,
+    limiting_magnitude: f32,
+    variable_jd: Option<f64>,
+) -> Result<Vec<StarInstance>> {
     let path = path.as_ref();
     let stars =
         load_from_file(path).with_context(|| format!("Reading catalog at {}", path.display()))?;
     Ok(stars
         .iter()
         .map(|s| {
+            let magnitude = match variable_jd {
+                Some(jd) => {
+                    render_magnitude_at(s.identifiers.hip, s.identifiers.hd, None, s.magnitude, jd)
+                }
+                None => s.magnitude,
+            };
             build_star_instance(
                 s.position.into(),
                 s.proper_motion.into(),
                 s.color,
-                s.magnitude,
+                magnitude,
                 limiting_magnitude,
                 s.distance_pc,
                 // L-18: preserve the catalogue primary id through the instance.
@@ -654,6 +675,27 @@ pub fn load_star_instances_from_file(
             )
         })
         .collect())
+}
+
+/// `L-18` interactive pick for native hosts: resolve a screen-space click to a
+/// catalogue identity. Maps the click to a J2000 equatorial ray via the
+/// camera inverse, finds the nearest rendered star within `tol_rad`, and
+/// returns its canonical primary-id label (`"HIP 32349"`, `"HD 48915"`, …)
+/// from the instance's preserved pick handle. `None` for a miss, an instance
+/// without an id, or a non-perspective viewpoint.
+pub fn pick_star_label(
+    camera: &renderer::Camera,
+    instances: &[StarInstance],
+    px: f32,
+    py: f32,
+    width: f32,
+    height: f32,
+    tol_rad: f32,
+) -> Option<String> {
+    let ray = camera.screen_ray_equatorial(px, py, width, height)?;
+    let idx = renderer::pick_nearest(instances, ray, tol_rad)?;
+    let (kind, value) = instances[idx].catalog_id_parts()?;
+    CatalogObjectId::from_parts(kind, value).map(|id| id.label())
 }
 
 /// Build the session catalog snapshot for the current HYG CSV backend.

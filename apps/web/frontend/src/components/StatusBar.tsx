@@ -55,6 +55,9 @@ type Props = {
   meteors: MeteorsConfig;
   aurora: AuroraConfig;
   comets: CometsConfig;
+  /// L-20 host-side toggle: render known variables at their session-time
+  /// magnitude. Not part of the session schema.
+  variableMagnitudes: boolean;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   outputColourspace: OutputColourspace;
@@ -70,6 +73,7 @@ type Props = {
   onSetMeteors: (next: MeteorsConfig) => void;
   onSetAurora: (next: AuroraConfig) => void;
   onSetComets: (next: CometsConfig) => void;
+  onSetVariableMagnitudes: (enabled: boolean) => void;
   onSetProjection: (next: ProjectionConfig) => void;
   onSetEyepiece: (next: EyepieceConfig) => void;
   onSetOutputColourspace: (next: OutputColourspace) => void;
@@ -168,6 +172,7 @@ export function StatusBar({
   meteors,
   aurora,
   comets,
+  variableMagnitudes,
   projection,
   eyepiece,
   outputColourspace,
@@ -183,6 +188,7 @@ export function StatusBar({
   onSetMeteors,
   onSetAurora,
   onSetComets,
+  onSetVariableMagnitudes,
   onSetProjection,
   onSetEyepiece,
   onSetOutputColourspace,
@@ -475,6 +481,7 @@ export function StatusBar({
             meteors={meteors}
             aurora={aurora}
             comets={comets}
+            variableMagnitudes={variableMagnitudes}
             projection={projection}
             eyepiece={eyepiece}
             outputColourspace={outputColourspace}
@@ -488,6 +495,7 @@ export function StatusBar({
             onSetMeteors={onSetMeteors}
             onSetAurora={onSetAurora}
             onSetComets={onSetComets}
+            onSetVariableMagnitudes={onSetVariableMagnitudes}
             onSetProjection={onSetProjection}
             onSetEyepiece={onSetEyepiece}
             onSetOutputColourspace={onSetOutputColourspace}
@@ -712,6 +720,7 @@ type SettingsPanelProps = Pick<
   | "meteors"
   | "aurora"
   | "comets"
+  | "variableMagnitudes"
   | "projection"
   | "eyepiece"
   | "outputColourspace"
@@ -725,6 +734,7 @@ type SettingsPanelProps = Pick<
   | "onSetMeteors"
   | "onSetAurora"
   | "onSetComets"
+  | "onSetVariableMagnitudes"
   | "onSetProjection"
   | "onSetEyepiece"
   | "onSetOutputColourspace"
@@ -743,6 +753,7 @@ function SettingsPanel({
   meteors,
   aurora,
   comets,
+  variableMagnitudes,
   projection,
   eyepiece,
   outputColourspace,
@@ -756,6 +767,7 @@ function SettingsPanel({
   onSetMeteors,
   onSetAurora,
   onSetComets,
+  onSetVariableMagnitudes,
   onSetProjection,
   onSetEyepiece,
   onSetOutputColourspace,
@@ -976,6 +988,15 @@ function SettingsPanel({
                 style={{ accentColor: "#8fb1ff" }}
               />
               {t("card.view.comets")}
+            </label>
+            <label style={checkboxRowStyle}>
+              <input
+                type="checkbox"
+                checked={variableMagnitudes}
+                onChange={(e) => onSetVariableMagnitudes(e.target.checked)}
+                style={{ accentColor: "#8fb1ff" }}
+              />
+              {t("card.view.variableMagnitudes")}
             </label>
           </SettingCard>
 

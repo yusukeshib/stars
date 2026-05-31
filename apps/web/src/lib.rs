@@ -9,18 +9,18 @@ use astronomy::{
 };
 use catalog::load_embedded;
 use catalog::{
-    simbad_query_url, variable_for, vizier_query_url, DeepSkyCatalog, DeepSkyId, DeepSkyObject,
-    MessierCatalog, NgcBrightCatalog, StarIdentifiers, VariableSummary,
+    render_magnitude_at, simbad_query_url, variable_for, vizier_query_url, DeepSkyCatalog,
+    DeepSkyId, DeepSkyObject, MessierCatalog, NgcBrightCatalog, Star, StarIdentifiers,
+    VariableSummary,
 };
 use catalog::search::{
     named_star, search as catalog_search, SearchId, SearchKind, SearchMatch, SOLAR_SYSTEM_BODIES,
 };
 use renderer::{
-    build_star_instance, Atmosphere, AtmospherePreset, AuroraLayer, Camera, CometLayer,
-    ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView, MeteorLayer, OpticalDesign,
-    OutputColourSpace, OverlayConfig, OverlayKind, Renderer, SatelliteLayer, Scintillation,
-    SkyProjection, SkyViewpoint, StarInstance,
-    DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    build_star_instance, pick_nearest, Atmosphere, AtmospherePreset, AuroraLayer, Camera,
+    CometLayer, ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView, MeteorLayer,
+    OpticalDesign, OutputColourSpace, OverlayConfig, OverlayKind, Renderer, SatelliteLayer,
+    Scintillation, SkyProjection, SkyViewpoint, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 
 /// V-55 curated, manifest-pinned artificial-satellite TLE snapshot, embedded
@@ -312,6 +312,47 @@ fn deepsky_goto(id: SearchId, object: DeepSkyObject) -> GotoRecord {
     }
 }
 
+/// Build a [`GotoRecord`] from a picked catalogue [`Star`] (`L-18` canvas
+/// pick). The full embedded catalogue carries no proper name / Bayer letter,
+/// so the display falls back to the canonical primary id; CDS deep links and
+/// the `L-20` variable summary are derived from the preserved identifiers.
+fn goto_record_for_star(star: &Star, observer: Observer) -> GotoRecord {
+    let p = star.position;
+    let ra = (p.y as f64).atan2(p.x as f64).rem_euclid(std::f64::consts::TAU);
+    let dec = (p.z as f64).clamp(-1.0, 1.0).asin();
+    let ids = StarIdentifiers {
+        hip: star.identifiers.hip,
+        hd: star.identifiers.hd,
+        hr: None,
+        proper_name: None,
+        catalog_designation: None,
+        right_ascension_rad: ra,
+        declination_rad: dec,
+    };
+    let primary_id = star.identifiers.primary_label();
+    let display = primary_id.clone().unwrap_or_else(|| "Star".to_string());
+    GotoRecord {
+        id: String::new(),
+        kind: SearchKind::Star,
+        display,
+        aka: String::new(),
+        right_ascension_rad: ra,
+        declination_rad: dec,
+        magnitude: Some(star.magnitude as f64),
+        distance: if star.distance_pc > 0.0 {
+            Some((star.distance_pc as f64, "pc"))
+        } else {
+            None
+        },
+        planning: None,
+        primary_id,
+        simbad_url: Some(simbad_query_url(&ids)),
+        vizier_url: Some(vizier_query_url(&ids)),
+        variable: variable_for(star.identifiers.hip, star.identifiers.hd, None)
+            .map(|v| v.summary_at(observer.time.jd_utc)),
+    }
+}
+
 fn push_goto_record(out: &mut String, record: &GotoRecord, observer: Observer) {
     let lst = lmst_radians(observer.time.jd_ut1, observer.longitude_rad);
     let altaz = equatorial_to_horizontal(
@@ -444,6 +485,55 @@ struct RenderState {
     config: wgpu::SurfaceConfiguration,
     renderer: Renderer,
     camera: Camera,
+    /// Catalogue rows, retained in instance order so an `L-18` canvas pick
+    /// (`pick_nearest` index) maps back to a star's identity, and the `L-20`
+    /// variable override can rebuild instances for a new session time.
+    stars: Vec<Star>,
+    /// Current GPU instance order (parallel to [`Self::stars`]).
+    instances: Vec<StarInstance>,
+    /// `L-20` toggle: render known variables at their phase-folded magnitude
+    /// for the session time. Off by default (catalogue purity).
+    variable_magnitudes: bool,
+    /// JD(UTC) the variable-override instance buffer was last rebuilt at, so a
+    /// per-frame `set_observer` only re-uploads when the clock has moved enough
+    /// to matter (variable periods are days; a ~30 min bucket is ample).
+    variable_rebuild_jd: f64,
+}
+
+/// Clock movement (days) below which the `L-20` variable override is *not*
+/// rebuilt, so the per-frame `set_observer` stays cheap. ~30 minutes.
+const VARIABLE_REBUILD_BUCKET_DAYS: f64 = 0.02;
+
+impl RenderState {
+    /// Rebuild the star instance buffer from the retained catalogue rows,
+    /// applying the `L-20` variable-magnitude override at the current clock
+    /// when enabled. Cheap enough to call on observer/time changes.
+    fn rebuild_instances(&mut self) {
+        self.variable_rebuild_jd = self.camera.observer.time.jd_utc;
+        let jd = self.variable_magnitudes.then(|| self.camera.observer.time.jd_utc);
+        self.instances = self
+            .stars
+            .iter()
+            .map(|s| {
+                let magnitude = match jd {
+                    Some(jd) => {
+                        render_magnitude_at(s.identifiers.hip, s.identifiers.hd, None, s.magnitude, jd)
+                    }
+                    None => s.magnitude,
+                };
+                build_star_instance(
+                    s.position.into(),
+                    s.proper_motion.into(),
+                    s.color,
+                    magnitude,
+                    LIMITING_MAGNITUDE,
+                    s.distance_pc,
+                    s.identifiers.pick_handle(),
+                )
+            })
+            .collect();
+        self.renderer.update_instances(&self.device, &self.instances);
+    }
 }
 
 #[wasm_bindgen]
@@ -554,6 +644,10 @@ impl StarView {
                 config,
                 renderer,
                 camera,
+                stars,
+                instances,
+                variable_magnitudes: false,
+                variable_rebuild_jd: f64::NEG_INFINITY,
             })),
         })
     }
@@ -563,8 +657,17 @@ impl StarView {
     /// to know the constant.
     pub fn set_observer(&self, lat_deg: f64, lng_deg: f64, time_unix_ms: f64) {
         let time = TimeScales::from_unix_seconds(time_unix_ms / 1000.0);
-        self.state.borrow_mut().camera.observer =
-            Observer::from_degrees_with_time(lat_deg, lng_deg, time);
+        let mut state = self.state.borrow_mut();
+        state.camera.observer = Observer::from_degrees_with_time(lat_deg, lng_deg, time);
+        // L-20: when the override is active, predicted brightnesses depend on
+        // the clock — but `set_observer` runs every frame, so only re-upload
+        // the instance buffer once the clock has moved past the coarse bucket.
+        if state.variable_magnitudes
+            && (state.camera.observer.time.jd_utc - state.variable_rebuild_jd).abs()
+                > VARIABLE_REBUILD_BUCKET_DAYS
+        {
+            state.rebuild_instances();
+        }
     }
 
     /// Current apparent topocentric Sun altitude, in degrees.
@@ -1045,6 +1148,44 @@ impl StarView {
             Some(record) => push_goto_record(&mut s, &record, observer),
         }
         s
+    }
+
+    /// `L-18` interactive canvas pick. Maps a CSS-pixel click `(x, y)` (origin
+    /// top-left) to a J2000 equatorial ray, finds the nearest rendered star
+    /// within ~0.6° (a comfortable tap radius), and returns the same JSON
+    /// record `goto_object` produces so the host can open the existing info
+    /// panel for the picked star. Returns `"null"` for a miss or for the
+    /// non-perspective viewpoints where the screen→sky inverse is undefined.
+    pub fn pick_star(&self, x: f32, y: f32) -> String {
+        let state = self.state.borrow();
+        let (w, h) = (state.config.width as f32, state.config.height as f32);
+        let Some(ray) = state.camera.screen_ray_equatorial(x, y, w, h) else {
+            return "null".to_string();
+        };
+        let tol = 0.6_f32.to_radians();
+        let Some(idx) = pick_nearest(&state.instances, ray, tol) else {
+            return "null".to_string();
+        };
+        let observer = state.camera.observer;
+        let record = goto_record_for_star(&state.stars[idx], observer);
+        let mut s = String::new();
+        push_goto_record(&mut s, &record, observer);
+        s
+    }
+
+    /// `L-20` renderer brightness override toggle. When enabled, stars that
+    /// match a known variable render at their phase-folded predicted magnitude
+    /// for the current session time (Mira / Algol dim and brighten with the
+    /// clock); when disabled, every star keeps its static catalogue magnitude.
+    /// Off by default to preserve catalogue purity. Not persisted in the
+    /// session schema — a pure host-side view preference.
+    pub fn set_variable_magnitudes(&self, enabled: bool) {
+        let mut state = self.state.borrow_mut();
+        if state.variable_magnitudes == enabled {
+            return;
+        }
+        state.variable_magnitudes = enabled;
+        state.rebuild_instances();
     }
 
     /// Update V-24 scintillation controls. `enabled=false` matches the

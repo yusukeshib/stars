@@ -210,6 +210,9 @@ async fn render_route(
         width: q.width.clamp(16, 8192),
         height: q.height.clamp(16, 8192),
         skyglow_enabled: q.skyglow,
+        // L-20 variable override is a host-side view preference, not a stored
+        // scene field; the headless server keeps catalogue magnitudes.
+        variable_magnitudes: false,
     };
 
     // The GPU pipeline is sync-driven (pollster) — run it on a blocking

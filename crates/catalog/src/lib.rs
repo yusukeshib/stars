@@ -32,7 +32,9 @@ pub use ingest::{
 };
 pub use links::{simbad_query_url, vizier_query_url, StarIdentifiers};
 pub use search::{search, SearchId, SearchKind, SearchMatch, SEARCH_LIMIT_DEFAULT};
-pub use variables::{variable_for, variable_stars, VariableStar, VariableSummary, VariableType};
+pub use variables::{
+    render_magnitude_at, variable_for, variable_stars, VariableStar, VariableSummary, VariableType,
+};
 
 #[cfg(feature = "filesystem")]
 pub use backend::HygCsvBackend;

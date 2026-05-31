@@ -350,6 +350,13 @@ struct Args {
     #[arg(long)]
     no_skyglow: bool,
 
+    /// L-20: render known variable stars (Mira / Algol / …) at their
+    /// phase-folded magnitude for the session time, so a rendered Mira / Algol
+    /// sprite reflects its current brightness. Off by default preserves the
+    /// static catalogue magnitudes for the rest of the sky.
+    #[arg(long)]
+    variable_magnitudes: bool,
+
     /// Disable atmospheric scintillation (V-24). With the default model on,
     /// each star's RGB flux is modulated by a deterministic band-limited
     /// noise whose variance scales as sec(z)³ and damps with observer
@@ -686,6 +693,7 @@ fn main() -> Result<()> {
             width: args.width,
             height: args.height,
             skyglow_enabled: !args.no_skyglow,
+            variable_magnitudes: args.variable_magnitudes,
         },
     ))?;
 

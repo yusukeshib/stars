@@ -67,6 +67,12 @@ declare module "stars-web" {
     set_scintillation(enabled: boolean, cN2Scale: number, seed: number): void;
     /// V-50 output colour management: "srgb" | "display-p3" | "rec2020".
     set_output_colourspace(space: string): void;
+    /// L-20 renderer brightness override: render known variables at their
+    /// phase-folded magnitude for the session time. Off = catalogue purity.
+    set_variable_magnitudes(enabled: boolean): void;
+    /// L-18 canvas pick: CSS-pixel (x, y) -> goto-record JSON for the star
+    /// under the tap, or `"null"` for a miss / non-perspective viewpoint.
+    pick_star(x: number, y: number): string;
     resize(width: number, height: number): void;
     sun_altitude_deg(): number;
     /// V-56 search: free-text lookup over named stars, deep-sky catalogs,

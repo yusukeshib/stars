@@ -169,6 +169,19 @@ impl Renderer {
         self.skyglow_enabled = enabled;
     }
 
+    /// Replace the star instance buffer (e.g. after the `L-20` variable-star
+    /// magnitude override recomputes per-star brightness for a new session
+    /// time). The buffer is recreated rather than written in place so the
+    /// instance count may also change; `num_stars` is updated to match.
+    pub fn update_instances(&mut self, device: &wgpu::Device, stars: &[StarInstance]) {
+        self.instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Star Instance Buffer"),
+            contents: bytemuck::cast_slice(stars),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        self.num_stars = stars.len() as u32;
+    }
+
     /// Rebuild the overlay layers from `config`. Pass `OverlayConfig { layers: vec![], ..}`
     /// (or simply don't call this) to draw stars only.
     pub fn set_overlays(&mut self, device: &wgpu::Device, config: &OverlayConfig) {

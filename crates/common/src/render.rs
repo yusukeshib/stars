@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use astronomy::Observer;
 use renderer::{Camera, Renderer, StarInstance};
 
-use crate::{load_star_instances_from_file, SessionScene};
+use crate::{load_star_instances_from_file_at, SessionScene};
 
 /// Render target format used by every native host. `Rgba8UnormSrgb` matches
 /// the CLI's previous local constant and the swap-chain format the desktop
@@ -30,6 +30,10 @@ pub struct RenderOptions {
     /// pin this because hosts may want to A/B with and without the diffuse
     /// pass for the same scene.
     pub skyglow_enabled: bool,
+    /// `L-20`: render known variable stars at their phase-folded magnitude for
+    /// `scene.time`. Off by default (catalogue purity) so existing headless /
+    /// preset renders stay byte-identical; the CLI exposes `--variable-magnitudes`.
+    pub variable_magnitudes: bool,
 }
 
 impl Default for RenderOptions {
@@ -38,6 +42,7 @@ impl Default for RenderOptions {
             width: 1280,
             height: 720,
             skyglow_enabled: true,
+            variable_magnitudes: false,
         }
     }
 }
@@ -200,13 +205,18 @@ pub async fn render_scene_from_catalog_path(
         .as_deref()
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| default_catalog.as_ref().to_path_buf());
-    let instances = load_star_instances_from_file(&catalog_path, scene.catalog.limiting_magnitude)
-        .with_context(|| {
-            format!(
-                "Loading star catalog at {} for render",
-                catalog_path.display()
-            )
-        })?;
+    let variable_jd = options.variable_magnitudes.then_some(scene.time.jd_utc);
+    let instances = load_star_instances_from_file_at(
+        &catalog_path,
+        scene.catalog.limiting_magnitude,
+        variable_jd,
+    )
+    .with_context(|| {
+        format!(
+            "Loading star catalog at {} for render",
+            catalog_path.display()
+        )
+    })?;
     render_scene_pixels(scene, &instances, options).await
 }
 

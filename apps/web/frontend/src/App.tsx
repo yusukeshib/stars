@@ -357,6 +357,27 @@ function sessionUrl({ observer, view, overlays, atmosphere, planets, satellites,
 }
 
 // Read once at module load.
+// L-20 variable-magnitude override: a host-side view preference persisted on
+// its own localStorage key (default off, catalogue purity), independent of the
+// shareable session schema — like the L-19 external-links preference.
+const VARIABLE_MAG_PREF_KEY = "stars.variableMagnitudes.v1";
+const loadVariableMagnitudesPref = (): boolean => {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    return localStorage.getItem(VARIABLE_MAG_PREF_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+const saveVariableMagnitudesPref = (enabled: boolean): void => {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(VARIABLE_MAG_PREF_KEY, enabled ? "1" : "0");
+  } catch {
+    // ignore quota / privacy-mode errors
+  }
+};
+
 const PERSISTED = loadConfig();
 const URL_SESSION = loadSessionFromUrl();
 const URL_ATMOSPHERE = URL_SESSION?.atmosphere ?? (typeof window !== "undefined" ? loadAtmosphereFromUrl() : null);
@@ -415,9 +436,16 @@ export function App() {
         lookup: (query: string, limit: number) => string;
         goto: (id: string) => string;
         planningIcal: () => string;
+        pick: (x: number, y: number) => string;
       }
     | null
   >(null);
+  // L-18 canvas pick: the goto-record JSON of the last star tapped on the
+  // canvas, forwarded to the info panel. L-20: host-side toggle (not in the
+  // session schema) to render variable stars at their session-time magnitude.
+  const [pickedRecordJson, setPickedRecordJson] = useState<string | null>(null);
+  const [variableMagnitudes, setVariableMagnitudes] = useState<boolean>(loadVariableMagnitudesPref);
+  useEffect(() => saveVariableMagnitudesPref(variableMagnitudes), [variableMagnitudes]);
 
   // Persist observer + view + overlays + atmosphere + planets + projection + eyepiece whenever they change. We debounce
   // because the view updates on every mouse/touch frame during a drag, and
@@ -541,6 +569,8 @@ export function App() {
         projection={projection}
         eyepiece={eyepiece}
         outputColourspace={outputColourspace}
+        variableMagnitudes={variableMagnitudes}
+        onPick={setPickedRecordJson}
         onDrag={(daz, dalt) =>
           setView((v) => ({
             ...v,
@@ -562,6 +592,8 @@ export function App() {
       <SearchPanel
         onLookup={(query, limit) => searchApiRef.current?.lookup(query, limit) ?? "{\"matches\":[]}"}
         onGoto={(id) => searchApiRef.current?.goto(id) ?? "null"}
+        pickedRecordJson={pickedRecordJson}
+        onClearPicked={() => setPickedRecordJson(null)}
         onApplyView={(azRad, altRad) => {
           // V-56 GoTo: snap-and-recentre. A smooth interpolation is the
           // host's job in a follow-up; this slice keeps the wiring linear.
@@ -586,11 +618,13 @@ export function App() {
         meteors={meteors}
         aurora={aurora}
         comets={comets}
+        variableMagnitudes={variableMagnitudes}
         projection={projection}
         eyepiece={eyepiece}
         planning={planning}
         recommended={recommended}
         onExportIcal={() => exportIcal(searchApiRef.current?.planningIcal())}
+        onSetVariableMagnitudes={setVariableMagnitudes}
         onSetObserver={setObserver}
         onSetTime={setTimeMs}
         onSetOverlays={setOverlays}

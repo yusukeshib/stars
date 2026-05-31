@@ -396,15 +396,44 @@ interface SearchPanelProps {
   /// Slew the camera. Smooth-step animation is the host's job, not the
   /// engine's, so this stays out of WASM.
   onApplyView: (azimuthRad: number, altitudeRad: number) => void;
+  /// L-18 canvas pick: goto-record JSON (or `"null"`) for the star last
+  /// tapped on the canvas. When it resolves to a record, it opens the same
+  /// info panel as a search GoTo (without slewing the camera — the star is
+  /// already on screen). `null`/absent leaves the panel unchanged.
+  pickedRecordJson?: string | null;
+  /// Clears the parent's picked-record state once it has been consumed.
+  onClearPicked?: () => void;
 }
 
-export function SearchPanel({ onLookup, onGoto, onApplyView }: SearchPanelProps) {
+export function SearchPanel({
+  onLookup,
+  onGoto,
+  onApplyView,
+  pickedRecordJson,
+  onClearPicked,
+}: SearchPanelProps) {
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<SearchMatch[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [selected, setSelected] = useState<GotoRecord | null>(null);
   const [showLinks, setShowLinks] = useState<boolean>(loadExternalLinksPref);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // L-18: a canvas pick opens the same info panel as a search GoTo. The star
+  // is already on screen, so (unlike a search) we do not slew the camera.
+  useEffect(() => {
+    if (!pickedRecordJson || pickedRecordJson === "null") return;
+    try {
+      const parsed: unknown = JSON.parse(pickedRecordJson);
+      if (isGotoRecord(parsed)) {
+        setSelected(parsed);
+        setShowDropdown(false);
+      }
+    } catch {
+      // ignore malformed pick payloads
+    }
+    onClearPicked?.();
+  }, [pickedRecordJson, onClearPicked]);
 
   // Debounced lookup. Lookup runs purely in WASM and is O(N) over ~1.2k
   // named-star rows + the deep-sky tables, which is fine on every keystroke

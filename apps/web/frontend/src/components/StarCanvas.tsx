@@ -19,6 +19,13 @@ type Props = {
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   outputColourspace: OutputColourspace;
+  /// L-20 renderer brightness override: render known variables at their
+  /// phase-folded magnitude for the session time. Off preserves catalogue
+  /// magnitudes. A host-side view preference (not in the session schema).
+  variableMagnitudes: boolean;
+  /// L-18 canvas pick: notified with the goto-record JSON of the star under a
+  /// tap (or `"null"` for a miss) so the parent can open the info panel.
+  onPick: (recordJson: string) => void;
   onDrag: (deltaAzDeg: number, deltaAltDeg: number) => void;
   onWheel: (zoomFactor: number) => void;
   onSunAltitude: (sunAltitudeDeg: number) => void;
@@ -32,6 +39,8 @@ type Props = {
     lookup: (query: string, limit: number) => string;
     goto: (id: string) => string;
     planningIcal: () => string;
+    /// L-18 canvas pick: CSS-pixel (x, y) -> goto-record JSON (or "null").
+    pick: (x: number, y: number) => string;
   }) => void;
 };
 
@@ -62,6 +71,8 @@ export function StarCanvas({
   projection,
   eyepiece,
   outputColourspace,
+  variableMagnitudes,
+  onPick,
   onDrag,
   onWheel,
   onSunAltitude,
@@ -94,6 +105,10 @@ export function StarCanvas({
   const projectionRef = useRef(projection);
   const eyepieceRef = useRef(eyepiece);
   const outputColourspaceRef = useRef(outputColourspace);
+  const variableMagnitudesRef = useRef(variableMagnitudes);
+  const onPickRef = useRef(onPick);
+  // L-18: pointer-down position + time, to tell a pick tap from a pan drag.
+  const tapStart = useRef<{ x: number; y: number; t: number } | null>(null);
   observerRef.current = observer;
   viewRef.current = view;
   timeRef.current = timeMs;
@@ -108,6 +123,8 @@ export function StarCanvas({
   projectionRef.current = projection;
   eyepieceRef.current = eyepiece;
   outputColourspaceRef.current = outputColourspace;
+  variableMagnitudesRef.current = variableMagnitudes;
+  onPickRef.current = onPick;
 
   // Push overlays to wasm whenever the config changes. Geometry is rebuilt on
   // the GPU side, so we don't want to do it every frame -- a useEffect keyed
@@ -225,6 +242,7 @@ export function StarCanvas({
         lookup: (query: string, limit: number) => handle.lookup_object(query, limit),
         goto: (id: string) => handle.goto_object(id),
         planningIcal: () => handle.planning_ical(),
+        pick: (x: number, y: number) => handle.pick_star(x, y),
       });
       // Apply whatever overlay state is current right now -- could be the
       // initial defaults or something the user toggled during the wasm boot.
@@ -282,6 +300,10 @@ export function StarCanvas({
         if (cancelled) return;
         const o = observerRef.current;
         const v = viewRef.current;
+        // L-20: apply the variable-magnitude override toggle before the clock
+        // update so set_observer rebuilds with the right mode (the WASM side
+        // no-ops when the flag is unchanged and buckets rebuilds by time).
+        handle.set_variable_magnitudes(variableMagnitudesRef.current);
         handle.set_observer(o.latitudeDeg, o.longitudeDeg, timeRef.current);
         if (now - lastSunAltitudePublish > 1000) {
           lastSunAltitudePublish = now;
@@ -390,8 +412,13 @@ export function StarCanvas({
         if (activePointers.current.size === 1) {
           dragState.current = { x: e.clientX, y: e.clientY, pointerId: e.pointerId };
           pinchDistance.current = null;
+          // L-18: remember where/when this single-pointer press began so the
+          // matching pointerup can tell a pick tap from a pan drag.
+          tapStart.current = { x: e.clientX, y: e.clientY, t: e.timeStamp };
           return;
         }
+        // A second pointer (pinch) is never a pick.
+        tapStart.current = null;
 
         const pinchPoints = firstTwoPointers(activePointers.current);
         dragState.current = null;
@@ -434,6 +461,20 @@ export function StarCanvas({
       onPointerUp={(e) => {
         if (e.currentTarget.hasPointerCapture(e.pointerId)) {
           e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+        // L-18: a short, near-stationary single-pointer press is a pick tap.
+        // Map it to canvas-relative CSS pixels and notify the parent, which
+        // routes the resulting record into the info panel.
+        const tap = tapStart.current;
+        tapStart.current = null;
+        const handle = handleRef.current;
+        if (tap && handle && activePointers.current.size === 1) {
+          const moved = Math.hypot(e.clientX - tap.x, e.clientY - tap.y);
+          const elapsed = e.timeStamp - tap.t;
+          if (moved <= 5 && elapsed <= 500) {
+            const rect = e.currentTarget.getBoundingClientRect();
+            onPickRef.current(handle.pick_star(e.clientX - rect.left, e.clientY - rect.top));
+          }
         }
         activePointers.current.delete(e.pointerId);
         pinchDistance.current = null;
