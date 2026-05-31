@@ -10,6 +10,7 @@ import {
   DEFAULT_ATMOSPHERE_CONFIG,
   DEFAULT_SCINTILLATION_CONFIG,
   DEFAULT_EYEPIECE_CONFIG,
+  DEFAULT_METEORS_CONFIG,
   DEFAULT_OVERLAY_CONFIG,
   DEFAULT_PLANETS_CONFIG,
   DEFAULT_SATELLITES_CONFIG,
@@ -29,6 +30,7 @@ import {
   type OutputColourspace,
   type OverlayConfig,
   type PlanetsConfig,
+  type MeteorsConfig,
   type PlanningTable,
   type ProjectionConfig,
   type RecommendedPlan,
@@ -354,6 +356,9 @@ export function App() {
   const [satellites, setSatellites] = useState<SatellitesConfig>(
     URL_SESSION?.satellites ?? PERSISTED?.satellites ?? DEFAULT_SATELLITES_CONFIG,
   );
+  const [meteors, setMeteors] = useState<MeteorsConfig>(
+    URL_SESSION?.meteors ?? PERSISTED?.meteors ?? DEFAULT_METEORS_CONFIG,
+  );
   const [projection, setProjection] = useState<ProjectionConfig>(
     URL_SESSION?.projection ?? PERSISTED?.projection ?? DEFAULT_PROJECTION_CONFIG,
   );
@@ -387,11 +392,11 @@ export function App() {
   // next load would silently mislead the user.
   useEffect(() => {
     const handle = setTimeout(
-      () => saveConfig({ observer, view, overlays, atmosphere, scintillation, planets, satellites, projection, eyepiece, outputColourspace }),
+      () => saveConfig({ observer, view, overlays, atmosphere, scintillation, planets, satellites, meteors, projection, eyepiece, outputColourspace }),
       250,
     );
     return () => clearTimeout(handle);
-  }, [observer, view, overlays, atmosphere, scintillation, planets, satellites, projection, eyepiece, outputColourspace]);
+  }, [observer, view, overlays, atmosphere, scintillation, planets, satellites, meteors, projection, eyepiece, outputColourspace]);
 
   // Mirror the current session into the address bar so the user can copy the
   // URL at any time without going through the explicit "Copy URL" action.
@@ -434,6 +439,7 @@ export function App() {
     scintillation,
     planets,
     satellites,
+    meteors,
     projection,
     eyepiece,
     outputColourspace,
@@ -448,6 +454,7 @@ export function App() {
     setScintillation(session.scintillation);
     setPlanets(session.planets);
     setSatellites(session.satellites);
+    setMeteors(session.meteors);
     setProjection(session.projection);
     setEyepiece(session.eyepiece);
     setOutputColourspace(session.outputColourspace);
@@ -476,6 +483,7 @@ export function App() {
         scintillation={scintillation}
         planets={planets}
         satellites={satellites}
+        meteors={meteors}
         projection={projection}
         eyepiece={eyepiece}
         outputColourspace={outputColourspace}
@@ -520,6 +528,7 @@ export function App() {
         atmosphere={atmosphere}
         planets={planets}
         satellites={satellites}
+        meteors={meteors}
         projection={projection}
         eyepiece={eyepiece}
         planning={planning}
@@ -531,6 +540,7 @@ export function App() {
         onSetAtmosphere={setAtmosphere}
         onSetPlanets={setPlanets}
         onSetSatellites={setSatellites}
+        onSetMeteors={setMeteors}
         onSetProjection={setProjection}
         onSetEyepiece={setEyepiece}
         outputColourspace={outputColourspace}

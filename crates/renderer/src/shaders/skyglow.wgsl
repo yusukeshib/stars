@@ -132,9 +132,21 @@ struct CameraUniform {
     satellite_streak: array<vec4<f32>, 32>,
     // V-55 satellite header: [count, enabled, exposure_seconds, reserved].
     satellite_params: vec4<f32>,
+    // V-45 telescope-side optics (consumed by the star PSF; padding here so
+    // this CameraUniform stays byte-compatible with the shared Rust struct).
+    instrument_optics: vec4<f32>,
+    instrument_optics2: vec4<f32>,
+    // V-47 meteor streaks: two vec4 rows per meteor. Even row = streak head
+    // xyz (J2000-equatorial unit dir), w = peak apparent magnitude. Odd row =
+    // streak tail xyz, w = visible flag. Appended at the END to keep the V-47
+    // diff isolated from the parallel V-48 / V-49 work.
+    meteor_segments: array<vec4<f32>, 128>,
+    // V-47 meteor header: [count, enabled, reserved, reserved].
+    meteor_params: vec4<f32>,
 };
 
 const MAX_SATELLITES: u32 = 32u;
+const MAX_METEORS: u32 = 64u;
 
 // Stable shader codes for `OccluderTarget` (mirrors Rust).
 const OCCLUDER_TARGET_SUN: i32 = 0;
@@ -989,6 +1001,42 @@ fn satellite_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_sr
     return rgb;
 }
 
+// V-47 meteor showers. Renders a deterministic Poisson sample of shower +
+// sporadic meteors (built CPU-side in camera.rs) as one-frame great-circle
+// streaks radiating from their radiants, with magnitude -> length/brightness
+// via the shared streak mask. Self-contained: invoked from a single insertion
+// point in the composition so the V-47 diff stays isolated from the parallel
+// V-48 aurora / V-49 comet work. No persistent train (per the V-47 non-goals).
+fn meteor_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_sr: f32) -> vec3<f32> {
+    if camera.meteor_params.y <= 0.0 || sin_alt <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    var rgb = vec3<f32>(0.0);
+    let pixel_radius = sqrt(max(pixel_sr, 1e-12));
+    // Meteor trails read a little broader than a point source so a faint
+    // streak still registers; the mask antialiases against the pixel size.
+    let visual_radius = pixel_radius * 1.5;
+    let footprint_pixels = max((visual_radius * visual_radius) / max(pixel_sr, 1e-12), 1.0);
+    for (var i = 0u; i < MAX_METEORS; i = i + 1u) {
+        if f32(i) >= camera.meteor_params.x {
+            break;
+        }
+        let head = camera.meteor_segments[i * 2u];
+        let tail = camera.meteor_segments[i * 2u + 1u];
+        let a = normalize(head.xyz);
+        let b = normalize(tail.xyz);
+        // Cull meteors whose head sits below the local horizon.
+        if dot(a, camera.zenith_eq.xyz) <= 0.0 {
+            continue;
+        }
+        let flux = magnitude_to_flux(head.w, zeropoint);
+        let mask = satellite_streak_mask(ray_dir, a, b, visual_radius, pixel_sr);
+        // Incandescent ablation reads near-white with a faint warm cast.
+        rgb += vec3<f32>(1.0, 0.97, 0.92) * flux * mask / footprint_pixels;
+    }
+    return rgb;
+}
+
 fn henyey_greenstein(cos_angle: f32, g: f32) -> f32 {
     let gg = g * g;
     let denom = pow(max(1.0 + gg - 2.0 * g * cos_angle, 1e-3), 1.5);
@@ -1663,5 +1711,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let galilean_radiance = galilean_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
     let titan_radiance = titan_disk_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
     let satellite_radiance_rgb = satellite_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
-    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance + planet_radiance + galilean_radiance + titan_radiance + satellite_radiance_rgb, 1.0);
+    // V-47 meteor-shower contribution (single insertion point).
+    let meteor_radiance_rgb = meteor_radiance(ray_dir, sin_alt, zeropoint, pixel_sr);
+    return vec4<f32>(night_radiance + moon_radiance + twilight_radiance + day_radiance + disk_radiance + planet_radiance + galilean_radiance + titan_radiance + satellite_radiance_rgb + meteor_radiance_rgb, 1.0);
 }

@@ -3272,6 +3272,61 @@ diffraction spikes, the achromat colour fringe, and an exit-pupil vignette.
 References (also pinned in ROADMAP `V-45`): Born & Wolf 1999 §8.5;
 Conrady 1929; Suiter 2008; Rutten & van Venrooij 1988.
 
+## `V-47` Meteor shower display — shipped (CLI + viewer + web)
+
+The renderer now draws annual meteor showers as deterministic, radiant-based
+streaks, so an observer at a shower's peak sees Perseids / Geminids / etc.
+radiating from the right point at a physically-grounded rate.
+
+1. **What changed.** A new `astronomy::meteors` module ships the IMO Working
+   List of Visual Meteor Showers as a transcribed-constant catalog (radiant
+   α/δ, peak solar longitude, ZHR, population index `r`, velocity, activity
+   slope `B`). `zhr_at_solar_longitude` applies the Jenniskens 1994
+   double-exponential activity profile so the rate is date-dependent;
+   `observed_rate_per_hour` inverts the Koschack & Rendtel 1990 ZHR reduction
+   to the rate a real sky shows (`n = ZHR·sin h_R·r^(lm−6.5)/F`);
+   `meteor_stream` draws a deterministic SplitMix64-seeded Poisson sample of
+   shower + sporadic meteors, time-binned on `(seed, jd_utc/window)` so the
+   same session reproduces the same stream on every host. The renderer carries
+   a `MeteorLayer` on `Camera`, packs each streak (head + tail unit vectors,
+   peak magnitude) into a `meteor_segments` uniform block appended at the END
+   of `CameraUniform`, and `shaders/skyglow.wgsl::meteor_radiance` draws each
+   above-horizon streak via the shared great-circle mask from a single
+   composition insertion point (kept isolated from the parallel V-48 / V-49
+   shader work). One-frame appearance, no persistent train.
+
+2. **Why it counts as complete.** The observed-rate formula is pinned to the
+   Koschack-Rendtel reference value; the activity profile and solar-longitude
+   clock are pinned; the stream is deterministic and host-independent; the
+   layer renders visibly and is wired into every host with an optional,
+   schema-stable session field.
+
+3. **Where it lives.** `crates/astronomy/src/meteors.rs`;
+   `crates/renderer/src/camera.rs` (`MeteorLayer`, `meteor_uniforms`,
+   `MAX_METEORS`, uniform rows) + `crates/renderer/src/shaders/skyglow.wgsl`
+   (`meteor_radiance`); `crates/common/src/session.rs` (`SessionMeteors`,
+   appended with `skip_serializing_if` so presets stay byte-identical and the
+   schema version is unchanged) + `crates/common/src/render.rs`; `apps/cli`,
+   `apps/viewer` (`M`-key toggle), and `apps/web` (`StarView.set_meteors` +
+   settings controls).
+
+4. **Tests / validation.** `astronomy::meteors` pins the Koschack-Rendtel
+   observed rate (≈ 58.4 m/h for Perseids at h_R = 60°, lm 6.0), the
+   standard-conditions ZHR recovery, the Jenniskens activity profile, the
+   Perseid-maximum solar longitude, and stream determinism / seed-sensitivity;
+   the renderer pins meteor-uniform packing (unit-length streaks, the
+   `MAX_METEORS` cap, external-viewpoint suppression); `common` round-trips an
+   enabled meteor layer through the session schema.
+
+5. **Hosts wired.** CLI (`--meteors`, `--meteor-seed`, `--meteor-rate-scale`,
+   `--meteor-window-seconds`), viewer (same flags + `M` runtime toggle), web
+   (`set_meteors` WASM binding + settings panel toggle / seed / rate-scale
+   with localStorage + session round-trip).
+
+References (also pinned in ROADMAP `V-47`): Koschack, R. & Rendtel, J. 1990,
+WGN 18, 44; Jenniskens, P. 1994, A&A 287, 990; IMO Meteor Shower Calendar;
+McKinley, D. W. R. 1961, *Meteor Science and Engineering*.
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

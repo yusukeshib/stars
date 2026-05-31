@@ -346,7 +346,16 @@ The exact pass layout can change, but responsibilities should stay separated:
   (the direction one exposure later), and an above-horizon-and-sunlit
   visibility flag into a satellite uniform block; `satellite_radiance` draws
   each visible satellite as a neutral point sprite (or a great-circle motion
-  streak when the exposure field is positive). The V-52d Galilean-shadow producer
+  streak when the exposure field is positive). Meteor showers (V-47) ride the
+  same pass: `Camera::meteor_uniforms` asks `astronomy::meteor_stream` for a
+  deterministic Poisson sample of shower + sporadic meteors (the rate from the
+  Koschack-Rendtel 1990 observed-rate formula and the Jenniskens 1994
+  solar-longitude activity profile, seeded by `(seed, jd_utc/window)`), maps
+  each streak's head/tail through the same `apparent_disk_direction_j2000`
+  pipeline, and packs them into a `meteor_segments` block appended at the END
+  of `CameraUniform`; the self-contained `meteor_radiance` evaluator reuses the
+  great-circle `satellite_streak_mask` from a single composition insertion
+  point. The V-52d Galilean-shadow producer
   (`astronomy::galilean_shadow_disks_at`) feeds the same uniform; it
   also drives a CPU-side "moon behind Jupiter" cull on the V-52b
   Galilean-moon sprite path via a negative-radius sentinel in

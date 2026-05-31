@@ -387,6 +387,18 @@ pub(crate) struct CameraUniform {
     /// * `vignette_strength` is the exit-pupil-relative field-illumination
     ///   falloff toward the field stop.
     pub instrument_optics2: [f32; 4],
+    /// V-47 meteor streaks. Two `vec4` rows per meteor: the even row is the
+    /// streak head `xyz` (J2000-equatorial unit direction) with `w` = peak
+    /// apparent magnitude; the odd row is the streak tail `xyz` with
+    /// `w` = 1.0 (a visible-flag slot reserved for future culling). Padded
+    /// rows past `meteor_params.x` stay zero and are never sampled. Appended
+    /// at the END of the uniform so the V-47 diff stays isolated from the
+    /// parallel V-48 / V-49 work.
+    pub meteor_segments: MeteorUniform,
+    /// V-47 meteor header: `[count, enabled, reserved, reserved]`. `count`
+    /// counts meteors (not rows) and is `<= MAX_METEORS`; `enabled` is `1.0`
+    /// when the meteor layer should render.
+    pub meteor_params: [f32; 4],
 }
 
 /// Lower bound of the V-51c totality smoothstep on obscuration.
@@ -411,6 +423,12 @@ pub(crate) type HosekWilkieCoefficientsUniform = [[f32; 4]; HW_COEFFS_PER_CHANNE
 /// and the WGSL iteration in `shaders/skyglow.wgsl`.
 pub const MAX_SATELLITES: usize = 32;
 pub(crate) type SatelliteUniform = [[f32; 4]; MAX_SATELLITES];
+
+/// V-47: maximum number of meteors rendered per frame. Two `vec4` rows each
+/// (head + tail), bounding the uniform block and the WGSL iteration in
+/// `shaders/skyglow.wgsl`.
+pub const MAX_METEORS: usize = 64;
+pub(crate) type MeteorUniform = [[f32; 4]; MAX_METEORS * 2];
 
 pub(crate) const PLANET_UNIFORM_COUNT: usize = 7;
 pub(crate) type PlanetEqRadiusUniform = [[f32; 4]; PLANET_UNIFORM_COUNT];
@@ -1213,6 +1231,41 @@ pub struct Camera {
     /// renderer's native working space, so the gamut transform is the
     /// identity and output is bit-identical to the pre-V-50 pipeline.
     pub output_colourspace: crate::colourspace::OutputColourSpace,
+    /// V-47 meteor-shower layer. Off by default so the dark-sky composition
+    /// stays identical to the pre-V-47 pipeline; hosts opt in and the renderer
+    /// draws a deterministic Poisson sample of shower + sporadic meteors.
+    pub meteors: MeteorLayer,
+}
+
+/// V-47 host-tier meteor-shower layer configuration carried on [`Camera`].
+///
+/// The renderer draws a deterministic per-frame meteor stream from the
+/// IMO Working List showers active at the observer's time and location, plus a
+/// faint sporadic background. The stream is seeded by `(seed, time bin)` so the
+/// same JSON session reproduces the same meteors on every host.
+#[derive(Debug, Clone)]
+pub struct MeteorLayer {
+    /// Master on/off. Off by default.
+    pub enabled: bool,
+    /// Deterministic stream seed.
+    pub seed: u64,
+    /// Multiplier on the modelled observed rate (1.0 = physical expectation).
+    pub rate_scale: f32,
+    /// Integration window in seconds. A still frame shows the meteors that
+    /// would appear over this window (a long-exposure analogue); also the time
+    /// bin used for deterministic seeding.
+    pub window_seconds: f32,
+}
+
+impl Default for MeteorLayer {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            seed: 1,
+            rate_scale: 1.0,
+            window_seconds: 120.0,
+        }
+    }
 }
 
 /// V-55 host-tier satellite layer configuration carried on [`Camera`].
@@ -1249,6 +1302,7 @@ impl Camera {
             light_pollution: astronomy::skyglow::LightPollution::default(),
             satellites: SatelliteLayer::default(),
             output_colourspace: crate::colourspace::OutputColourSpace::default(),
+            meteors: MeteorLayer::default(),
         }
     }
 
@@ -1787,6 +1841,68 @@ impl Camera {
         (dir_radius, streak, params)
     }
 
+    /// V-47: build the deterministic meteor stream and pack per-meteor streak
+    /// rows. Each meteor occupies two `vec4` rows (head, tail); both endpoints
+    /// are mapped through the same apparent-direction transform the disks and
+    /// satellites use, so refraction near the horizon is consistent. Returns
+    /// all-zero / disabled when the layer is off or the viewpoint is external.
+    pub(crate) fn meteor_uniforms(&self) -> (MeteorUniform, [f32; 4]) {
+        let mut segments = [[0.0; 4]; MAX_METEORS * 2];
+        if !self.meteors.enabled || self.viewpoint.is_external() {
+            return (segments, [0.0, 0.0, 0.0, 0.0]);
+        }
+
+        let pressure_hpa = if self.atmosphere.pressure_hpa.is_finite() {
+            self.atmosphere.pressure_hpa.clamp(0.0, 1100.0)
+        } else {
+            Atmosphere::DEFAULT.pressure_hpa
+        };
+        let temperature_c = if self.atmosphere.temperature_c.is_finite() {
+            self.atmosphere.temperature_c.clamp(-80.0, 60.0)
+        } else {
+            Atmosphere::DEFAULT.temperature_c
+        };
+        let refract = self.atmosphere.sunlit_scattering;
+        let date_to_local = self.equatorial_to_horizontal();
+        let local_to_date = date_to_local.transpose();
+        let date_to_j2000 = self.j2000_to_date().transpose();
+        let to_j2000 = |v: [f64; 3]| -> Vec3 {
+            apparent_disk_direction_j2000(
+                Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32),
+                refract,
+                pressure_hpa,
+                temperature_c,
+                date_to_local,
+                local_to_date,
+                date_to_j2000,
+            )
+        };
+
+        let stream = astronomy::meteor_stream(
+            self.observer,
+            self.limiting_magnitude as f64,
+            self.meteors.window_seconds.max(0.0) as f64,
+            self.meteors.seed,
+            self.meteors.rate_scale.max(0.0) as f64,
+            MAX_METEORS,
+        );
+
+        let mut count = 0usize;
+        for meteor in &stream {
+            if count >= MAX_METEORS {
+                break;
+            }
+            let head = to_j2000(meteor.start_eq);
+            let tail = to_j2000(meteor.end_eq);
+            segments[count * 2] = [head.x, head.y, head.z, meteor.magnitude as f32];
+            segments[count * 2 + 1] = [tail.x, tail.y, tail.z, 1.0];
+            count += 1;
+        }
+
+        let params = [count as f32, if count > 0 { 1.0 } else { 0.0 }, 0.0, 0.0];
+        (segments, params)
+    }
+
     pub(crate) fn uniform_with_planets(
         &self,
         width: u32,
@@ -1796,6 +1912,7 @@ impl Camera {
         let zenith = self.zenith_in_equatorial();
         let (satellite_dir_radius, satellite_streak, satellite_params) = self.satellite_uniforms();
         let (instrument_optics_1, instrument_optics2) = self.instrument_optics_uniforms(height);
+        let (meteor_segments, meteor_params) = self.meteor_uniforms();
         let observer_altitude_m = if self.atmosphere.observer_altitude_m.is_finite() {
             self.atmosphere.observer_altitude_m.max(0.0)
         } else {
@@ -2136,6 +2253,8 @@ impl Camera {
             satellite_params,
             instrument_optics: instrument_optics_1,
             instrument_optics2,
+            meteor_segments,
+            meteor_params,
         }
     }
 
@@ -2792,6 +2911,61 @@ mod tests {
         assert_eq!(full_sky_map_scale(1.0), [1.0, 0.5]);
         assert_eq!(full_sky_map_scale(4.0), [0.5, 1.0]);
         assert_eq!(full_sky_map_scale(f32::NAN), [1.0, 0.5]);
+    }
+
+    #[test]
+    fn meteor_uniform_off_by_default_and_when_disabled() {
+        let cam = Camera::new(observer_at(45.0), LocalView::default(), 1.0);
+        let (segments, params) = cam.meteor_uniforms();
+        assert_eq!(params, [0.0, 0.0, 0.0, 0.0], "meteors off by default");
+        assert_eq!(segments[0], [0.0; 4]);
+    }
+
+    #[test]
+    fn meteor_uniform_packs_unit_streaks_when_enabled() {
+        // Perseid maximum (2024-08-12) from a northern site so the radiant is
+        // well up; a high rate scale guarantees a non-empty deterministic
+        // sample for the assertion.
+        let observer = Observer::from_degrees(45.0, 0.0, 2_460_536.9);
+        let mut cam = Camera::new(observer, LocalView::default(), 1.0);
+        cam.meteors = MeteorLayer {
+            enabled: true,
+            seed: 7,
+            rate_scale: 20.0,
+            window_seconds: 600.0,
+        };
+        let (segments, params) = cam.meteor_uniforms();
+        let count = params[0] as usize;
+        assert!(count > 0 && count <= MAX_METEORS, "meteor count {count}");
+        assert_eq!(params[1], 1.0, "enabled flag set when meteors present");
+        for i in 0..count {
+            let head = segments[i * 2];
+            let tail = segments[i * 2 + 1];
+            let hn = (head[0] * head[0] + head[1] * head[1] + head[2] * head[2]).sqrt();
+            let tn = (tail[0] * tail[0] + tail[1] * tail[1] + tail[2] * tail[2]).sqrt();
+            assert!((hn - 1.0).abs() < 1e-3, "head {i} not unit: {hn}");
+            assert!((tn - 1.0).abs() < 1e-3, "tail {i} not unit: {tn}");
+            assert_eq!(tail[3], 1.0, "tail visible flag");
+        }
+        // Deterministic: same camera state reproduces the same packed stream.
+        let (segments2, params2) = cam.meteor_uniforms();
+        assert_eq!(params, params2);
+        assert_eq!(segments[0], segments2[0]);
+    }
+
+    #[test]
+    fn meteor_uniform_suppressed_for_external_viewpoint() {
+        let observer = Observer::from_degrees(45.0, 0.0, 2_460_536.9);
+        let mut cam = Camera::new(observer, LocalView::default(), 1.0);
+        cam.meteors = MeteorLayer {
+            enabled: true,
+            seed: 7,
+            rate_scale: 20.0,
+            window_seconds: 600.0,
+        };
+        cam.viewpoint = SkyViewpoint::GalacticNorth;
+        let (_segments, params) = cam.meteor_uniforms();
+        assert_eq!(params, [0.0, 0.0, 0.0, 0.0]);
     }
 
     #[test]

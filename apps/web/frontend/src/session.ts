@@ -1,6 +1,7 @@
 import {
   DEFAULT_ATMOSPHERE_CONFIG,
   DEFAULT_EYEPIECE_CONFIG,
+  DEFAULT_METEORS_CONFIG,
   DEFAULT_OVERLAY_CONFIG,
   DEFAULT_PLANETS_CONFIG,
   DEFAULT_PROJECTION_CONFIG,
@@ -18,6 +19,7 @@ import {
   type AtmosphereConfig,
   type EyepieceConfig,
   type ExternalViewpointConfig,
+  type MeteorsConfig,
   type Observer,
   type OutputColourspace,
   type OverlayConfig,
@@ -66,6 +68,7 @@ export type StarSession = {
   scintillation: ScintillationConfig;
   planets: PlanetsConfig;
   satellites: SatellitesConfig;
+  meteors: MeteorsConfig;
   eyepiece: EyepieceConfig;
   outputColourspace: OutputColourspace;
   catalog: {
@@ -95,6 +98,7 @@ export type SessionState = {
   scintillation: ScintillationConfig;
   planets: PlanetsConfig;
   satellites: SatellitesConfig;
+  meteors: MeteorsConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   outputColourspace: OutputColourspace;
@@ -171,6 +175,7 @@ export function buildStarSession(state: SessionState): StarSession {
     scintillation: state.scintillation,
     planets: state.planets,
     satellites: state.satellites,
+    meteors: state.meteors,
     eyepiece: state.eyepiece,
     outputColourspace: state.outputColourspace,
     catalog: {
@@ -211,6 +216,7 @@ export function parseStarSessionJson(raw: string): SessionState {
   const scintillation = parseScintillation(s.scintillation);
   const planets = parsePlanets(s.planets);
   const satellites = parseSatellites(s.satellites);
+  const meteors = parseMeteors(s.meteors);
   const projection = parseProjection(s.projection);
   const eyepiece = parseEyepiece(s.eyepiece);
   const outputColourspace = isOutputColourspace(s.outputColourspace)
@@ -225,6 +231,7 @@ export function parseStarSessionJson(raw: string): SessionState {
     scintillation,
     planets,
     satellites,
+    meteors,
     projection,
     eyepiece,
     outputColourspace,
@@ -307,6 +314,19 @@ function parseSatellites(value: unknown): SatellitesConfig {
       typeof v.exposureSeconds === "number" && Number.isFinite(v.exposureSeconds) && v.exposureSeconds >= 0
         ? v.exposureSeconds
         : DEFAULT_SATELLITES_CONFIG.exposureSeconds,
+  };
+}
+
+function parseMeteors(value: unknown): MeteorsConfig {
+  if (!value || typeof value !== "object") return DEFAULT_METEORS_CONFIG;
+  const v = value as Partial<MeteorsConfig>;
+  const num = (x: unknown, min: number, fallback: number): number =>
+    typeof x === "number" && Number.isFinite(x) && x >= min ? x : fallback;
+  return {
+    enabled: typeof v.enabled === "boolean" ? v.enabled : DEFAULT_METEORS_CONFIG.enabled,
+    seed: num(v.seed, 0, DEFAULT_METEORS_CONFIG.seed),
+    rateScale: num(v.rateScale, 0, DEFAULT_METEORS_CONFIG.rateScale),
+    windowSeconds: num(v.windowSeconds, 0, DEFAULT_METEORS_CONFIG.windowSeconds),
   };
 }
 
