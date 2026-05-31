@@ -20,6 +20,7 @@ import {
   type SatellitesConfig,
   type PlanningTable,
   type ProjectionConfig,
+  type RecommendedPlan,
   type SkyProjection,
   type SkyViewpoint,
   type Vec3,
@@ -46,6 +47,8 @@ type Props = {
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   planning: PlanningTable | null;
+  recommended: RecommendedPlan | null;
+  onExportIcal: () => void;
   onSetObserver: (next: Observer) => void;
   onSetTime: (timeMs: number) => void;
   onSetOverlays: (next: OverlayConfig) => void;
@@ -149,6 +152,8 @@ export function StatusBar({
   projection,
   eyepiece,
   planning,
+  recommended,
+  onExportIcal,
   onSetObserver,
   onSetTime,
   onSetOverlays,
@@ -446,6 +451,8 @@ export function StatusBar({
             projection={projection}
             eyepiece={eyepiece}
             planning={planning}
+            recommended={recommended}
+            onExportIcal={onExportIcal}
             onSetOverlays={onSetOverlays}
             onSetAtmosphere={onSetAtmosphere}
             onSetPlanets={onSetPlanets}
@@ -626,6 +633,8 @@ type SettingsPanelProps = Pick<
   | "projection"
   | "eyepiece"
   | "planning"
+  | "recommended"
+  | "onExportIcal"
   | "onSetOverlays"
   | "onSetAtmosphere"
   | "onSetPlanets"
@@ -647,6 +656,8 @@ function SettingsPanel({
   projection,
   eyepiece,
   planning,
+  recommended,
+  onExportIcal,
   onSetOverlays,
   onSetAtmosphere,
   onSetPlanets,
@@ -732,7 +743,13 @@ function SettingsPanel({
             <OverlayToggles config={overlays} onChange={onSetOverlays} />
           </SettingCard>
 
-          {planning && <PlanningPanel planning={planning} />}
+          {planning && (
+            <PlanningPanel
+              planning={planning}
+              recommended={recommended}
+              onExportIcal={onExportIcal}
+            />
+          )}
         </>
       )}
 
@@ -1084,8 +1101,51 @@ function fmtEventTime(ms: number | null): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function PlanningPanel({ planning }: { planning: PlanningTable }) {
+const FAVOURITES_KEY = "stars.planning.favourites.v1";
+
+function loadFavourites(): Set<string> {
+  try {
+    const raw = localStorage.getItem(FAVOURITES_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? new Set(parsed.map(String)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function PlanningPanel({
+  planning,
+  recommended,
+  onExportIcal,
+}: {
+  planning: PlanningTable;
+  recommended: RecommendedPlan | null;
+  onExportIcal: () => void;
+}) {
   const t = useT();
+  const [favourites, setFavourites] = useState<Set<string>>(loadFavourites);
+  const toggleFavourite = (name: string) => {
+    setFavourites((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      try {
+        localStorage.setItem(FAVOURITES_KEY, JSON.stringify([...next]));
+      } catch {
+        // Ignore storage failures (private mode / quota); favourites stay in memory.
+      }
+      return next;
+    });
+  };
+  // Favourites float to the top of the recommended list; ties keep score order.
+  const ranked = recommended
+    ? [...recommended.recommended].sort((a, b) => {
+        const fa = favourites.has(a.name) ? 1 : 0;
+        const fb = favourites.has(b.name) ? 1 : 0;
+        return fb - fa || b.score - a.score;
+      })
+    : [];
   return (
     <SettingCard
       title={t("card.planning.title")}
@@ -1118,9 +1178,63 @@ function PlanningPanel({ planning }: { planning: PlanningTable }) {
           </div>
         ))}
       </div>
+      {ranked.length > 0 && (
+        <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <strong style={{ fontSize: 12 }}>{t("card.planning.recommended")}</strong>
+            <button type="button" onClick={onExportIcal} style={exportIcalButtonStyle}>
+              {t("card.planning.exportIcal")}
+            </button>
+          </div>
+          <div style={{ maxHeight: 150, overflow: "auto" }}>
+            {ranked.map((rec) => {
+              const isFav = favourites.has(rec.name);
+              return (
+                <div
+                  key={rec.name}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "20px 70px 44px 44px 1fr",
+                    gap: 6,
+                    alignItems: "center",
+                    padding: "3px 0",
+                    borderBottom: "1px solid rgba(255,255,255,0.06)",
+                  }}
+                >
+                  <button
+                    type="button"
+                    aria-label={t("card.planning.favourite")}
+                    aria-pressed={isFav}
+                    onClick={() => toggleFavourite(rec.name)}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: isFav ? "#ffcf6b" : "rgba(255,255,255,0.35)", fontSize: 13, padding: 0 }}
+                  >
+                    {isFav ? "★" : "☆"}
+                  </button>
+                  <span>{translateWasmBody(t, rec.name)}</span>
+                  <span title={t("card.planning.score")}>{(rec.score * 100).toFixed(0)}</span>
+                  <span title={t("card.planning.maxAltitude")}>{rec.maxAltitudeDeg.toFixed(0)}°</span>
+                  <span title={t("card.planning.moonImpact")} style={{ opacity: 0.72 }}>
+                    ☾ {rec.moonDeltaVMag <= 0.01 ? "—" : `−${rec.moonDeltaVMag.toFixed(1)}`}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </SettingCard>
   );
 }
+
+const exportIcalButtonStyle: React.CSSProperties = {
+  background: "rgba(143,177,255,0.16)",
+  border: "1px solid rgba(143,177,255,0.4)",
+  color: "#cfe0ff",
+  borderRadius: 6,
+  fontSize: 11,
+  padding: "2px 8px",
+  cursor: "pointer",
+};
 
 function Vec3NumberRow({
   id,

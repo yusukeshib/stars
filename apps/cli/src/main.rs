@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use astronomy::Observer;
+use astronomy::{
+    icalendar_for_targets, jd_utc_to_unix_ms, planning_targets_from_bodies, rank_targets, Observer,
+    ScoredTarget,
+};
 use clap::Parser;
 use renderer::{LocalView, SkyViewpoint, DEFAULT_SCREEN_LIMITING_MAGNITUDE};
 use stars_host_common::{
@@ -294,6 +297,20 @@ struct Args {
     /// --azimuth / --altitude and prints an info summary before rendering.
     #[arg(long, value_name = "NAME")]
     goto: Option<String>,
+
+    /// L-09 planning: print tonight's observation plan as JSON to stdout and
+    /// exit without rendering. Includes the rise/transit/set table, twilight
+    /// bands, the recommended-object ranking, and per-target visibility and
+    /// Moon-impact scores (Krisciunas-Schaefer 1991). Uses the scene's
+    /// light-pollution zenith brightness as the Moon-free baseline.
+    #[arg(long)]
+    plan_json: bool,
+
+    /// L-09 planning: write the recommended targets' observable dark windows
+    /// to an iCalendar (.ics) file at the given path and exit without
+    /// rendering.
+    #[arg(long, value_name = "PATH")]
+    plan_ical: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -441,6 +458,26 @@ fn main() -> Result<()> {
         );
     }
 
+    // L-09 planning exports run before rendering and exit early, so they work
+    // with --session / --preset / --goto and never spin up the GPU.
+    if args.plan_json || args.plan_ical.is_some() {
+        let observer =
+            Observer::from_degrees_with_time(scene.latitude_deg, scene.longitude_deg, scene.time);
+        let dark_v = scene.light_pollution.zenith_sqm_mag_per_arcsec2();
+        let targets = planning_targets_from_bodies(observer);
+        let ranked = rank_targets(observer, &targets, dark_v);
+        if let Some(path) = &args.plan_ical {
+            let ics = icalendar_for_targets(&ranked);
+            std::fs::write(path, ics)
+                .with_context(|| format!("writing iCalendar to {}", path.display()))?;
+            log::info!("Wrote observation-plan iCalendar to {}", path.display());
+        }
+        if args.plan_json {
+            println!("{}", planning_json(observer, dark_v, &ranked));
+        }
+        return Ok(());
+    }
+
     if let Some(path) = &args.write_session {
         let session = StarSession::from_scene(env!("CARGO_PKG_VERSION"), "stars-cli", &scene);
         save_session(path, &session)?;
@@ -469,6 +506,51 @@ fn main() -> Result<()> {
 
     log::info!("Wrote {}", args.output.display());
     Ok(())
+}
+
+/// Serialise the L-09 planning calculations as a JSON document. Hand-rolled
+/// to avoid pulling serde into the CLI for one report; mirrors the fields the
+/// web `planning_table_json` bridge exposes.
+fn planning_json(observer: Observer, dark_sky_v_mag: f64, ranked: &[ScoredTarget]) -> String {
+    fn opt_ms(jd: Option<f64>) -> String {
+        match jd {
+            Some(j) => format!("{:.0}", jd_utc_to_unix_ms(j)),
+            None => "null".to_string(),
+        }
+    }
+    let mut s = String::new();
+    s.push_str(&format!(
+        "{{\"observer\":{{\"latitudeDeg\":{:.6},\"longitudeDeg\":{:.6}}},\"darkSkyZenithVMag\":{:.3},\"recommended\":[",
+        observer.latitude_rad.to_degrees(),
+        observer.longitude_rad.to_degrees(),
+        dark_sky_v_mag,
+    ));
+    for (idx, entry) in ranked.iter().enumerate() {
+        if idx > 0 {
+            s.push(',');
+        }
+        let v = &entry.visibility;
+        let (win_start, win_end) = match v.observable_window_jd_utc {
+            Some((a, b)) => (opt_ms(Some(a)), opt_ms(Some(b))),
+            None => ("null".to_string(), "null".to_string()),
+        };
+        s.push_str(&format!(
+            "{{\"name\":\"{}\",\"score\":{:.4},\"maxAltitudeDeg\":{:.2},\"observableDarkHours\":{:.2},\"totalDarkHours\":{:.2},\"windowStartMs\":{},\"windowEndMs\":{},\"moonDeltaVMag\":{:.3},\"moonAltitudeDeg\":{:.2},\"moonIlluminatedFraction\":{:.4},\"moonSeparationDeg\":{:.2}}}",
+            entry.target.name.replace('"', ""),
+            v.score,
+            v.max_altitude_rad.to_degrees(),
+            v.observable_dark_hours,
+            v.total_dark_hours,
+            win_start,
+            win_end,
+            v.moon.delta_v_mag,
+            v.moon.moon_altitude_rad.to_degrees(),
+            v.moon.moon_illuminated_fraction,
+            v.moon.separation_rad.to_degrees(),
+        ));
+    }
+    s.push_str("]}");
+    s
 }
 
 fn print_scene_presets() {

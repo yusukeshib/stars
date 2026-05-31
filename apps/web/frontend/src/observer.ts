@@ -183,6 +183,25 @@ export type PlanningTable = {
   twilight: TwilightSegment[];
 };
 
+/// L-09: one entry in "tonight's recommended objects", carrying its
+/// visibility score and Moon-impact (Krisciunas-Schaefer 1991).
+export type RecommendedTarget = {
+  name: string;
+  score: number;
+  maxAltitudeDeg: number;
+  observableDarkHours: number;
+  windowStartMs: number | null;
+  windowEndMs: number | null;
+  moonDeltaVMag: number;
+  moonAltitudeDeg: number;
+  moonIlluminatedFraction: number;
+};
+
+export type RecommendedPlan = {
+  darkSkyZenithVMag: number;
+  recommended: RecommendedTarget[];
+};
+
 export const DEFAULT_ATMOSPHERE_CONFIG: AtmosphereConfig = {
   enabled: true,
   preset: "clear-rural",

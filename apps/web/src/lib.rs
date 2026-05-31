@@ -3,8 +3,9 @@ use std::rc::Rc;
 
 use astronomy::{
     apparent_moon_topocentric, apparent_planet_topocentric, apparent_sun_topocentric,
-    equatorial_to_horizontal, evening_plan, jd_utc_to_unix_ms, lmst_radians, rise_transit_set,
-    Observer, Planet, PlanningBody, TimeScales,
+    equatorial_to_horizontal, evening_plan, icalendar_for_targets, jd_utc_to_unix_ms, lmst_radians,
+    planning_targets_from_bodies, rank_targets, rise_transit_set, Observer, Planet, PlanningBody,
+    ScoredTarget, TimeScales,
 };
 use catalog::load_embedded;
 use catalog::{
@@ -694,6 +695,76 @@ impl StarView {
         }
         s.push_str("]}");
         s
+    }
+
+    /// L-09: rank tonight's solar-system bodies by visibility score and return
+    /// the recommended-object list as JSON, including per-target Moon-impact
+    /// (Krisciunas-Schaefer 1991) and the observable dark window. The
+    /// Moon-free baseline is the current site's light-pollution zenith
+    /// brightness, so the score reflects what the observer will actually see.
+    pub fn planning_recommended_json(&self) -> String {
+        let (observer, dark_v) = {
+            let state = self.state.borrow();
+            (
+                state.camera.observer,
+                state.camera.light_pollution.zenith_sqm_mag_per_arcsec2(),
+            )
+        };
+        let targets = planning_targets_from_bodies(observer);
+        let ranked = rank_targets(observer, &targets, dark_v);
+        let mut s = String::new();
+        s.push_str("{\"darkSkyZenithVMag\":");
+        push_num(&mut s, dark_v);
+        s.push_str(",\"recommended\":[");
+        for (idx, entry) in ranked.iter().enumerate() {
+            if idx > 0 {
+                s.push(',');
+            }
+            let v = &entry.visibility;
+            s.push_str("{\"name\":\"");
+            s.push_str(&entry.target.name);
+            s.push_str("\",\"score\":");
+            push_num(&mut s, v.score);
+            s.push_str(",\"maxAltitudeDeg\":");
+            push_num(&mut s, v.max_altitude_rad.to_degrees());
+            s.push_str(",\"observableDarkHours\":");
+            push_num(&mut s, v.observable_dark_hours);
+            s.push_str(",\"windowStartMs\":");
+            match v.observable_window_jd_utc {
+                Some((start, _)) => push_num(&mut s, jd_utc_to_unix_ms(start)),
+                None => s.push_str("null"),
+            }
+            s.push_str(",\"windowEndMs\":");
+            match v.observable_window_jd_utc {
+                Some((_, end)) => push_num(&mut s, jd_utc_to_unix_ms(end)),
+                None => s.push_str("null"),
+            }
+            s.push_str(",\"moonDeltaVMag\":");
+            push_num(&mut s, v.moon.delta_v_mag);
+            s.push_str(",\"moonAltitudeDeg\":");
+            push_num(&mut s, v.moon.moon_altitude_rad.to_degrees());
+            s.push_str(",\"moonIlluminatedFraction\":");
+            push_num(&mut s, v.moon.moon_illuminated_fraction);
+            s.push('}');
+        }
+        s.push_str("]}");
+        s
+    }
+
+    /// L-09: export the recommended targets' observable dark windows as an
+    /// RFC 5545 iCalendar document. The frontend offers this as an `.ics`
+    /// download so a plan can be dropped straight into a calendar app.
+    pub fn planning_ical(&self) -> String {
+        let (observer, dark_v) = {
+            let state = self.state.borrow();
+            (
+                state.camera.observer,
+                state.camera.light_pollution.zenith_sqm_mag_per_arcsec2(),
+            )
+        };
+        let targets = planning_targets_from_bodies(observer);
+        let ranked: Vec<ScoredTarget> = rank_targets(observer, &targets, dark_v);
+        icalendar_for_targets(&ranked)
     }
 
     /// Update atmosphere controls from the web UI. `enabled=false` matches the

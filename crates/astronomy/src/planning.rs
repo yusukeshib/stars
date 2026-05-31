@@ -1095,6 +1095,413 @@ pub fn find_mutual_planetary_occultation(
     })
 }
 
+// ---------------------------------------------------------------------------
+// L-09 Observation-planning polish: Moon-impact, visibility scoring,
+// recommended-target ranking, and iCalendar export.
+//
+// The Moon-impact model follows Krisciunas, K. & Schaefer, B. E. 1991,
+// PASP 103, 1033, "A model of the brightness of moonlight". Sky-brightness
+// luminances are carried in nanolamberts and converted to/from V-band
+// surface brightness (mag/arcsec²) with their Eq. 27.
+// ---------------------------------------------------------------------------
+
+/// V-band atmospheric extinction coefficient (mag/airmass) adopted by the
+/// Krisciunas-Schaefer 1991 moonlight model for a clear, dark site.
+pub const KS_V_EXTINCTION_COEFF: f64 = 0.172;
+
+/// Zenith dark-sky V-band surface brightness (mag/arcsec²) for a pristine
+/// site. Used as the Moon-free baseline when no site brightness is supplied.
+pub const DARK_SKY_ZENITH_V_MAG: f64 = 21.6;
+
+/// Minimum target altitude (degrees) counted as "observable" when scoring the
+/// fraction of the dark window a target spends usefully high.
+pub const MIN_OBSERVABLE_ALTITUDE_DEG: f64 = 20.0;
+
+/// Sun depression (degrees) below which the sky is treated as dark enough for
+/// deep-sky observing (nautical twilight and darker).
+pub const DARK_SUN_DEPRESSION_DEG: f64 = 12.0;
+
+/// Krisciunas-Schaefer 1991 relative airmass (their Eq. 3):
+/// `X(Z) = (1 − 0.96 sin²Z)^(−1/2)`. Returns a large but finite airmass near
+/// and below the horizon so callers never see NaN/∞.
+fn ks_airmass(zenith_rad: f64) -> f64 {
+    let s = zenith_rad.sin();
+    let denom = 1.0 - 0.96 * s * s;
+    if denom <= 1.0e-6 {
+        40.0
+    } else {
+        denom.powf(-0.5)
+    }
+}
+
+/// Moon illuminance outside the atmosphere (K&S 1991 Eq. 20).
+/// `phase_angle_deg` is the Sun-Moon-Earth phase angle in degrees
+/// (0 = full Moon). The result combines with [`ks_scattering_function`]
+/// to give a sky brightness in nanolamberts.
+fn moon_illuminance_outside_atmosphere(phase_angle_deg: f64) -> f64 {
+    let a = phase_angle_deg.abs().clamp(0.0, 180.0);
+    10f64.powf(-0.4 * (3.84 + 0.026 * a + 4.0e-9 * a.powi(4)))
+}
+
+/// Krisciunas-Schaefer scattering function `f(ρ)` (their Eqs. 16–18) for an
+/// angular separation `separation_deg` (deg) between the Moon and a sky
+/// point. Sums a Rayleigh term and an aerosol (Mie) term.
+fn ks_scattering_function(separation_deg: f64) -> f64 {
+    let rho = separation_deg.clamp(0.0, 180.0);
+    let cos_rho = rho.to_radians().cos();
+    let rayleigh = 10f64.powf(5.36) * (1.06 + cos_rho * cos_rho);
+    let mie = 10f64.powf(6.15 - rho / 40.0);
+    rayleigh + mie
+}
+
+/// Convert a V-band surface brightness (mag/arcsec²) to luminance in
+/// nanolamberts via K&S 1991 Eq. 27: `B = 34.08·exp(20.7233 − 0.92104 V)`.
+pub fn nanolamberts_from_v_mag(v_mag_per_arcsec2: f64) -> f64 {
+    34.08 * (20.7233 - 0.92104 * v_mag_per_arcsec2).exp()
+}
+
+/// Inverse of [`nanolamberts_from_v_mag`]: nanolamberts → V mag/arcsec².
+pub fn v_mag_from_nanolamberts(nanolamberts: f64) -> f64 {
+    let b = nanolamberts.max(1.0e-6);
+    (20.7233 - (b / 34.08).ln()) / 0.92104
+}
+
+/// Moon contribution to sky surface brightness at a sky point, in
+/// nanolamberts (K&S 1991 Eq. 15). Returns 0 when the Moon is below the
+/// horizon.
+pub fn moon_sky_brightness_nanolamberts(
+    moon_phase_angle_deg: f64,
+    moon_zenith_rad: f64,
+    target_zenith_rad: f64,
+    separation_deg: f64,
+) -> f64 {
+    if moon_zenith_rad >= std::f64::consts::FRAC_PI_2 {
+        return 0.0;
+    }
+    let i_star = moon_illuminance_outside_atmosphere(moon_phase_angle_deg);
+    let f = ks_scattering_function(separation_deg);
+    let x_moon = ks_airmass(moon_zenith_rad);
+    let x_target = ks_airmass(target_zenith_rad);
+    let k = KS_V_EXTINCTION_COEFF;
+    f * i_star * 10f64.powf(-0.4 * k * x_moon) * (1.0 - 10f64.powf(-0.4 * k * x_target))
+}
+
+/// Angular separation (radians) between two equatorial directions.
+fn angular_separation_rad(ra1: f64, dec1: f64, ra2: f64, dec2: f64) -> f64 {
+    let cos_sep = dec1.sin() * dec2.sin() + dec1.cos() * dec2.cos() * (ra1 - ra2).cos();
+    cos_sep.clamp(-1.0, 1.0).acos()
+}
+
+/// Moonlight sky-brightness impact on a target at one instant.
+#[derive(Debug, Clone, Copy)]
+pub struct MoonImpact {
+    pub moon_altitude_rad: f64,
+    pub moon_illuminated_fraction: f64,
+    pub separation_rad: f64,
+    pub dark_sky_v_mag: f64,
+    pub moonlit_sky_v_mag: f64,
+    /// Sky-brightness degradation in V magnitudes (positive = brighter sky,
+    /// i.e. worse contrast). Zero when the Moon is down or new.
+    pub delta_v_mag: f64,
+}
+
+/// Moon-impact score for a fixed-equatorial target at the observer's instant,
+/// against a Moon-free baseline `dark_sky_v_mag` (mag/arcsec²).
+pub fn moon_impact(
+    observer: Observer,
+    target_ra_rad: f64,
+    target_dec_rad: f64,
+    dark_sky_v_mag: f64,
+) -> MoonImpact {
+    let moon = apparent_moon_topocentric(observer);
+    let lst = lmst_radians(observer.time.jd_ut1, observer.longitude_rad);
+    let moon_h = equatorial_to_horizontal(
+        moon.right_ascension_rad,
+        moon.declination_rad,
+        lst,
+        observer.latitude_rad,
+    );
+    let target_h =
+        equatorial_to_horizontal(target_ra_rad, target_dec_rad, lst, observer.latitude_rad);
+    let separation = angular_separation_rad(
+        moon.right_ascension_rad,
+        moon.declination_rad,
+        target_ra_rad,
+        target_dec_rad,
+    );
+    let moon_zenith = std::f64::consts::FRAC_PI_2 - moon_h.altitude;
+    let target_zenith = std::f64::consts::FRAC_PI_2 - target_h.altitude;
+    let b_moon = moon_sky_brightness_nanolamberts(
+        moon.phase_angle_rad.to_degrees(),
+        moon_zenith,
+        target_zenith,
+        separation.to_degrees(),
+    );
+    let b_dark = nanolamberts_from_v_mag(dark_sky_v_mag);
+    let moonlit_v = v_mag_from_nanolamberts(b_dark + b_moon);
+    MoonImpact {
+        moon_altitude_rad: moon_h.altitude,
+        moon_illuminated_fraction: moon.illuminated_fraction,
+        separation_rad: separation,
+        dark_sky_v_mag,
+        moonlit_sky_v_mag: moonlit_v,
+        delta_v_mag: dark_sky_v_mag - moonlit_v,
+    }
+}
+
+/// Visibility score for a fixed-equatorial target over the coming evening.
+#[derive(Debug, Clone, Copy)]
+pub struct VisibilityScore {
+    pub max_altitude_rad: f64,
+    pub max_altitude_jd_utc: f64,
+    pub observable_dark_hours: f64,
+    pub total_dark_hours: f64,
+    /// Observable dark window [start, end] in JD(UTC), if the target clears
+    /// [`MIN_OBSERVABLE_ALTITUDE_DEG`] during darkness.
+    pub observable_window_jd_utc: Option<(f64, f64)>,
+    pub moon: MoonImpact,
+    /// Composite score in [0, 1]: altitude × dark-window × Moon-clarity.
+    pub score: f64,
+}
+
+/// Score how observable a fixed-equatorial target is over the evening window
+/// returned by [`evening_window_jd_utc`].
+///
+/// The composite is the product of three documented terms, each in `[0, 1]`:
+/// * altitude — `clamp(max_altitude / 60°, 0, 1)` (saturates at 60°),
+/// * dark-window — `clamp(observable_dark_hours / 4 h, 0, 1)`,
+/// * Moon-clarity — `10^(−0.4·max(ΔV, 0))`, the relative sky-brightness
+///   factor from the [`moon_impact`] degradation (1 = no Moon impact).
+pub fn visibility_score(
+    observer: Observer,
+    target_ra_rad: f64,
+    target_dec_rad: f64,
+    dark_sky_v_mag: f64,
+) -> VisibilityScore {
+    let (start, end) = evening_window_jd_utc(observer);
+    let step = 5.0 / (24.0 * 60.0); // 5 minutes
+    let min_alt = MIN_OBSERVABLE_ALTITUDE_DEG.to_radians();
+    let dark_sun_alt = -DARK_SUN_DEPRESSION_DEG.to_radians();
+
+    let mut max_alt = f64::NEG_INFINITY;
+    let mut max_jd = start;
+    let mut total_dark_days = 0.0;
+    let mut obs_dark_days = 0.0;
+    let mut win_start: Option<f64> = None;
+    let mut win_end: Option<f64> = None;
+
+    let mut t = start;
+    while t <= end + 1e-12 {
+        let obs_t = observer_at(observer, t);
+        let lst = lmst_radians(obs_t.time.jd_ut1, obs_t.longitude_rad);
+        let alt =
+            equatorial_to_horizontal(target_ra_rad, target_dec_rad, lst, observer.latitude_rad)
+                .altitude;
+        if alt > max_alt {
+            max_alt = alt;
+            max_jd = t;
+        }
+        let sun_alt = body_altitude_rad(obs_t, PlanningBody::Sun);
+        if sun_alt < dark_sun_alt {
+            total_dark_days += step;
+            if alt > min_alt {
+                obs_dark_days += step;
+                if win_start.is_none() {
+                    win_start = Some(t);
+                }
+                win_end = Some(t);
+            }
+        }
+        t += step;
+    }
+
+    let observable_dark_hours = obs_dark_days * 24.0;
+    let total_dark_hours = total_dark_days * 24.0;
+    let moon = moon_impact(
+        observer_at(observer, max_jd),
+        target_ra_rad,
+        target_dec_rad,
+        dark_sky_v_mag,
+    );
+
+    let altitude_term = (max_alt.to_degrees() / 60.0).clamp(0.0, 1.0);
+    let dark_term = (observable_dark_hours / 4.0).clamp(0.0, 1.0);
+    let moon_term = 10f64.powf(-0.4 * moon.delta_v_mag.max(0.0));
+    let score = (altitude_term * dark_term * moon_term).clamp(0.0, 1.0);
+
+    let observable_window_jd_utc = match (win_start, win_end) {
+        (Some(a), Some(b)) => Some((a, b)),
+        _ => None,
+    };
+
+    VisibilityScore {
+        max_altitude_rad: max_alt,
+        max_altitude_jd_utc: max_jd,
+        observable_dark_hours,
+        total_dark_hours,
+        observable_window_jd_utc,
+        moon,
+        score,
+    }
+}
+
+/// A named, fixed-equatorial planning target supplied by a host (catalog
+/// star, deep-sky object, or a solar-system body sampled at the evening's
+/// midpoint).
+#[derive(Debug, Clone)]
+pub struct PlanningTarget {
+    pub name: String,
+    pub right_ascension_rad: f64,
+    pub declination_rad: f64,
+}
+
+/// A planning target with its computed visibility score.
+#[derive(Debug, Clone)]
+pub struct ScoredTarget {
+    pub target: PlanningTarget,
+    pub visibility: VisibilityScore,
+}
+
+/// Build planning targets from the default solar-system bodies (all of
+/// [`DEFAULT_PLANNING_BODIES`] except the Sun), sampling each body's apparent
+/// equatorial position at the midpoint of the coming evening window. Hosts
+/// without a star catalog can feed these straight into [`rank_targets`].
+pub fn planning_targets_from_bodies(observer: Observer) -> Vec<PlanningTarget> {
+    let (start, end) = evening_window_jd_utc(observer);
+    let mid = observer_at(observer, 0.5 * (start + end));
+    DEFAULT_PLANNING_BODIES
+        .into_iter()
+        .filter(|body| !matches!(body, PlanningBody::Sun))
+        .map(|body| {
+            let (ra, dec) = body_equatorial(mid, body);
+            PlanningTarget {
+                name: body.name().to_string(),
+                right_ascension_rad: ra,
+                declination_rad: dec,
+            }
+        })
+        .collect()
+}
+
+/// Score every supplied target and return them sorted by descending
+/// visibility score ("tonight's recommended objects").
+pub fn rank_targets(
+    observer: Observer,
+    targets: &[PlanningTarget],
+    dark_sky_v_mag: f64,
+) -> Vec<ScoredTarget> {
+    let mut scored: Vec<ScoredTarget> = targets
+        .iter()
+        .map(|target| ScoredTarget {
+            target: target.clone(),
+            visibility: visibility_score(
+                observer,
+                target.right_ascension_rad,
+                target.declination_rad,
+                dark_sky_v_mag,
+            ),
+        })
+        .collect();
+    scored.sort_by(|a, b| {
+        b.visibility
+            .score
+            .partial_cmp(&a.visibility.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    scored
+}
+
+/// Convert a JD(UTC) to an iCalendar UTC timestamp (`YYYYMMDDTHHMMSSZ`).
+fn ical_utc_timestamp(jd_utc: f64) -> String {
+    // Fliegel & Van Flandern (1968) JD → Gregorian calendar date.
+    let jd = jd_utc + 0.5;
+    let z = jd.floor();
+    let frac = jd - z;
+    let a = if z < 2_299_161.0 {
+        z
+    } else {
+        let alpha = ((z - 1_867_216.25) / 36_524.25).floor();
+        z + 1.0 + alpha - (alpha / 4.0).floor()
+    };
+    let b = a + 1524.0;
+    let c = ((b - 122.1) / 365.25).floor();
+    let d = (365.25 * c).floor();
+    let e = ((b - d) / 30.6001).floor();
+    let day = b - d - (30.6001 * e).floor();
+    let month = if e < 14.0 { e - 1.0 } else { e - 13.0 };
+    let year = if month > 2.0 { c - 4716.0 } else { c - 4715.0 };
+
+    let total_seconds = (frac * 86_400.0).round() as i64;
+    let (mut day_i, mut total_seconds) = (day as i64, total_seconds);
+    if total_seconds >= 86_400 {
+        total_seconds -= 86_400;
+        day_i += 1;
+    }
+    let hour = total_seconds / 3600;
+    let minute = (total_seconds % 3600) / 60;
+    let second = total_seconds % 60;
+    format!(
+        "{:04}{:02}{:02}T{:02}{:02}{:02}Z",
+        year as i64, month as i64, day_i, hour, minute, second
+    )
+}
+
+/// Escape a string for an iCalendar TEXT value (RFC 5545 §3.3.11).
+fn ical_escape(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace(';', "\\;")
+        .replace(',', "\\,")
+        .replace('\n', "\\n")
+}
+
+/// Export the observable dark windows of scored targets as an RFC 5545
+/// iCalendar document. Targets without an observable dark window are
+/// skipped. Each event spans the target's `observable_window_jd_utc` and
+/// records the transit altitude, visibility score, and Moon ΔV in the
+/// description so the calendar entry is self-documenting.
+pub fn icalendar_for_targets(scored: &[ScoredTarget]) -> String {
+    let mut out = String::new();
+    out.push_str("BEGIN:VCALENDAR\r\n");
+    out.push_str("VERSION:2.0\r\n");
+    out.push_str("PRODID:-//stars//L-09 observation planning//EN\r\n");
+    out.push_str("CALSCALE:GREGORIAN\r\n");
+    for entry in scored {
+        let Some((start, end)) = entry.visibility.observable_window_jd_utc else {
+            continue;
+        };
+        let name = &entry.target.name;
+        let dtstart = ical_utc_timestamp(start);
+        let dtend = ical_utc_timestamp(end);
+        let alt_deg = entry.visibility.max_altitude_rad.to_degrees();
+        let summary = format!(
+            "Observe {} (alt {:.0}°, score {:.2})",
+            name, alt_deg, entry.visibility.score
+        );
+        let description = format!(
+            "Max altitude {:.1}°; observable dark window {:.1} h; \
+             Moon ΔV {:+.2} mag/arcsec² (illum {:.0}%).",
+            alt_deg,
+            entry.visibility.observable_dark_hours,
+            entry.visibility.moon.delta_v_mag,
+            entry.visibility.moon.moon_illuminated_fraction * 100.0,
+        );
+        out.push_str("BEGIN:VEVENT\r\n");
+        out.push_str(&format!(
+            "UID:{}-{}@stars\r\n",
+            ical_escape(&name.replace(' ', "-")),
+            dtstart
+        ));
+        out.push_str(&format!("DTSTAMP:{}\r\n", dtstart));
+        out.push_str(&format!("DTSTART:{}\r\n", dtstart));
+        out.push_str(&format!("DTEND:{}\r\n", dtend));
+        out.push_str(&format!("SUMMARY:{}\r\n", ical_escape(&summary)));
+        out.push_str(&format!("DESCRIPTION:{}\r\n", ical_escape(&description)));
+        out.push_str("END:VEVENT\r\n");
+    }
+    out.push_str("END:VCALENDAR\r\n");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1628,5 +2035,113 @@ mod tests {
             .twilight
             .windows(2)
             .all(|pair| pair[0].end_jd_utc <= pair[1].start_jd_utc + 1e-9));
+    }
+
+    // ----- L-09 Observation-planning polish -----
+
+    #[test]
+    fn v_mag_nanolambert_roundtrip() {
+        for v in [18.0, 20.0, 21.6, 22.0] {
+            let b = nanolamberts_from_v_mag(v);
+            let back = v_mag_from_nanolamberts(b);
+            assert!((v - back).abs() < 1e-9, "V={v} round-trip got {back}");
+        }
+        // Pinned anchor: V = 21.6 mag/arcsec² ≈ 78.1 nL (K&S 1991 Eq. 27).
+        assert!((nanolamberts_from_v_mag(21.6) - 78.07).abs() < 0.2);
+    }
+
+    #[test]
+    fn moon_impact_matches_krisciunas_schaefer_reference() {
+        // ROADMAP L-09 pinned case: target at 20° altitude, Moon at 60°
+        // altitude, 90% illuminated. Illuminated fraction 0.90 ⇒ phase angle
+        // α = acos(2·0.90 − 1) = 36.870°. Separation taken as 60°.
+        //
+        // Worked through K&S 1991 Eqs. 15/20/16-18/3/27 by hand:
+        //   I*   = 10^(-0.4(3.84 + 0.026·36.870 + 4e-9·36.870^4)) ≈ 0.011956
+        //   f    = 10^5.36(1.06 + cos²60°) + 10^(6.15 - 60/40)    ≈ 344772
+        //   X_m  = (1 - 0.96 sin²30°)^-0.5                        ≈ 1.14699
+        //   X_t  = (1 - 0.96 sin²70°)^-0.5                        ≈ 2.56244
+        //   B_moon ≈ 1147 nL ; B_dark(21.6) ≈ 78.1 nL
+        //   V_moonlit ≈ 18.61 ⇒ ΔV ≈ 2.99 mag/arcsec²
+        let target_zenith = 70f64.to_radians();
+        let moon_zenith = 30f64.to_radians();
+        let phase_angle_deg = (2.0 * 0.90 - 1.0_f64).acos().to_degrees();
+        let b_moon =
+            moon_sky_brightness_nanolamberts(phase_angle_deg, moon_zenith, target_zenith, 60.0);
+        assert!(
+            (b_moon - 1147.0).abs() < 25.0,
+            "B_moon {b_moon} nL deviates from K&S reference 1147 nL"
+        );
+        let v_moonlit = v_mag_from_nanolamberts(nanolamberts_from_v_mag(21.6) + b_moon);
+        let delta_v = 21.6 - v_moonlit;
+        assert!(
+            (delta_v - 2.99).abs() < 0.06,
+            "ΔV {delta_v} deviates from K&S-derived 2.99 mag"
+        );
+    }
+
+    #[test]
+    fn moon_impact_grows_with_illumination_and_proximity() {
+        let zt = 60f64.to_radians();
+        let zm = 30f64.to_radians();
+        // Brighter (fuller) Moon → larger sky brightness.
+        let full = moon_sky_brightness_nanolamberts(0.0, zm, zt, 45.0);
+        let crescent = moon_sky_brightness_nanolamberts(120.0, zm, zt, 45.0);
+        assert!(
+            full > crescent,
+            "full {full} should exceed crescent {crescent}"
+        );
+        // Closer to the Moon → larger sky brightness.
+        let near = moon_sky_brightness_nanolamberts(0.0, zm, zt, 15.0);
+        let far = moon_sky_brightness_nanolamberts(0.0, zm, zt, 120.0);
+        assert!(near > far, "near {near} should exceed far {far}");
+        // Moon below the horizon contributes nothing.
+        let below = moon_sky_brightness_nanolamberts(0.0, 100f64.to_radians(), zt, 45.0);
+        assert_eq!(below, 0.0);
+    }
+
+    #[test]
+    fn visibility_score_in_unit_range_and_ranks_targets() {
+        let observer = Observer::from_degrees(35.68, 139.69, 2_460_482.5);
+        let targets = planning_targets_from_bodies(observer);
+        assert_eq!(targets.len(), DEFAULT_PLANNING_BODIES.len() - 1);
+        let ranked = rank_targets(observer, &targets, DARK_SKY_ZENITH_V_MAG);
+        assert_eq!(ranked.len(), targets.len());
+        for entry in &ranked {
+            assert!(
+                (0.0..=1.0).contains(&entry.visibility.score),
+                "{} score {} out of range",
+                entry.target.name,
+                entry.visibility.score
+            );
+        }
+        // rank_targets must return descending scores.
+        assert!(ranked
+            .windows(2)
+            .all(|pair| pair[0].visibility.score >= pair[1].visibility.score));
+    }
+
+    #[test]
+    fn icalendar_export_is_well_formed() {
+        let observer = Observer::from_degrees(35.68, 139.69, 2_460_482.5);
+        let targets = planning_targets_from_bodies(observer);
+        let ranked = rank_targets(observer, &targets, DARK_SKY_ZENITH_V_MAG);
+        let ics = icalendar_for_targets(&ranked);
+        assert!(ics.starts_with("BEGIN:VCALENDAR\r\n"));
+        assert!(ics.trim_end().ends_with("END:VCALENDAR"));
+        // Every VEVENT must be paired and carry UTC timestamps.
+        let begins = ics.matches("BEGIN:VEVENT").count();
+        let ends = ics.matches("END:VEVENT").count();
+        assert_eq!(begins, ends);
+        if begins > 0 {
+            assert!(ics.contains("DTSTART:"));
+            assert!(ics.contains('Z'));
+        }
+    }
+
+    #[test]
+    fn ical_timestamp_matches_known_epoch() {
+        // JD 2451545.0 (UTC) = 2000-01-01 12:00:00 UTC.
+        assert_eq!(ical_utc_timestamp(2_451_545.0), "20000101T120000Z");
     }
 }

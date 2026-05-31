@@ -71,7 +71,14 @@ Owns scientific and geometric models:
   satellite reduction reuses the same equatorial → horizontal path as the
   Sun / Moon / planets;
 - photometry, illuminants, atmosphere, twilight, and skyglow reference models;
-- planning helpers such as rise / transit / set and twilight bands.
+- planning helpers such as rise / transit / set, twilight bands, and the
+  `L-09` observation-planning layer: Krisciunas-Schaefer 1991 Moon-impact
+  (`moon_impact`), visibility scoring (`visibility_score`), recommended-
+  object ranking (`rank_targets`), and RFC 5545 iCalendar export
+  (`icalendar_for_targets`). The Moon-free baseline reads the `V-39`
+  light-pollution zenith brightness, so scores follow the configured site;
+  the CLI (`--plan-json` / `--plan-ical`) and web (`planning_recommended_json`
+  / `planning_ical`) hosts consume these helpers without re-deriving them.
 
 This crate should not depend on a renderer, a UI framework, or host-specific
 argument parsing.

@@ -28,6 +28,7 @@ import {
   type PlanetsConfig,
   type PlanningTable,
   type ProjectionConfig,
+  type RecommendedPlan,
   type SatellitesConfig,
   type View,
 } from "./observer";
@@ -39,6 +40,21 @@ const DEFAULT_OBSERVER: Observer = {
   latitudeDeg: 35.68, // Tokyo as a sensible default
   longitudeDeg: 139.69,
 };
+
+/// L-09: trigger a client-side download of the iCalendar plan produced by the
+/// WASM bridge. No-op if the bridge is not ready yet or returns no events.
+function exportIcal(ics: string | undefined): void {
+  if (!ics || !ics.includes("BEGIN:VEVENT")) return;
+  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "stars-observation-plan.ics";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 const DEFAULT_VIEW: View = {
   azimuthDeg: 180, // facing south
@@ -338,12 +354,17 @@ export function App() {
   const [timeMs, setTimeMs] = useState<number>(() => URL_SESSION?.timeMs ?? Date.now());
   const [sunAltitudeDeg, setSunAltitudeDeg] = useState<number | null>(null);
   const [planning, setPlanning] = useState<PlanningTable | null>(null);
+  const [recommended, setRecommended] = useState<RecommendedPlan | null>(null);
   const lastTickRef = useRef<number>(performance.now());
   // V-56 search/GoTo: the WASM `StarView` is owned by `StarCanvas`. We hold
   // a stable proxy in a ref so the search panel can call into it without
   // forcing a re-render of the renderer on every search-state change.
   const searchApiRef = useRef<
-    | { lookup: (query: string, limit: number) => string; goto: (id: string) => string }
+    | {
+        lookup: (query: string, limit: number) => string;
+        goto: (id: string) => string;
+        planningIcal: () => string;
+      }
     | null
   >(null);
 
@@ -455,6 +476,7 @@ export function App() {
         }
         onSunAltitude={setSunAltitudeDeg}
         onPlanning={setPlanning}
+        onRecommended={setRecommended}
         onSearchReady={(api) => {
           searchApiRef.current = api;
         }}
@@ -486,6 +508,8 @@ export function App() {
         projection={projection}
         eyepiece={eyepiece}
         planning={planning}
+        recommended={recommended}
+        onExportIcal={() => exportIcal(searchApiRef.current?.planningIcal())}
         onSetObserver={setObserver}
         onSetTime={setTimeMs}
         onSetOverlays={setOverlays}

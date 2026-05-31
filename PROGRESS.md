@@ -34,6 +34,10 @@ Shipped:
   `V-39-Atlas`).
 - **Library track** — IAU-grade time / precession / nutation / aberration /
   proper motion (`L-01`–`L-05`), planning helpers (`L-07`, `L-08`),
+  observation-planning polish — Krisciunas-Schaefer 1991 Moon-impact /
+  visibility scoring, recommended-object ranking, favourites, and
+  iCalendar export across the astronomy crate, CLI, and web hosts
+  (`L-09`),
   schema-versioned JSON sessions (`L-10`, `L-11`), deterministic scene
   presets (`L-12`), notebook reproducibility examples (`L-13`), catalog
   backend scaling scaffold (`L-16`), validation / demo gallery (`L-27`),
@@ -53,8 +57,7 @@ Still open:
   (`L-17`), identifier preservation (`L-18`),
   variable-star light curves (`L-20`), Python bindings (`L-21`),
   headless server (`L-22`), guided education (`L-23`), accessibility
-  (`L-24`), public demo gallery (`L-14`), observation-planning polish
-  (`L-09`).
+  (`L-24`), public demo gallery (`L-14`).
 
 Earlier entries below refer to the legacy Phase 1 / 1' / 2 / 3 / 4 grouping
 that shipped before the V / L split landed; the IDs in those entries
@@ -1881,6 +1884,50 @@ Primary implementation areas:
 
 - `crates/astronomy/src/planning.rs`
 - `apps/web/frontend`
+
+### Observation-planning polish (`L-09`)
+
+Layered Moon-impact and visibility scoring, recommended-object ranking,
+favourites, and calendar export on top of the existing rise/transit/set and
+twilight helpers.
+
+- **Moon-impact (Krisciunas & Schaefer 1991, PASP 103, 1033).**
+  `moon_sky_brightness_nanolamberts` implements their Eq. 15 from the
+  Moon illuminance outside the atmosphere (Eq. 20), the Rayleigh + Mie
+  scattering function `f(ρ)` (Eqs. 16–18), and the relative airmass
+  `X(Z) = (1 − 0.96 sin²Z)^(−1/2)` (Eq. 3). `nanolamberts_from_v_mag` /
+  `v_mag_from_nanolamberts` carry their Eq. 27 V-band surface-brightness
+  conversion. `moon_impact` returns the ΔV degradation of a target's sky
+  against a Moon-free baseline.
+- **Visibility score.** `visibility_score` samples the evening window at
+  5-minute steps and composes a unit-range product of an altitude term
+  (saturating at 60°), a dark-window term (observable hours below the
+  −12° Sun-depression threshold, saturating at 4 h), and a Moon-clarity
+  term `10^(−0.4·ΔV)`. `rank_targets` / `planning_targets_from_bodies`
+  produce "tonight's recommended objects"; `icalendar_for_targets`
+  serialises each target's observable dark window to an RFC 5545 `.ics`
+  document.
+- **Site coupling.** The Moon-free baseline reads the `V-39`
+  light-pollution zenith brightness
+  (`LightPollution::zenith_sqm_mag_per_arcsec2`), so the scores reflect
+  the configured Bortle / SQM site.
+- **Hosts.** CLI `--plan-json` / `--plan-ical <path>` export the ranked
+  plan and calendar without rendering. The web `StarView` bridge gains
+  `planning_recommended_json` / `planning_ical`; the Planning settings
+  card shows the ranking with score, max altitude, and Moon ΔV, a
+  localStorage-backed favourites star toggle, and an "Export .ics"
+  download button.
+- **Tests.** Pinned K-S reference ΔV ≈ 2.99 mag/arcsec² for the
+  ROADMAP case (target 20°, Moon 60°, 90 % illuminated), phase /
+  separation monotonicity, V-mag ↔ nanolambert round-trip, unit-range
+  and descending-rank scoring, iCalendar well-formedness, and a pinned
+  JD → UTC timestamp.
+
+Primary implementation areas:
+
+- `crates/astronomy/src/planning.rs`
+- `apps/cli/src/main.rs`
+- `apps/web/src/lib.rs`, `apps/web/frontend`
 
 ## Reproducibility and platform baseline (legacy `Phase 3`)
 

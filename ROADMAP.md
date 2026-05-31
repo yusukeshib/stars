@@ -147,8 +147,10 @@ web host controls. With both shipped, every `V-51`–`V-56` item is now done.
 
 The Library track is at "amateur-grade is shipped" — the remaining items are
 DE440-class ephemerides (`L-06`), large catalog ingest (`L-17`), bindings and
-headless server (`L-21`, `L-22`), planning polish (`L-09`), variable-star
-library (`L-20`), and education / accessibility (`L-23`, `L-24`).
+headless server (`L-21`, `L-22`), variable-star library (`L-20`), and
+education / accessibility (`L-23`, `L-24`). Observation-planning polish
+(`L-09`) has now shipped: Moon-impact and visibility scoring, recommended-
+object ranking, favourites, and iCalendar export.
 
 A row is `✅ done` only when the model named in its references is implemented,
 documented, tested, and wired into all relevant hosts.
@@ -232,7 +234,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-06` | DE440 / VSOP87 ephemeris upgrade | ⬜ |
 | `L-07` | Rise / transit / set tables | ✅ |
 | `L-08` | Twilight indicators | ✅ |
-| `L-09` | Observation-planning polish | ⬜ |
+| `L-09` | Observation-planning polish | ✅ |
 | `L-10` | Session URL encoding | ✅ |
 | `L-11` | Sharable JSON sessions | ✅ |
 | `L-12` | Scene presets | ✅ |
@@ -2801,7 +2803,7 @@ twilight times.
 
 ---
 
-### `L-09` Observation-planning polish — ⬜
+### `L-09` Observation-planning polish — ✅ done
 
 **Item.** Favourites, "tonight's recommended objects", Moon-impact score,
 visibility score, and optional calendar export, all derived from
@@ -2812,21 +2814,40 @@ moonlight sky-brightness contribution at the target's altitude. Visibility
 score combines altitude-vs-time, twilight bands, and (when present from
 `V-39`) site sky brightness.
 
-**Implementation scope.**
-- `crates/astronomy/src/planning.rs`: scoring helpers with pinned
-  reference values.
-- `apps/web/frontend`: planning panel UX (favourites, recommended-list,
-  scores).
-- iCalendar export of the chosen targets and the local visibility
-  windows.
+**Implementation.**
+- `crates/astronomy/src/planning.rs`: the Krisciunas-Schaefer 1991
+  moonlight model — `moon_sky_brightness_nanolamberts` (Eq. 15) built
+  from the illuminance (Eq. 20), scattering function `f(ρ)`
+  (Eqs. 16–18), and relative airmass (Eq. 3), with
+  `nanolamberts_from_v_mag` / `v_mag_from_nanolamberts` (Eq. 27) for the
+  V-band surface-brightness conversion. `moon_impact` evaluates ΔV for a
+  fixed-equatorial target against a Moon-free baseline; `visibility_score`
+  composes an altitude × dark-window × Moon-clarity score over the
+  evening window; `rank_targets` / `planning_targets_from_bodies` build
+  "tonight's recommended objects"; `icalendar_for_targets` emits an
+  RFC 5545 `.ics` document of each target's observable dark window.
+  The Moon-free baseline reads the `V-39` light-pollution zenith
+  brightness (`LightPollution::zenith_sqm_mag_per_arcsec2`).
+- `apps/cli`: `--plan-json` prints the ranked plan + per-target scores to
+  stdout and `--plan-ical <path>` writes the calendar; both exit before
+  the GPU render path.
+- `apps/web` + `apps/web/frontend`: the `StarView` bridge gains
+  `planning_recommended_json` and `planning_ical`; the Planning settings
+  card shows the recommended ranking with visibility score, max altitude,
+  and Moon ΔV, a localStorage-backed favourites star toggle, and an
+  "Export .ics" download button.
 
 **Tests / validation.**
 - Unit: Moon-impact for a target at 20° altitude with the Moon at 60°
-  altitude and 90% illumination matches the K-S-derived ΔV.
-- Visual: planning panel screenshots for two reference dates.
+  altitude and 90% illumination matches the K-S-derived ΔV ≈ 2.99
+  mag/arcsec² (`moon_impact_matches_krisciunas_schaefer_reference`).
+- Unit: monotonicity in lunar phase / Moon-target separation, V-mag ↔
+  nanolambert round-trip + pinned 21.6 mag anchor, visibility scores in
+  `[0, 1]` and descending after ranking, iCalendar well-formedness, and a
+  pinned JD → UTC timestamp.
 
-**Hosts wired.** Web (primary UX); CLI exports JSON of the same
-calculations.
+**Hosts wired.** Web (primary UX); CLI exports JSON and iCalendar of the
+same calculations.
 
 ---
 

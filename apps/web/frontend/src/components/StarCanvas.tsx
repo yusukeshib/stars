@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { StarView } from "stars-web";
-import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type EyepieceConfig, type Observer, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type SatellitesConfig, type ScintillationConfig, type View } from "../observer";
+import { eyepieceTrueFieldDeg, toRad, type AtmosphereConfig, type EyepieceConfig, type Observer, type OverlayConfig, type PlanetsConfig, type PlanningTable, type ProjectionConfig, type RecommendedPlan, type SatellitesConfig, type ScintillationConfig, type View } from "../observer";
 
 type Props = {
   observer: Observer;
@@ -18,12 +18,15 @@ type Props = {
   onWheel: (zoomFactor: number) => void;
   onSunAltitude: (sunAltitudeDeg: number) => void;
   onPlanning: (planning: PlanningTable) => void;
+  /// L-09: notified with tonight's recommended-object ranking + scores.
+  onRecommended: (plan: RecommendedPlan) => void;
   /// Notified once the WASM `StarView` is ready, with stable closures that
-  /// proxy V-56 search and GoTo. Closures stay valid for the canvas
-  /// lifetime, so parent state can keep them in a ref.
+  /// proxy V-56 search and GoTo and L-09 iCalendar export. Closures stay
+  /// valid for the canvas lifetime, so parent state can keep them in a ref.
   onSearchReady?: (api: {
     lookup: (query: string, limit: number) => string;
     goto: (id: string) => string;
+    planningIcal: () => string;
   }) => void;
 };
 
@@ -54,6 +57,7 @@ export function StarCanvas({
   onWheel,
   onSunAltitude,
   onPlanning,
+  onRecommended,
   onSearchReady,
 }: Props) {
   const onSearchReadyRef = useRef(onSearchReady);
@@ -175,6 +179,7 @@ export function StarCanvas({
       onSearchReadyRef.current?.({
         lookup: (query: string, limit: number) => handle.lookup_object(query, limit),
         goto: (id: string) => handle.goto_object(id),
+        planningIcal: () => handle.planning_ical(),
       });
       // Apply whatever overlay state is current right now -- could be the
       // initial defaults or something the user toggled during the wasm boot.
@@ -239,6 +244,7 @@ export function StarCanvas({
           lastPlanningPublish = now;
           try {
             onPlanning(JSON.parse(handle.planning_table_json()) as PlanningTable);
+            onRecommended(JSON.parse(handle.planning_recommended_json()) as RecommendedPlan);
           } catch {
             // Keep rendering if a development wasm build returns malformed planning data.
           }
