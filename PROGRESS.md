@@ -2969,6 +2969,66 @@ info panel).
 
 ---
 
+## `V-55` Artificial satellites (TLE / SGP4) — shipped (CLI + viewer + web)
+
+The renderer now has a TLE-driven artificial-satellite layer propagated by
+SGP4, with Earth-shadow visibility and amateur-grade apparent magnitudes —
+so the ISS, a Starlink train member, bright LEO satellites, and the
+geostationary belt can be drawn for any observer / instant.
+
+1. **What changed.** A new `astronomy::satellites` module parses two-line
+   element sets and propagates them with the vendored pure-Rust `sgp4`
+   crate (the Vallado et al. 2006 / Spacetrack Report #3 reference model),
+   yielding a geocentric **TEME** position. The topocentric reduction
+   reuses the existing WGS84 `observer_equatorial_position_km` helper —
+   the TEME position and the observer position share the one GMST-defined
+   inertial frame, so `r_sat − r_obs` gives right ascension / declination,
+   and local sidereal time gives altitude / azimuth and slant range. A
+   conical umbra / penumbra Earth-shadow test (built from the apparent
+   Sun direction and distance, sharing the umbra-cone idea with `V-36`)
+   gives the sunlit fraction, and the McCants / QuickSat "standard
+   magnitude" convention (intrinsic V at 1000 km and half phase, scaled by
+   range and a Lambertian phase fraction) gives apparent magnitude. The
+   renderer carries a `SatelliteLayer` on `Camera` and packs a per-frame
+   satellite uniform block; `shaders/skyglow.wgsl` draws each sunlit,
+   above-horizon satellite as a neutral reflected-sunlight point sprite,
+   or a great-circle motion streak when the exposure field is positive.
+
+2. **Why it counts as complete.** SGP4 propagation matches the
+   AIAA 2006-6753 reference vector to sub-km; the shadow and magnitude
+   models are pinned; the layer renders visibly (a dark-sky ISS pass) and
+   is wired into every host with a session + manifest-pinned data trail.
+
+3. **Where it lives.** `crates/astronomy/src/satellites.rs`;
+   `crates/renderer/src/camera.rs` (`SatelliteLayer`, `satellite_uniforms`,
+   uniform block) + `crates/renderer/src/shaders/skyglow.wgsl`
+   (`satellite_radiance` / `satellite_streak_mask`);
+   `crates/common/src/satellites.rs` (curated TLE embed) +
+   `crates/common/data/satellites/curated_tle.txt`; session schema v6 in
+   `crates/common/src/session.rs`; the `iss-pass` preset in
+   `crates/common/src/presets.rs`; `apps/cli`, `apps/viewer`, and
+   `apps/web` (`StarView.set_satellites` + frontend settings control).
+
+4. **Tests / validation.** `astronomy::satellites` unit tests pin the SGP4
+   position against the AIAA 2006-6753 catalog-88888 reference vector
+   (sub-km), the conical umbra/penumbra classification, the
+   standard-magnitude reference geometry, the TLE parser, and a finite
+   ISS apparent state; the renderer pins the satellite uniform packing for
+   a visible ISS pass; `common` pins the curated snapshot parse; and
+   `make manifest-check` pins the TLE snapshot bytes.
+
+5. **Hosts wired.** CLI (`--satellites`, `--satellite-exposure-seconds`),
+   viewer (`L` toggle + same flags), web (`set_satellites` WASM binding +
+   settings toggle / exposure with session + URL round-trip). Live TLE
+   fetch is opt-in only; the default render path uses the curated,
+   manifest-pinned snapshot so renders stay deterministic.
+
+References (also pinned in ROADMAP `V-55`): Vallado, D. A. et al. 2006,
+AIAA 2006-6753; Hoots, F. R. & Roehrich, R. L. 1980, Spacetrack Report #3;
+CelesTrak (celestrak.org); McCants (mmccants.org).
+
+---
+
 ## Documentation progress
 
 The documentation has been split into purpose-specific files:

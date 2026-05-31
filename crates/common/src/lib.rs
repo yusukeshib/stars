@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 mod goto;
 mod presets;
 mod render;
+mod satellites;
 mod session;
 pub use goto::{resolve_goto_id, resolve_goto_query, GotoTarget};
 pub use presets::*;
@@ -27,6 +28,10 @@ use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation,
     LightPollution, OverlayConfig, OverlayKind, Scintillation, SkyProjection, SkyViewpoint,
     StarInstance,
+};
+pub use satellites::{
+    curated_satellite_layer, curated_satellite_tles, CURATED_TLE_TEXT,
+    DEFAULT_SATELLITE_EXPOSURE_SECONDS,
 };
 pub use session::*;
 

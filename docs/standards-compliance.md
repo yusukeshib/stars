@@ -51,6 +51,7 @@ approximations, and deliberate non-goals.
 | Diffuse night sky | Analytic Leinert-inspired ISL/DGL/zodiacal/airglow/dust model | Visual dark-sky Milky Way and background; not radiometric survey data | `crates/astronomy/src/skyglow.rs` |
 | Star colour | B-V to temperature to blackbody/CIE/sRGB approximation | Catalogue-colour visualization from limited HYG inputs | `crates/catalog/src/color.rs` |
 | Human vision | CIE/Ferwerda/Reinhard/Pattanaik-inspired mesopic, scotopic, and tonemap helpers | Display-facing perception model, not metrology | `crates/astronomy/src/photometry.rs`, renderer shaders |
+| Artificial satellites (`V-55`) | SGP4 (Vallado 2006 / Spacetrack #3, via the `sgp4` crate) on a curated manifest-pinned TLE snapshot; TEME treated as the J2000-ish equatorial frame; conical umbra/penumbra Earth-shadow visibility; McCants/QuickSat standard-magnitude photometry | Naked-eye satellite rendering and visibility, validated against the AIAA 2006-6753 reference vector (sub-km). TLEs are epoch-local (drift over weeks); not operational tracking, and apparent magnitudes use a hand-curated intrinsic-magnitude table, not a cross-section/BRDF model. | `crates/astronomy/src/satellites.rs`, `crates/renderer/src/shaders/skyglow.wgsl` |
 
 ## SOFA routines deliberately not implemented as complete routines
 
@@ -81,6 +82,18 @@ approximations, and deliberate non-goals.
   display calibration.
 - No constellation point-in-region classifier; boundaries are rendered for
   education, not used as authoritative catalog labels.
+- **No live TLE fetch in the default render path (`V-55`).** The artificial-
+  satellite layer ships a curated, manifest-pinned CelesTrak snapshot
+  (`crates/common/data/satellites/curated_tle.txt`, manifest id
+  `celestrak-tle-curated-2026-05`) embedded at build time, so default renders
+  are deterministic and reproducible offline. Fetching fresh TLEs from
+  CelesTrak / Space-Track at runtime is an opt-in host responsibility, not a
+  default: it makes renders non-reproducible (positions depend on the
+  download time), depends on network availability, and the elements are only
+  accurate near their epoch. The shipped snapshot is for demonstration /
+  validation of the SGP4 pipeline, not for operational conjunction or
+  re-entry tracking. Regenerate the snapshot with
+  `scripts/fetch-satellite-tle.sh` and refresh the manifest hash.
 
 ## How to cite standards-dependent output
 

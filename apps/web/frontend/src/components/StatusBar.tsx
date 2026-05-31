@@ -17,6 +17,7 @@ import {
   type Observer,
   type OverlayConfig,
   type PlanetsConfig,
+  type SatellitesConfig,
   type PlanningTable,
   type ProjectionConfig,
   type SkyProjection,
@@ -41,6 +42,7 @@ type Props = {
   overlays: OverlayConfig;
   atmosphere: AtmosphereConfig;
   planets: PlanetsConfig;
+  satellites: SatellitesConfig;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   planning: PlanningTable | null;
@@ -49,6 +51,7 @@ type Props = {
   onSetOverlays: (next: OverlayConfig) => void;
   onSetAtmosphere: (next: AtmosphereConfig) => void;
   onSetPlanets: (next: PlanetsConfig) => void;
+  onSetSatellites: (next: SatellitesConfig) => void;
   onSetProjection: (next: ProjectionConfig) => void;
   onSetEyepiece: (next: EyepieceConfig) => void;
   onSetView: (next: View) => void;
@@ -142,6 +145,7 @@ export function StatusBar({
   overlays,
   atmosphere,
   planets,
+  satellites,
   projection,
   eyepiece,
   planning,
@@ -150,6 +154,7 @@ export function StatusBar({
   onSetOverlays,
   onSetAtmosphere,
   onSetPlanets,
+  onSetSatellites,
   onSetProjection,
   onSetEyepiece,
   onSetView,
@@ -437,12 +442,14 @@ export function StatusBar({
             overlays={overlays}
             atmosphere={atmosphere}
             planets={planets}
+            satellites={satellites}
             projection={projection}
             eyepiece={eyepiece}
             planning={planning}
             onSetOverlays={onSetOverlays}
             onSetAtmosphere={onSetAtmosphere}
             onSetPlanets={onSetPlanets}
+            onSetSatellites={onSetSatellites}
             onSetProjection={onSetProjection}
             onSetEyepiece={onSetEyepiece}
             onCopySessionJson={onCopySessionJson}
@@ -615,12 +622,14 @@ type SettingsPanelProps = Pick<
   | "overlays"
   | "atmosphere"
   | "planets"
+  | "satellites"
   | "projection"
   | "eyepiece"
   | "planning"
   | "onSetOverlays"
   | "onSetAtmosphere"
   | "onSetPlanets"
+  | "onSetSatellites"
   | "onSetProjection"
   | "onSetEyepiece"
   | "onCopySessionJson"
@@ -634,12 +643,14 @@ function SettingsPanel({
   overlays,
   atmosphere,
   planets,
+  satellites,
   projection,
   eyepiece,
   planning,
   onSetOverlays,
   onSetAtmosphere,
   onSetPlanets,
+  onSetSatellites,
   onSetProjection,
   onSetEyepiece,
   onCopySessionJson,
@@ -684,6 +695,33 @@ function SettingsPanel({
                 style={{ accentColor: "#8fb1ff" }}
               />
               {t("card.view.mercuryToNeptune")}
+            </label>
+            <label style={checkboxRowStyle}>
+              <input
+                type="checkbox"
+                checked={satellites.enabled}
+                onChange={(e) => onSetSatellites({ ...satellites, enabled: e.target.checked })}
+                style={{ accentColor: "#8fb1ff" }}
+              />
+              {t("card.view.satellites")}
+            </label>
+            <label style={checkboxRowStyle}>
+              <span>{t("card.view.satelliteExposure")}</span>
+              <input
+                type="number"
+                min={0}
+                max={600}
+                step={1}
+                value={satellites.exposureSeconds}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  onSetSatellites({
+                    ...satellites,
+                    exposureSeconds: Number.isFinite(v) && v >= 0 ? v : 0,
+                  });
+                }}
+                style={{ width: "5rem", marginLeft: "0.5rem" }}
+              />
             </label>
           </SettingCard>
 

@@ -12,6 +12,7 @@ declare module "stars-web" {
       deepSkyMagnitudeLimit: number,
     ): void;
     set_planets_enabled(enabled: boolean): void;
+    set_satellites(enabled: boolean, exposureSeconds: number): void;
     set_eyepiece_simulation(
       enabled: boolean,
       apertureMm: number,

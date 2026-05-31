@@ -13,8 +13,10 @@ use anyhow::{bail, Context, Result};
 use astronomy::TimeScales;
 use renderer::{
     Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView,
-    OverlayConfig, OverlayKind, Scintillation, SkyProjection, SkyViewpoint,
+    OverlayConfig, OverlayKind, SatelliteLayer, Scintillation, SkyProjection, SkyViewpoint,
 };
+
+use crate::curated_satellite_layer;
 use serde::{Deserialize, Serialize};
 
 use crate::{AtmospherePresetArg, OverlayArg, ProjectionArg, ViewpointArg};
@@ -26,7 +28,10 @@ use crate::{AtmospherePresetArg, OverlayArg, ProjectionArg, ViewpointArg};
 /// to the session. The field is required in v5+; older sessions on the
 /// previous schema do not migrate forward automatically — the host must
 /// re-run `--write-session` to bump.
-pub const SESSION_SCHEMA_VERSION: u32 = 5;
+/// v6: V-55 adds the `satellites` block (artificial-satellite TLE / SGP4
+/// layer). The field is required in v6+; older sessions must re-run
+/// `--write-session` to bump.
+pub const SESSION_SCHEMA_VERSION: u32 = 6;
 
 /// Complete scene/session file. Unknown future fields are ignored by serde, but
 /// the top-level schema version must match before a host uses the data.
@@ -45,6 +50,8 @@ pub struct StarSession {
     pub light_pollution: SessionLightPollution,
     pub scintillation: SessionScintillation,
     pub planets: SessionPlanets,
+    #[serde(default)]
+    pub satellites: SessionSatellites,
     pub eyepiece: SessionEyepiece,
     pub catalog: CatalogSnapshot,
     pub corrections: CorrectionSnapshot,
@@ -63,12 +70,53 @@ pub struct SessionScene {
     pub light_pollution: LightPollution,
     pub scintillation: Scintillation,
     pub planets_enabled: bool,
+    /// V-55 artificial-satellite layer (engine-ready, with curated TLEs loaded
+    /// when enabled).
+    pub satellites: SatelliteLayer,
     pub projection: SkyProjection,
     pub viewpoint: SkyViewpoint,
     pub external_viewpoint: ExternalViewpoint,
     pub eyepiece: EyepieceSimulation,
     pub catalog: CatalogSnapshot,
     pub corrections: CorrectionSnapshot,
+}
+
+/// Serialized V-55 satellite-layer settings. The TLE set itself is *not*
+/// stored in the session — when `enabled`, the host loads the curated,
+/// manifest-pinned snapshot so sessions stay small and deterministic.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSatellites {
+    pub enabled: bool,
+    /// Frame-integration exposure (seconds). 0 renders point sprites; a
+    /// positive value renders motion streaks.
+    pub exposure_seconds: f32,
+}
+
+impl Default for SessionSatellites {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            exposure_seconds: 0.0,
+        }
+    }
+}
+
+impl From<&SatelliteLayer> for SessionSatellites {
+    fn from(layer: &SatelliteLayer) -> Self {
+        Self {
+            enabled: layer.enabled,
+            exposure_seconds: layer.exposure_seconds,
+        }
+    }
+}
+
+impl SessionSatellites {
+    /// Build an engine-ready [`SatelliteLayer`], loading the curated TLE
+    /// snapshot when enabled.
+    pub fn to_satellite_layer(self) -> SatelliteLayer {
+        curated_satellite_layer(self.enabled, self.exposure_seconds.max(0.0))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -393,6 +441,7 @@ impl StarSession {
             planets: SessionPlanets {
                 enabled: scene.planets_enabled,
             },
+            satellites: SessionSatellites::from(&scene.satellites),
             eyepiece: SessionEyepiece::from(scene.eyepiece),
             catalog: scene.catalog.clone(),
             corrections: scene.corrections,
@@ -474,6 +523,7 @@ impl StarSession {
             light_pollution: self.light_pollution.to_light_pollution()?,
             scintillation: self.scintillation.to_scintillation()?,
             planets_enabled: self.planets.enabled,
+            satellites: self.satellites.to_satellite_layer(),
             projection: self.projection.projection.into(),
             viewpoint: self.projection.viewpoint.into(),
             external_viewpoint: self.projection.external.to_external_viewpoint()?,
@@ -833,6 +883,7 @@ mod tests {
             light_pollution: LightPollution::default(),
             scintillation: Scintillation::default(),
             planets_enabled: true,
+            satellites: curated_satellite_layer(true, 1.5),
             projection: SkyProjection::Perspective,
             viewpoint: SkyViewpoint::Earth,
             external_viewpoint: ExternalViewpoint::GALACTIC_NORTH,
@@ -847,7 +898,7 @@ mod tests {
         let scene = sample_scene();
         let session = StarSession::from_scene("0.1.0", "test", &scene);
         let json = serde_json::to_string(&session).unwrap();
-        assert!(json.contains("\"schemaVersion\":5"));
+        assert!(json.contains("\"schemaVersion\":6"));
         assert!(json.contains("\"cardinal-labels\""));
         assert!(json.contains("\"scintillation\""));
         let parsed: StarSession = serde_json::from_str(&json).unwrap();

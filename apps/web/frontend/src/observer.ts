@@ -77,6 +77,13 @@ export type PlanetsConfig = {
   enabled: boolean;
 };
 
+/** V-55 artificial-satellite layer (TLE / SGP4) state. */
+export type SatellitesConfig = {
+  enabled: boolean;
+  /** Frame-integration exposure (seconds). 0 = point sprites, >0 = streaks. */
+  exposureSeconds: number;
+};
+
 /** Per-frame atmospheric scintillation state (V-24). */
 export type ScintillationConfig = {
   enabled: boolean;
@@ -139,6 +146,11 @@ export const DEFAULT_PROJECTION_CONFIG: ProjectionConfig = {
 
 export const DEFAULT_PLANETS_CONFIG: PlanetsConfig = {
   enabled: true,
+};
+
+export const DEFAULT_SATELLITES_CONFIG: SatellitesConfig = {
+  enabled: false,
+  exposureSeconds: 0,
 };
 
 export const DEFAULT_EYEPIECE_CONFIG: EyepieceConfig = {

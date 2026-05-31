@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "appVersion": "0.1.0",
   "createdBy": "stars-cli",
   "observer": {
@@ -69,6 +69,10 @@
   },
   "planets": {
     "enabled": false
+  },
+  "satellites": {
+    "enabled": false,
+    "exposureSeconds": 0.0
   },
   "eyepiece": {
     "enabled": false,

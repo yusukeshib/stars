@@ -6,16 +6,17 @@ use anyhow::Result;
 use astronomy::Observer;
 use clap::Parser;
 use renderer::{
-    Atmosphere, Camera, LightPollution, LocalView, OverlayConfig, Renderer, StarInstance,
-    DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    Atmosphere, Camera, LightPollution, LocalView, OverlayConfig, Renderer, SatelliteLayer,
+    StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
-    atmosphere_from_args, eyepiece_from_args, light_pollution_from_args, load_session,
-    load_star_instances_from_file, overlay_config_from_args, parse_time_to_time_scales,
-    resolve_goto_query, scene_from_preset, scene_preset_infos, scintillation_from_args,
-    viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg, CatalogSnapshot,
-    CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides, LightPollutionOverrides,
-    OverlayArg, ProjectionArg, ScenePresetArg, ScintillationOverrides, SessionScene, ViewpointArg,
+    atmosphere_from_args, curated_satellite_layer, eyepiece_from_args, light_pollution_from_args,
+    load_session, load_star_instances_from_file, overlay_config_from_args,
+    parse_time_to_time_scales, resolve_goto_query, scene_from_preset, scene_preset_infos,
+    scintillation_from_args, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
+    CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides,
+    LightPollutionOverrides, OverlayArg, ProjectionArg, ScenePresetArg, ScintillationOverrides,
+    SessionScene, ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -193,6 +194,15 @@ struct Args {
     #[arg(long)]
     no_planets: bool,
 
+    /// Enable the V-55 artificial-satellite layer (TLE / SGP4) using the
+    /// curated CelesTrak snapshot. Toggle at runtime with the `L` key.
+    #[arg(long)]
+    satellites: bool,
+
+    /// Frame-integration exposure (seconds) for satellite motion streaks.
+    #[arg(long, default_value_t = 0.0)]
+    satellite_exposure_seconds: f32,
+
     /// Enable telescope eyepiece simulation. Supplying any telescope/eyepiece
     /// parameter also enables this mode.
     #[arg(long)]
@@ -314,6 +324,7 @@ fn main() -> Result<()> {
             light_pollution,
             scintillation,
             planets_enabled: !args.no_planets,
+            satellites: curated_satellite_layer(args.satellites, args.satellite_exposure_seconds),
             projection: args.projection.into(),
             viewpoint,
             external_viewpoint,
@@ -364,6 +375,7 @@ fn main() -> Result<()> {
         scene.scintillation,
         scene.light_pollution,
         scene.planets_enabled,
+        scene.satellites.clone(),
         scene.projection,
         scene.viewpoint,
         scene.external_viewpoint,
@@ -426,6 +438,9 @@ struct App {
     scintillation: renderer::Scintillation,
     light_pollution: LightPollution,
     planets_enabled: bool,
+    /// V-55 artificial-satellite layer (curated TLEs are always loaded so the
+    /// `L` key can toggle the layer on/off at runtime).
+    satellites: SatelliteLayer,
     projection: renderer::SkyProjection,
     viewpoint: renderer::SkyViewpoint,
     external_viewpoint: renderer::ExternalViewpoint,
@@ -505,12 +520,19 @@ impl App {
         scintillation: renderer::Scintillation,
         light_pollution: LightPollution,
         planets_enabled: bool,
+        satellites: SatelliteLayer,
         projection: renderer::SkyProjection,
         viewpoint: renderer::SkyViewpoint,
         external_viewpoint: renderer::ExternalViewpoint,
         eyepiece: renderer::EyepieceSimulation,
         pending_goto: Option<String>,
     ) -> Self {
+        // Always keep the curated TLEs available so the runtime toggle works
+        // even when the layer starts disabled.
+        let satellites = SatelliteLayer {
+            tles: curated_satellite_layer(true, satellites.exposure_seconds).tles,
+            ..satellites
+        };
         Self {
             gpu: None,
             window: None,
@@ -524,6 +546,7 @@ impl App {
             scintillation,
             light_pollution,
             planets_enabled,
+            satellites,
             projection,
             viewpoint,
             external_viewpoint,
@@ -643,6 +666,7 @@ impl ApplicationHandler for App {
         camera.scintillation = self.scintillation;
         camera.light_pollution = self.light_pollution;
         camera.planets_enabled = self.planets_enabled;
+        camera.satellites = self.satellites.clone();
         camera.projection = self.projection;
         camera.viewpoint = self.viewpoint;
         camera.external_viewpoint = self.external_viewpoint;
@@ -791,6 +815,18 @@ impl ApplicationHandler for App {
                         Some(KeyCode::Slash) => {
                             self.search_mode = true;
                             self.search_query.clear();
+                        }
+                        Some(KeyCode::KeyL) => {
+                            // V-55: toggle the artificial-satellite layer.
+                            gpu.camera.satellites.enabled = !gpu.camera.satellites.enabled;
+                            log::info!(
+                                "satellites {}",
+                                if gpu.camera.satellites.enabled {
+                                    "on"
+                                } else {
+                                    "off"
+                                }
+                            );
                         }
                         Some(KeyCode::Space) => self.sky_clock.toggle_pause(),
                         Some(KeyCode::Digit1) => self.sky_clock.set_speed(CLOCK_SPEED_REALTIME),

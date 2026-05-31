@@ -16,8 +16,16 @@ use catalog::search::{
 use renderer::{
     build_star_instance, Atmosphere, AtmospherePreset, Camera, ExternalViewpoint,
     EyepieceSimulation, LightPollution, LocalView, OverlayConfig, OverlayKind, Renderer,
-    Scintillation, SkyProjection, SkyViewpoint, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    SatelliteLayer, Scintillation, SkyProjection, SkyViewpoint, StarInstance,
+    DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
+
+/// V-55 curated, manifest-pinned artificial-satellite TLE snapshot, embedded
+/// at build time (provenance: `data/manifest.toml` id
+/// `celestrak-tle-curated-2026-05`). Shared verbatim with the native hosts'
+/// `crates/common/data/satellites/curated_tle.txt`.
+const CURATED_TLE_TEXT: &str =
+    include_str!("../../../crates/common/data/satellites/curated_tle.txt");
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -519,6 +527,22 @@ impl StarView {
 
     pub fn set_planets_enabled(&self, enabled: bool) {
         self.state.borrow_mut().camera.planets_enabled = enabled;
+    }
+
+    /// V-55: enable / disable the artificial-satellite layer (TLE / SGP4) from
+    /// the curated CelesTrak snapshot. `exposure_seconds > 0` renders motion
+    /// streaks; `0` renders point sprites.
+    pub fn set_satellites(&self, enabled: bool, exposure_seconds: f32) {
+        let tles = if enabled {
+            astronomy::parse_tle_set(CURATED_TLE_TEXT)
+        } else {
+            Vec::new()
+        };
+        self.state.borrow_mut().camera.satellites = SatelliteLayer {
+            enabled,
+            exposure_seconds: exposure_seconds.max(0.0),
+            tles,
+        };
     }
 
     /// Update the telescope eyepiece simulator. When enabled, the renderer

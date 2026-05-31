@@ -1,0 +1,33 @@
+# Curated artificial-satellite TLE snapshot for the V-55 satellite layer.
+#
+# Source: CelesTrak GP service (https://celestrak.org/NORAD/elements/gp.php),
+#   retrieved 2026-05-31 (TLE epoch ~ 2026-05-30, day-of-year 150).
+# License: CelesTrak redistributes US Space Force public-domain orbital data;
+#   see DATA_SOURCES.md and data/manifest.toml (id "celestrak-tle-curated-2026-05").
+#
+# Format: standard 3-line TLE blocks (name, line 1, line 2). Lines beginning
+# with '#' and blank lines are ignored by the parser. This snapshot is the
+# *deterministic* default the renderer ships with; live TLE fetch is an opt-in
+# host flag (see docs/standards-compliance.md) and is never used in the default
+# render path so deterministic gallery renders stay reproducible.
+#
+# Regenerate with: scripts/fetch-satellite-tle.sh
+#
+# Per-satellite intrinsic ("standard") visual magnitudes (the V magnitude at
+# 1000 km range and 50% illuminated phase, McCants/QuickSat convention) live in
+# crates/astronomy/src/satellites.rs CURATED_STD_MAGNITUDES, cited there.
+ISS (ZARYA)
+1 25544U 98067A   26150.51748228  .00011776  00000+0  21767-3 0  9998
+2 25544  51.6337  27.5746 0007245 114.7080 245.4664 15.49496548569014
+HST
+1 20580U 90037B   26150.53921556  .00006911  00000+0  21966-3 0  9997
+2 20580  28.4720 201.1735 0001465 321.2424  38.8067 15.30552064785860
+NOAA 20 (JPSS-1)
+1 43013U 17073A   26150.80263875  .00000078  00000+0  58117-4 0  9992
+2 43013  98.7769  90.4202 0000831  36.8152 323.3081 14.19508193442004
+STARLINK-1008
+1 44714U 19074B   26150.30936191  .00080211  00000+0  15180-2 0  9995
+2 44714  53.1513 154.1788 0003034  54.2939 305.8351 15.47704531361446
+GOES 16
+1 41866U 16071A   26150.69619869 -.00000079  00000+0  00000+0 0  9993
+2 41866   0.2967  85.7063 0000803 308.3962   0.0918  1.00271513 34928
