@@ -3271,7 +3271,10 @@ generated from HYG); and manifest rows for all four artifacts.
   `tycho2` | `gaia-dr3`) via `stars_host_common::load_star_instances_for_backend`
   + `catalog_snapshot_for`; the choice is recorded in `catalog.backend` and
   re-selected on session replay. The web build keeps the embedded HYG subset
-  (design-doc WASM-subset policy); LOD streaming is the native / optional path.
+  (design-doc WASM-subset policy). The `catalog::lod` streaming layer is
+  implemented and tested as a library capability (no host consumes it yet;
+  the renderer per-tile upload is the one tracked follow-up, design-doc plan
+  item 5).
 - **Bench / scaling coverage** — `lod_cull_does_not_blow_up_with_catalog_size`
   pins the per-frame loaded faint-tile count for a fixed FOV bounded (O(FOV),
   not O(catalogue)) as the index grows ~9×; a wall-clock criterion micro-bench
@@ -3307,8 +3310,10 @@ documented zero-points.
 **Hosts wired.** CLI / viewer `--catalog-backend` selects HYG / Hipparcos /
 Tycho-2 / Gaia DR3 and records it in the session; web keeps the embedded HYG
 subset (WASM-subset policy in `docs/catalog-backend-design.md`). The Gaia LOD
-content-addressable streaming layer (`catalog::lod`) is the native / optional
-path for the full source.
+content-addressable streaming layer (`catalog::lod`) is implemented and tested
+as a library capability for the full source; consuming it from a host (the
+renderer per-tile upload) remains the one tracked follow-up (design-doc plan
+item 5).
 
 ---
 
