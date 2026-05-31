@@ -18,7 +18,7 @@ pub use camera::{
     SkyProjection, SkyViewpoint, MAX_COMETS, MAX_METEORS, MAX_SATELLITES,
 };
 pub use colourspace::OutputColourSpace;
-pub use overlay::{OverlayConfig, OverlayKind, DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT};
+pub use overlay::{OverlayConfig, OverlayKind, OverlayPalette, DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT};
 pub use renderer::Renderer;
 pub use vertex::{
     build_star_instance, magnitude_to_render_params, pick_nearest, RenderParams, StarInstance,

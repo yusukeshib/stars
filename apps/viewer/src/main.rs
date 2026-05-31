@@ -18,7 +18,8 @@ use stars_host_common::{
     scintillation_from_args, viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg,
     AuroraSeasonArg, CatalogSnapshot, CorrectionSnapshot, ExternalViewpointOverrides,
     EyepieceOverrides, LightPollutionOverrides, OpticalDesign, OutputColourspaceArg, OverlayArg,
-    ProjectionArg, ScenePresetArg, ScintillationOverrides, SessionScene, Tour, ViewpointArg,
+    OverlayPaletteArg, ProjectionArg, ScenePresetArg, ScintillationOverrides, SessionScene, Tour,
+    ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -159,6 +160,12 @@ struct Args {
     /// `--overlays`.
     #[arg(long, default_value_t = renderer::DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT)]
     deep_sky_magnitude_limit: f32,
+
+    /// Colour palette for the structural overlay lines (L-24 accessibility):
+    /// `default`, `colorblind-safe` (Okabe-Ito / Wong 2011), or
+    /// `high-contrast`. Cycle live with the `P` key.
+    #[arg(long, value_enum, default_value_t = OverlayPaletteArg::Default)]
+    overlay_palette: OverlayPaletteArg,
 
     /// Disable atmospheric extinction and sunlit sky scattering.
     #[arg(long)]
@@ -355,6 +362,7 @@ fn main() -> Result<()> {
             args.grid_step_deg,
             args.overlay_opacity,
             args.deep_sky_magnitude_limit,
+            args.overlay_palette,
         );
         let atmosphere = atmosphere_from_args(
             args.no_extinction,
@@ -1127,6 +1135,24 @@ impl ApplicationHandler for App {
                                 }
                             );
                         }
+                        Some(KeyCode::KeyP) => {
+                            // L-24: cycle the CVD-safe overlay palette
+                            // (default → colorblind-safe → high-contrast).
+                            let next = match self.overlays.palette {
+                                renderer::OverlayPalette::Default => {
+                                    renderer::OverlayPalette::ColorblindSafe
+                                }
+                                renderer::OverlayPalette::ColorblindSafe => {
+                                    renderer::OverlayPalette::HighContrast
+                                }
+                                renderer::OverlayPalette::HighContrast => {
+                                    renderer::OverlayPalette::Default
+                                }
+                            };
+                            self.overlays.palette = next;
+                            gpu.renderer.set_overlays(&gpu.device, &self.overlays);
+                            log::info!("overlay palette: {}", next.as_kebab_str());
+                        }
                         Some(KeyCode::Space) => self.sky_clock.toggle_pause(),
                         Some(KeyCode::Digit1) => self.sky_clock.set_speed(CLOCK_SPEED_REALTIME),
                         Some(KeyCode::Digit2) => {
@@ -1186,6 +1212,9 @@ impl ApplicationHandler for App {
                                         opacity: 0.6,
                                         deep_sky_magnitude_limit: OverlayConfig::default()
                                             .deep_sky_magnitude_limit,
+                                        // Keep the user's chosen accessibility
+                                        // palette across tour steps.
+                                        palette: self.overlays.palette,
                                     },
                                 );
                                 let caption = format!(

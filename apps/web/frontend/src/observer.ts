@@ -39,11 +39,17 @@ export const DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT = 7;
 export const MIN_DEEP_SKY_MAGNITUDE_LIMIT = -5;
 export const MAX_DEEP_SKY_MAGNITUDE_LIMIT = 99;
 
+/// L-24 accessibility overlay palettes. Kept in sync with `OverlayPalette`
+/// in `crates/renderer/src/overlay.rs` and the CLI `--overlay-palette` flag.
+export const OVERLAY_PALETTES = ["default", "colorblind-safe", "high-contrast"] as const;
+export type OverlayPalette = (typeof OVERLAY_PALETTES)[number];
+
 export type OverlayConfig = {
   layers: OverlayLayer[];
   gridStepDeg: number;
   opacity: number;
   deepSkyMagnitudeLimit: number;
+  palette: OverlayPalette;
 };
 
 export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
@@ -51,6 +57,7 @@ export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
   gridStepDeg: 15,
   opacity: 0.6,
   deepSkyMagnitudeLimit: DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT,
+  palette: "default",
 };
 
 export const ATMOSPHERE_PRESETS = ["clear-rural", "hazy-urban", "high-altitude"] as const;
@@ -317,6 +324,9 @@ export const isSkyViewpoint = (s: unknown): s is SkyViewpoint =>
 
 export const isOverlayLayer = (s: unknown): s is OverlayLayer =>
   typeof s === "string" && (OVERLAY_LAYERS as readonly string[]).includes(s);
+
+export const isOverlayPalette = (s: unknown): s is OverlayPalette =>
+  typeof s === "string" && (OVERLAY_PALETTES as readonly string[]).includes(s);
 
 export const MIN_ALTITUDE_DEG = -89.5;
 export const MAX_ALTITUDE_DEG = 89.5;

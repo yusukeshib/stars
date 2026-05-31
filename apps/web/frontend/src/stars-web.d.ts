@@ -10,6 +10,7 @@ declare module "stars-web" {
       gridStepDeg: number,
       opacity: number,
       deepSkyMagnitudeLimit: number,
+      palette: string,
     ): void;
     set_planets_enabled(enabled: boolean): void;
     set_satellites(enabled: boolean, exposureSeconds: number): void;

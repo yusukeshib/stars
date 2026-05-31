@@ -19,7 +19,8 @@ use catalog::search::{
 use renderer::{
     build_star_instance, pick_nearest, Atmosphere, AtmospherePreset, AuroraLayer, Camera,
     CometLayer, ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView, MeteorLayer,
-    OpticalDesign, OutputColourSpace, OverlayConfig, OverlayKind, Renderer, SatelliteLayer,
+    OpticalDesign, OutputColourSpace, OverlayConfig, OverlayKind, OverlayPalette, Renderer,
+    SatelliteLayer,
     Scintillation, SkyProjection, SkyViewpoint, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 
@@ -705,12 +706,17 @@ impl StarView {
     /// outside the renderer's accepted range are silently coerced. Non-finite
     /// values would propagate into the geometry generators and produce NaN
     /// vertices, so we replace them with the renderer's defaults here.
+    ///
+    /// `palette` is the L-24 accessibility overlay palette: `"default"`,
+    /// `"colorblind-safe"` (Okabe-Ito / Wong 2011), or `"high-contrast"`.
+    /// Unknown values fall back to `"default"` so older JS callers are safe.
     pub fn set_overlays(
         &self,
         layers: Vec<String>,
         grid_step_deg: f64,
         opacity: f32,
         deep_sky_magnitude_limit: f32,
+        palette: String,
     ) {
         let kinds: Vec<OverlayKind> = layers
             .iter()
@@ -728,6 +734,7 @@ impl StarView {
             15.0
         };
         let opacity = if opacity.is_finite() { opacity } else { 0.6 };
+        let palette = OverlayPalette::from_kebab_str(&palette).unwrap_or(OverlayPalette::Default);
         // The renderer clamps and NaN-replaces internally; we just forward.
         let s = &mut *self.state.borrow_mut();
         s.renderer.set_overlays(
@@ -737,6 +744,7 @@ impl StarView {
                 grid_step_deg,
                 opacity,
                 deep_sky_magnitude_limit,
+                palette,
             },
         );
     }

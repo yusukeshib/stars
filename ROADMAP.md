@@ -150,12 +150,12 @@ manifest-pinned curated TLE snapshot, an `iss-pass` preset, and CLI / viewer /
 web host controls. With both shipped, every `V-51`–`V-56` item is now done.
 
 The Library track is at "amateur-grade is shipped" — every numbered item has
-now landed; the only open work is three documented follow-ups inside
+now landed; the only open work is two documented follow-ups inside
 otherwise-shipped items: DE440-class ephemerides (`L-06`: the SPK Chebyshev
-kernel reader has shipped; kernel ingest + Horizons cross-check remain),
+kernel reader has shipped; kernel ingest + Horizons cross-check remain) and
 large-catalog LOD streaming + host wiring (`L-17`: the Hipparcos / Tycho-2 /
-Gaia DR3 CSV backends + cross-match shipped), and the `L-24` colour-vision
-overlay palette + audio cues. The variable-star library (`L-20`) is now
+Gaia DR3 CSV backends + cross-match shipped). The variable-star library
+(`L-20`) is now
 complete: light-curve elements + phase-folded model + web panel + CLI Δm, and
 the renderer whole-scene brightness override (rendered Mira / Algol sprites
 dim and brighten with the session epoch, opt-in). Identifier preservation
@@ -167,10 +167,12 @@ identity. The Python bindings (`L-21`) and headless server (`L-22`) have both
 shipped. Observation-planning polish (`L-09`) has now shipped: Moon-impact and
 visibility scoring, recommended-object ranking, favourites, and iCalendar
 export. Guided education mode (`L-23`) has now shipped: a deterministic,
-cross-host "first night" guided tour. The `L-24` accessibility pass has
-shipped its web WCAG core (keyboard, ARIA, focus management, visible focus),
-with the renderer CVD-safe overlay palette and audio cues tracked as
-follow-ups.
+cross-host "first night" guided tour. The `L-24` accessibility pass is now
+complete: the web WCAG core (keyboard, ARIA, focus management, visible focus),
+the renderer CVD-safe overlay palette (Okabe-Ito / Wong 2011, selectable in
+CLI / viewer / web), and the opt-in Az/Alt Web Audio cue have all shipped;
+only the automated axe-core CI gate remains, blocked on a frontend JS test
+harness.
 
 A row is `✅ done` only when the model named in its references is implemented,
 documented, tested, and wired into all relevant hosts.
@@ -269,7 +271,7 @@ Legend: ✅ done, ⏳ next, ⬜ open.
 | `L-21` | Python bindings (PyO3) | ✅ |
 | `L-22` | Headless server mode | ✅ |
 | `L-23` | Guided education mode | ✅ |
-| `L-24` | Accessibility pass (web WCAG core ✅; CVD overlay palette + audio cues ⬜) | ◑ |
+| `L-24` | Accessibility pass (web WCAG core + CVD overlay palette + Az/Alt audio cues ✅; automated axe-core CI gate ⬜) | ✅ |
 | `L-25` | `CITATION.cff` + Zenodo DOI | ✅ |
 | `L-26` | Standards-compliance document | ✅ |
 | `L-27` | Validation / demo gallery | ✅ |
@@ -3575,13 +3577,13 @@ as follow-ups; the schema is additive so neither needs a session-schema bump.
 
 ---
 
-### `L-24` Accessibility pass — ◑ (web WCAG core shipped)
+### `L-24` Accessibility pass — ✅ done (automated axe-core CI gate deferred)
 
 **Item.** ARIA labels on every web control, keyboard navigation,
 high-contrast / colour-vision-safe modes, screen-reader summaries, and
 optional Az / Alt audio cues.
 
-**Status.** The web-frontend WCAG 2.2 AA core has shipped: a visible
+**Status.** The web-frontend WCAG 2.2 AA core shipped first: a visible
 focus ring on every control (`:focus-visible`), full keyboard operability
 of the star canvas (arrow-key pan, `+`/`-` zoom, focusable with an
 `aria-label`), modal focus management on the location / time / settings
@@ -3589,10 +3591,30 @@ popovers (focus moves in on open, Tab is trapped, focus returns to the
 trigger on close), the WAI-ARIA tabs pattern on the settings panel
 (roving `tabindex`, arrow / Home / End keys, `tabpanel` wiring), a
 `prefers-reduced-motion` guard, and `prefers-contrast` / `forced-colors`
-focus reinforcement. Still open and tracked as follow-ups: the renderer
-CVD-safe overlay palette via `OverlayConfig` (needs a renderer/shader +
-schema change), the optional Web Audio Az/Alt cues, and an automated
-axe-core score gate (no JS test harness in the frontend yet).
+focus reinforcement.
+
+The two deferred follow-ups have now landed:
+- **CVD-safe overlay palette** via `OverlayConfig::palette`
+  ([`OverlayPalette::{Default, ColorblindSafe, HighContrast}`]). The
+  structural overlay *line* layers (horizon, grids, ecliptic, celestial /
+  galactic equator, meridian, constellation lines / boundaries, deep-sky
+  markers) are recoloured onto the Okabe-Ito / Wong 2011 colour-universal
+  qualitative palette; `Default` is byte-identical to the historical
+  colours (no shader change — the overlay colours are CPU-side uniforms).
+  Selectable in the CLI (`--overlay-palette`), the viewer (`P` key), and
+  the web settings panel; persisted as an optional `palette` session field
+  (no schema bump — `Default` is skipped, so committed presets are
+  byte-identical). Object-identity *labels* (Sun / Moon / planet / Titan
+  hues) keep their legibility-tuned colours: they are disambiguated by
+  glyph shape, not hue, so they are not the dichromacy failure mode the
+  palette targets.
+- **Az / Alt audio cues**: an opt-in Web Audio sonifier (`audio.ts`) maps
+  the view-centre azimuth to stereo pan and altitude to pitch, so keyboard
+  panning is audible for low-vision users. Default off; a device
+  preference (not in the session schema), with an ARIA-labelled toggle.
+
+**Still open (tracked):** an automated axe-core / Lighthouse score gate in
+CI, which waits on the frontend gaining a JS test harness.
 
 **Scientific basis.** WCAG 2.2 AA. Colour-blind safe palettes following
 Wong 2011, Nature Methods 8, 441.
@@ -3604,18 +3626,25 @@ Wong 2011, Nature Methods 8, 441.
 
 **Implementation scope.**
 - `apps/web/frontend`: ARIA on every gear / menu / slider; full keyboard
-  flow.
-- Renderer: high-contrast / CVD-safe overlay palette selectable via
-  `OverlayConfig`.
-- Optional audio: Web Audio API tones for Az / Alt indicator (off by
-  default).
+  flow (shipped). Az/Alt Web Audio cue in `audio.ts` (shipped, opt-in).
+- Renderer: CVD-safe overlay palette selectable via
+  `OverlayConfig::palette` (`OverlayPalette`), CPU-side colours so no
+  shader change; `Default` byte-identical (shipped).
+- CLI `--overlay-palette`, viewer `P` key, web settings dropdown (shipped).
 
 **Tests / validation.**
-- Lighthouse / axe-core scores ≥ documented threshold.
-- Manual screen-reader pass on the gear menu and tour mode.
+- `renderer::overlay`: `default_palette_is_byte_identical` pins every line
+  layer's default colour; `cvd_palettes_remap_and_stay_distinct` and the
+  kebab round-trip cover the CVD variants. `stars-host-common`:
+  `overlay_palette_arg_round_trips`. Frontend `tsc --noEmit` over the new
+  palette dropdown + audio toggle.
+- Manual screen-reader + keyboard pass on the gear menu, tour mode, and the
+  audio cue while panning.
+- Deferred: automated Lighthouse / axe-core score gate (needs a frontend JS
+  test harness).
 
-**Hosts wired.** Web first; CLI / viewer follow with platform-native
-accessibility hooks.
+**Hosts wired.** CVD palette: CLI / viewer / web. Audio cue: web (the
+low-vision sonification target); CLI / viewer are non-visual already.
 
 ---
 

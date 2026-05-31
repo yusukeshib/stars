@@ -724,6 +724,7 @@ fn external_scene(
             grid_step_deg: 15.0,
             opacity: 0.0,
             deep_sky_magnitude_limit: OverlayConfig::default().deep_sky_magnitude_limit,
+            palette: OverlayConfig::default().palette,
         },
         atmosphere_preset: AtmospherePreset::ClearRural,
         atmosphere: Atmosphere::OFF,
@@ -758,6 +759,7 @@ pub(crate) fn overlay_config(layers: &[OverlayKind]) -> OverlayConfig {
         grid_step_deg: 15.0,
         opacity: 0.6,
         deep_sky_magnitude_limit: OverlayConfig::default().deep_sky_magnitude_limit,
+        palette: OverlayConfig::default().palette,
     }
 }
 

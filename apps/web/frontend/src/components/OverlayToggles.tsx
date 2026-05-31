@@ -4,8 +4,10 @@ import {
   MAX_DEEP_SKY_MAGNITUDE_LIMIT,
   MIN_DEEP_SKY_MAGNITUDE_LIMIT,
   OVERLAY_LAYERS,
+  OVERLAY_PALETTES,
   type OverlayConfig,
   type OverlayLayer,
+  type OverlayPalette,
 } from "../observer";
 import { useT } from "../i18n";
 
@@ -155,6 +157,30 @@ export function OverlayToggles({ config, onChange }: Props) {
           />
         </div>
       </section>
+
+      <section style={groupStyle}>
+        <div style={groupLegendStyle}>{t("overlayGroup.palette.title")}</div>
+        <p style={groupDescriptionStyle}>{t("overlayGroup.palette.description")}</p>
+        <div style={{ marginTop: 4, display: "grid", gap: 6 }}>
+          <label htmlFor="overlay-palette" style={paletteLabelStyle}>
+            {t("overlayGroup.palette.label")}
+          </label>
+          <select
+            id="overlay-palette"
+            value={config.palette}
+            onChange={(e) =>
+              onChange({ ...config, palette: e.target.value as OverlayPalette })
+            }
+            style={paletteSelectStyle}
+          >
+            {OVERLAY_PALETTES.map((p) => (
+              <option key={p} value={p}>
+                {t(`overlayPalette.${p}`)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </section>
     </div>
   );
 }
@@ -174,6 +200,21 @@ const groupDescriptionStyle: CSSProperties = {
   margin: "0 0 7px",
   opacity: 0.55,
   fontSize: 11,
+};
+
+const paletteLabelStyle: CSSProperties = {
+  fontSize: 12,
+  opacity: 0.8,
+};
+
+const paletteSelectStyle: CSSProperties = {
+  width: "100%",
+  background: "#0c1424",
+  color: "#e8eefc",
+  border: "1px solid #2a3650",
+  borderRadius: 6,
+  padding: "6px 8px",
+  fontSize: 13,
 };
 
 function Slider({

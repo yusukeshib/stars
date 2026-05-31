@@ -58,6 +58,8 @@ type Props = {
   /// L-20 host-side toggle: render known variables at their session-time
   /// magnitude. Not part of the session schema.
   variableMagnitudes: boolean;
+  /// L-24 accessibility toggle: sonify the view-centre az/alt. Device pref.
+  audioCues: boolean;
   projection: ProjectionConfig;
   eyepiece: EyepieceConfig;
   outputColourspace: OutputColourspace;
@@ -74,6 +76,7 @@ type Props = {
   onSetAurora: (next: AuroraConfig) => void;
   onSetComets: (next: CometsConfig) => void;
   onSetVariableMagnitudes: (enabled: boolean) => void;
+  onSetAudioCues: (enabled: boolean) => void;
   onSetProjection: (next: ProjectionConfig) => void;
   onSetEyepiece: (next: EyepieceConfig) => void;
   onSetOutputColourspace: (next: OutputColourspace) => void;
@@ -173,6 +176,7 @@ export function StatusBar({
   aurora,
   comets,
   variableMagnitudes,
+  audioCues,
   projection,
   eyepiece,
   outputColourspace,
@@ -189,6 +193,7 @@ export function StatusBar({
   onSetAurora,
   onSetComets,
   onSetVariableMagnitudes,
+  onSetAudioCues,
   onSetProjection,
   onSetEyepiece,
   onSetOutputColourspace,
@@ -482,6 +487,7 @@ export function StatusBar({
             aurora={aurora}
             comets={comets}
             variableMagnitudes={variableMagnitudes}
+            audioCues={audioCues}
             projection={projection}
             eyepiece={eyepiece}
             outputColourspace={outputColourspace}
@@ -496,6 +502,7 @@ export function StatusBar({
             onSetAurora={onSetAurora}
             onSetComets={onSetComets}
             onSetVariableMagnitudes={onSetVariableMagnitudes}
+            onSetAudioCues={onSetAudioCues}
             onSetProjection={onSetProjection}
             onSetEyepiece={onSetEyepiece}
             onSetOutputColourspace={onSetOutputColourspace}
@@ -721,6 +728,7 @@ type SettingsPanelProps = Pick<
   | "aurora"
   | "comets"
   | "variableMagnitudes"
+  | "audioCues"
   | "projection"
   | "eyepiece"
   | "outputColourspace"
@@ -735,6 +743,7 @@ type SettingsPanelProps = Pick<
   | "onSetAurora"
   | "onSetComets"
   | "onSetVariableMagnitudes"
+  | "onSetAudioCues"
   | "onSetProjection"
   | "onSetEyepiece"
   | "onSetOutputColourspace"
@@ -754,6 +763,7 @@ function SettingsPanel({
   aurora,
   comets,
   variableMagnitudes,
+  audioCues,
   projection,
   eyepiece,
   outputColourspace,
@@ -768,6 +778,7 @@ function SettingsPanel({
   onSetAurora,
   onSetComets,
   onSetVariableMagnitudes,
+  onSetAudioCues,
   onSetProjection,
   onSetEyepiece,
   onSetOutputColourspace,
@@ -997,6 +1008,16 @@ function SettingsPanel({
                 style={{ accentColor: "#8fb1ff" }}
               />
               {t("card.view.variableMagnitudes")}
+            </label>
+            <label style={checkboxRowStyle}>
+              <input
+                type="checkbox"
+                checked={audioCues}
+                onChange={(e) => onSetAudioCues(e.target.checked)}
+                aria-label={t("card.a11y.audioCues.aria")}
+                style={{ accentColor: "#8fb1ff" }}
+              />
+              {t("card.a11y.audioCues")}
             </label>
           </SettingCard>
 

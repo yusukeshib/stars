@@ -4,6 +4,7 @@ import {
   isAtmospherePreset,
   isOutputColourspace,
   isOverlayLayer,
+  isOverlayPalette,
   isSkyProjection,
   isSkyViewpoint,
   sanitizedOpticalDesign,
@@ -170,7 +171,10 @@ function isOverlayConfig(v: unknown): v is OverlayConfig {
     o.layers.every(isOverlayLayer) &&
     inRange(o.gridStepDeg, GRID_STEP_RANGE) &&
     inRange(o.opacity, OPACITY_RANGE) &&
-    inRange(o.deepSkyMagnitudeLimit, DEEP_SKY_MAG_RANGE)
+    inRange(o.deepSkyMagnitudeLimit, DEEP_SKY_MAG_RANGE) &&
+    // L-24: palette is optional for backward compatibility with configs
+    // persisted before it existed; normalizeWebOverlays fills the default.
+    (o.palette === undefined || isOverlayPalette(o.palette))
   );
 }
 

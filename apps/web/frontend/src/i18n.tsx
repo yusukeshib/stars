@@ -222,6 +222,16 @@ const en: Dictionary = {
   "overlayGroup.deepSkyDensity.description":
     "Hide Messier objects fainter than this V magnitude. 7.0 keeps the dark-sky naked-eye showpieces (M31, M42, M44, M45, M13); raise to 99 to show everything.",
   "overlayGroup.deepSkyMagnitudeLimit": "Magnitude limit",
+  "overlayGroup.palette.title": "Accessibility palette",
+  "overlayGroup.palette.description":
+    "Recolour the overlay lines with a colour-vision-deficiency-safe set (Okabe-Ito / Wong 2011). Does not change star or label colours.",
+  "overlayGroup.palette.label": "Overlay colours",
+  "overlayPalette.default": "Default",
+  "overlayPalette.colorblind-safe": "Colour-blind safe (Okabe-Ito)",
+  "overlayPalette.high-contrast": "High contrast",
+  "card.a11y.audioCues": "Audio cue: view direction",
+  "card.a11y.audioCues.aria":
+    "Sonify the view-centre direction: stereo pan follows azimuth, pitch follows altitude.",
   "overlayGroup.constellations.title": "Constellations",
   "overlayGroup.constellations.description":
     "Western stick figures and IAU boundary outlines.",
@@ -455,6 +465,16 @@ const ja: Dictionary = {
   "overlayGroup.deepSkyDensity.description":
     "この V 等級より暗いメシエ天体を隠します。7.0 は暗い空で胉眼に見える見頃し (M31, M42, M44, M45, M13) を残します。99 まで上げるとすべて表示されます。",
   "overlayGroup.deepSkyMagnitudeLimit": "等級の上限",
+  "overlayGroup.palette.title": "アクセシビリティ配色",
+  "overlayGroup.palette.description":
+    "オーバーレイ線を色覚多様性に配慮した配色（Okabe-Ito / Wong 2011）に置き換えます。星やラベルの色は変わりません。",
+  "overlayGroup.palette.label": "オーバーレイの配色",
+  "overlayPalette.default": "デフォルト",
+  "overlayPalette.colorblind-safe": "色覚対応（Okabe-Ito）",
+  "overlayPalette.high-contrast": "ハイコントラスト",
+  "card.a11y.audioCues": "音声キュー：視線方向",
+  "card.a11y.audioCues.aria":
+    "視野中心の方向を音にします。ステレオの定位が方位角、音の高さが高度に対応します。",
   "overlayGroup.constellations.title": "星座",
   "overlayGroup.constellations.description": "西洋星座の線と IAU 境界を表示します。",
   "overlayGroup.labels.title": "ラベル",

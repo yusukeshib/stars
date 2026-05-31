@@ -169,6 +169,57 @@ impl OverlayKind {
     }
 }
 
+/// Colour palette for the structural overlay lines (`L-24` accessibility).
+///
+/// The overlay layers encode their *category* (horizon, grids, ecliptic,
+/// celestial equator, constellation lines/boundaries, …) by hue. For viewers
+/// with a colour-vision deficiency, several of the default hues collapse to
+/// near-identical greys (e.g. the reddish celestial equator vs. the greenish
+/// deep-sky markers under deuteranopia), so the layers become hard to tell
+/// apart. Selecting a CVD-safe palette remaps every line layer onto a
+/// qualitative colour set chosen to stay distinguishable across the common
+/// dichromacies.
+///
+/// [`OverlayPalette::Default`] returns the historical per-layer colours
+/// **byte-for-byte**, so the default render is unchanged.
+///
+/// Reference: Wong, B. 2011, *Nature Methods* 8, 441 ("Points of view: Color
+/// blindness"), whose eight-colour qualitative set is the Okabe & Ito (2008)
+/// colour-universal design palette.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum OverlayPalette {
+    /// Historical hue-per-layer colours. Byte-identical to pre-`L-24` output.
+    #[default]
+    Default,
+    /// Okabe-Ito / Wong 2011 colour-universal qualitative palette: distinct
+    /// for deuteranopia, protanopia, and tritanopia.
+    ColorblindSafe,
+    /// Maximum-luminance high-contrast set (low-vision / `forced-colors`).
+    HighContrast,
+}
+
+impl OverlayPalette {
+    /// Stable kebab-case identifier shared by the CLI flag, the session JSON,
+    /// and the WASM/JS binding.
+    pub fn as_kebab_str(self) -> &'static str {
+        match self {
+            OverlayPalette::Default => "default",
+            OverlayPalette::ColorblindSafe => "colorblind-safe",
+            OverlayPalette::HighContrast => "high-contrast",
+        }
+    }
+
+    /// Inverse of [`OverlayPalette::as_kebab_str`]; `None` for unknown names.
+    pub fn from_kebab_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "default" => OverlayPalette::Default,
+            "colorblind-safe" => OverlayPalette::ColorblindSafe,
+            "high-contrast" => OverlayPalette::HighContrast,
+            _ => return None,
+        })
+    }
+}
+
 /// Overlay configuration. Hosts construct this and call [`Renderer::set_overlays`].
 #[derive(Debug, Clone)]
 pub struct OverlayConfig {
@@ -183,6 +234,9 @@ pub struct OverlayConfig {
     /// to `[-5.0, 99.0]` at apply time so a tampered WASM caller cannot
     /// disable the layer with NaN or crash the builder.
     pub deep_sky_magnitude_limit: f32,
+    /// `L-24` colour-vision palette for the structural overlay lines.
+    /// [`OverlayPalette::Default`] keeps the historical colours unchanged.
+    pub palette: OverlayPalette,
 }
 
 impl Default for OverlayConfig {
@@ -196,6 +250,7 @@ impl Default for OverlayConfig {
             grid_step_deg: 15.0,
             opacity: 0.6,
             deep_sky_magnitude_limit: DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT,
+            palette: OverlayPalette::Default,
         }
     }
 }
@@ -365,7 +420,7 @@ impl OverlayRenderer {
                 continue;
             }
             seen.push(*kind);
-            let (frame, verts, rgb) = build_layer(*kind, step_deg, deep_sky_limit);
+            let (frame, verts, rgb) = build_layer(*kind, step_deg, deep_sky_limit, config.palette);
             if verts.is_empty() {
                 continue;
             }
@@ -463,69 +518,120 @@ fn build_layer(
     kind: OverlayKind,
     grid_step_deg: f64,
     deep_sky_magnitude_limit: f32,
+    palette: OverlayPalette,
 ) -> (OverlayFrame, Vec<OverlayVertex>, [f32; 3]) {
-    match kind {
+    let (frame, verts) = match kind {
         OverlayKind::Horizon => (
             OverlayFrame::Horizontal,
             closed_circle_local_at_alt(0.0, 256),
-            [0.40, 0.75, 1.00],
         ),
-        OverlayKind::Cardinals => (
-            OverlayFrame::Horizontal,
-            cardinal_marks(),
-            [1.00, 0.85, 0.40],
-        ),
-        OverlayKind::AltAzGrid => (
-            OverlayFrame::Horizontal,
-            alt_az_grid(grid_step_deg),
-            [0.30, 0.55, 0.85],
-        ),
-        OverlayKind::EquatorialGrid => (
-            OverlayFrame::Equatorial,
-            equatorial_grid(grid_step_deg),
-            [0.85, 0.40, 0.50],
-        ),
-        OverlayKind::CelestialEquator => (
-            OverlayFrame::Equatorial,
-            closed_circle_eq_at_dec(0.0, 256),
-            [0.95, 0.30, 0.35],
-        ),
-        OverlayKind::Ecliptic => (
-            OverlayFrame::Equatorial,
-            ecliptic_circle(256),
-            [1.00, 0.75, 0.25],
-        ),
-        OverlayKind::Meridian => (
-            OverlayFrame::Horizontal,
-            meridian_local(256),
-            [0.65, 0.65, 0.70],
-        ),
-        OverlayKind::GalacticEquator => (
-            OverlayFrame::Equatorial,
-            galactic_equator_circle(256),
-            [0.55, 0.80, 1.00],
-        ),
+        OverlayKind::Cardinals => (OverlayFrame::Horizontal, cardinal_marks()),
+        OverlayKind::AltAzGrid => (OverlayFrame::Horizontal, alt_az_grid(grid_step_deg)),
+        OverlayKind::EquatorialGrid => (OverlayFrame::Equatorial, equatorial_grid(grid_step_deg)),
+        OverlayKind::CelestialEquator => {
+            (OverlayFrame::Equatorial, closed_circle_eq_at_dec(0.0, 256))
+        }
+        OverlayKind::Ecliptic => (OverlayFrame::Equatorial, ecliptic_circle(256)),
+        OverlayKind::Meridian => (OverlayFrame::Horizontal, meridian_local(256)),
+        OverlayKind::GalacticEquator => (OverlayFrame::Equatorial, galactic_equator_circle(256)),
         OverlayKind::ConstellationLines => (
             OverlayFrame::Equatorial,
             segments_to_vertices(&constellation_lines()),
-            [0.35, 0.65, 1.00],
         ),
         OverlayKind::ConstellationBoundaries => (
             OverlayFrame::Equatorial,
             segments_to_vertices(&constellation_boundaries()),
-            [0.45, 0.45, 0.55],
         ),
         OverlayKind::DeepSkyObjects => (
             OverlayFrame::Equatorial,
             deep_sky_markers(deep_sky_magnitude_limit),
-            [0.45, 0.85, 0.55],
         ),
         OverlayKind::DeepSkyLabels
         | OverlayKind::StarLabels
         | OverlayKind::PlanetLabels
         | OverlayKind::ConstellationLabels
         | OverlayKind::CardinalLabels
-        | OverlayKind::DegreeLabels => (OverlayFrame::Horizontal, Vec::new(), [1.0, 1.0, 1.0]),
+        | OverlayKind::DegreeLabels => (OverlayFrame::Horizontal, Vec::new()),
+    };
+    (frame, verts, palette_color(kind, palette))
+}
+
+/// Per-layer line colour for the selected [`OverlayPalette`].
+///
+/// The [`OverlayPalette::Default`] arm returns the historical colours
+/// **byte-for-byte** (pinned by `default_palette_is_byte_identical`), so the
+/// default render is unchanged. The CVD-safe arms remap each structural layer
+/// onto the Okabe-Ito / Wong 2011 colour-universal qualitative palette
+/// (`high-contrast` lifts the same hues toward maximum luminance), keeping
+/// neighbouring layers distinguishable under deuteranopia / protanopia /
+/// tritanopia. Label-only kinds never reach the line pass; their `[1,1,1]`
+/// return value is inert (the text pass owns label colour).
+pub(crate) fn palette_color(kind: OverlayKind, palette: OverlayPalette) -> [f32; 3] {
+    // Okabe-Ito colour-universal palette (Wong 2011), sRGB 0..1. Black is
+    // omitted because the sky background is black.
+    const OI_ORANGE: [f32; 3] = [0.902, 0.624, 0.000]; // (230,159,0)
+    const OI_SKYBLUE: [f32; 3] = [0.337, 0.706, 0.914]; // (86,180,233)
+    const OI_GREEN: [f32; 3] = [0.000, 0.620, 0.451]; // (0,158,115)
+    const OI_YELLOW: [f32; 3] = [0.941, 0.894, 0.259]; // (240,228,66)
+    const OI_BLUE: [f32; 3] = [0.000, 0.447, 0.698]; // (0,114,178)
+    const OI_VERMILLION: [f32; 3] = [0.835, 0.369, 0.000]; // (213,94,0)
+    const OI_PURPLE: [f32; 3] = [0.800, 0.475, 0.655]; // (204,121,167)
+
+    /// Push an Okabe-Ito hue toward maximum luminance for the high-contrast
+    /// variant while keeping its hue identity (mix 55% toward white).
+    fn lift(c: [f32; 3]) -> [f32; 3] {
+        [
+            c[0] + (1.0 - c[0]) * 0.55,
+            c[1] + (1.0 - c[1]) * 0.55,
+            c[2] + (1.0 - c[2]) * 0.55,
+        ]
+    }
+
+    match palette {
+        OverlayPalette::Default => match kind {
+            OverlayKind::Horizon => [0.40, 0.75, 1.00],
+            OverlayKind::Cardinals => [1.00, 0.85, 0.40],
+            OverlayKind::AltAzGrid => [0.30, 0.55, 0.85],
+            OverlayKind::EquatorialGrid => [0.85, 0.40, 0.50],
+            OverlayKind::CelestialEquator => [0.95, 0.30, 0.35],
+            OverlayKind::Ecliptic => [1.00, 0.75, 0.25],
+            OverlayKind::Meridian => [0.65, 0.65, 0.70],
+            OverlayKind::GalacticEquator => [0.55, 0.80, 1.00],
+            OverlayKind::ConstellationLines => [0.35, 0.65, 1.00],
+            OverlayKind::ConstellationBoundaries => [0.45, 0.45, 0.55],
+            OverlayKind::DeepSkyObjects => [0.45, 0.85, 0.55],
+            _ => [1.0, 1.0, 1.0],
+        },
+        OverlayPalette::ColorblindSafe => match kind {
+            // Horizontal-frame references: sky blue family.
+            OverlayKind::Horizon => OI_SKYBLUE,
+            OverlayKind::Cardinals => OI_ORANGE,
+            OverlayKind::AltAzGrid => OI_BLUE,
+            OverlayKind::Meridian => OI_PURPLE,
+            // Equatorial-frame references: warm/green families, kept apart.
+            OverlayKind::EquatorialGrid => OI_VERMILLION,
+            OverlayKind::CelestialEquator => OI_YELLOW,
+            OverlayKind::Ecliptic => OI_ORANGE,
+            OverlayKind::GalacticEquator => OI_SKYBLUE,
+            OverlayKind::ConstellationLines => OI_BLUE,
+            OverlayKind::ConstellationBoundaries => OI_PURPLE,
+            OverlayKind::DeepSkyObjects => OI_GREEN,
+            _ => [1.0, 1.0, 1.0],
+        },
+        OverlayPalette::HighContrast => match kind {
+            OverlayKind::Horizon => lift(OI_SKYBLUE),
+            OverlayKind::Cardinals => lift(OI_ORANGE),
+            OverlayKind::AltAzGrid => lift(OI_BLUE),
+            OverlayKind::Meridian => lift(OI_PURPLE),
+            OverlayKind::EquatorialGrid => lift(OI_VERMILLION),
+            OverlayKind::CelestialEquator => lift(OI_YELLOW),
+            OverlayKind::Ecliptic => lift(OI_ORANGE),
+            OverlayKind::GalacticEquator => lift(OI_SKYBLUE),
+            OverlayKind::ConstellationLines => lift(OI_BLUE),
+            OverlayKind::ConstellationBoundaries => lift(OI_PURPLE),
+            OverlayKind::DeepSkyObjects => lift(OI_GREEN),
+            _ => [1.0, 1.0, 1.0],
+        },
     }
 }
 
@@ -1009,6 +1115,82 @@ mod tests {
             );
         }
         assert_eq!(OverlayKind::from_kebab_str("unknown"), None);
+    }
+
+    /// Every structural line layer must keep its historical colour under the
+    /// default palette so a default render is byte-identical to pre-`L-24`.
+    #[test]
+    fn default_palette_is_byte_identical() {
+        let expected: &[(OverlayKind, [f32; 3])] = &[
+            (OverlayKind::Horizon, [0.40, 0.75, 1.00]),
+            (OverlayKind::Cardinals, [1.00, 0.85, 0.40]),
+            (OverlayKind::AltAzGrid, [0.30, 0.55, 0.85]),
+            (OverlayKind::EquatorialGrid, [0.85, 0.40, 0.50]),
+            (OverlayKind::CelestialEquator, [0.95, 0.30, 0.35]),
+            (OverlayKind::Ecliptic, [1.00, 0.75, 0.25]),
+            (OverlayKind::Meridian, [0.65, 0.65, 0.70]),
+            (OverlayKind::GalacticEquator, [0.55, 0.80, 1.00]),
+            (OverlayKind::ConstellationLines, [0.35, 0.65, 1.00]),
+            (OverlayKind::ConstellationBoundaries, [0.45, 0.45, 0.55]),
+            (OverlayKind::DeepSkyObjects, [0.45, 0.85, 0.55]),
+        ];
+        for (kind, want) in expected {
+            assert_eq!(
+                palette_color(*kind, OverlayPalette::Default),
+                *want,
+                "default palette colour drifted for {kind:?}"
+            );
+        }
+    }
+
+    /// CVD palettes must actually change the colours and keep every structural
+    /// layer's colour distinct from its neighbours (the whole point of a
+    /// qualitative palette).
+    #[test]
+    fn cvd_palettes_remap_and_stay_distinct() {
+        let line_kinds = [
+            OverlayKind::Horizon,
+            OverlayKind::Cardinals,
+            OverlayKind::AltAzGrid,
+            OverlayKind::EquatorialGrid,
+            OverlayKind::CelestialEquator,
+            OverlayKind::Ecliptic,
+            OverlayKind::Meridian,
+            OverlayKind::GalacticEquator,
+            OverlayKind::ConstellationLines,
+            OverlayKind::ConstellationBoundaries,
+            OverlayKind::DeepSkyObjects,
+        ];
+        for palette in [OverlayPalette::ColorblindSafe, OverlayPalette::HighContrast] {
+            // At least one layer must differ from the default (palette is live).
+            let changed = line_kinds
+                .iter()
+                .any(|k| palette_color(*k, palette) != palette_color(*k, OverlayPalette::Default));
+            assert!(changed, "{palette:?} did not remap any layer");
+            // Every colour must be finite and in gamut.
+            for k in line_kinds {
+                let c = palette_color(k, palette);
+                for ch in c {
+                    assert!(
+                        (0.0..=1.0).contains(&ch),
+                        "{palette:?} {k:?} out of gamut: {c:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn overlay_palette_kebab_round_trips() {
+        for p in [
+            OverlayPalette::Default,
+            OverlayPalette::ColorblindSafe,
+            OverlayPalette::HighContrast,
+        ] {
+            assert_eq!(OverlayPalette::from_kebab_str(p.as_kebab_str()), Some(p));
+        }
+        assert_eq!(OverlayPalette::from_kebab_str("nope"), None);
+        assert_eq!(OverlayPalette::default(), OverlayPalette::Default);
     }
 
     #[test]

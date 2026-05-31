@@ -14,6 +14,7 @@ import {
   isAtmospherePreset,
   isOutputColourspace,
   isOverlayLayer,
+  isOverlayPalette,
   isSkyProjection,
   isSkyViewpoint,
   sanitizedOpticalDesign,
@@ -291,6 +292,7 @@ function parseOverlays(value: unknown): OverlayConfig {
     deepSkyMagnitudeLimit: inRange(v.deepSkyMagnitudeLimit, -5, 99)
       ? v.deepSkyMagnitudeLimit
       : DEFAULT_OVERLAY_CONFIG.deepSkyMagnitudeLimit,
+    palette: isOverlayPalette(v.palette) ? v.palette : DEFAULT_OVERLAY_CONFIG.palette,
   };
 }
 

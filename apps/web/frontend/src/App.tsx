@@ -25,6 +25,7 @@ import {
   isAtmospherePreset,
   isAuroraSeason,
   isOverlayLayer,
+  isOverlayPalette,
   isSkyProjection,
   isSkyViewpoint,
   type AtmosphereConfig,
@@ -79,6 +80,8 @@ const normalizeWebOverlays = (overlays: OverlayConfig): OverlayConfig => ({
   // Cardinal marks are intentionally hidden in the web UI; drop older persisted
   // selections so users do not get a stuck invisible toggle.
   layers: overlays.layers.filter((layer) => layer !== "cardinals"),
+  // L-24: fill the default palette for configs persisted before it existed.
+  palette: overlays.palette ?? DEFAULT_OVERLAY_CONFIG.palette,
 });
 
 const numberParam = (
@@ -231,6 +234,9 @@ function loadSessionFromUrl(): UrlSession | null {
       -5,
       99,
     ),
+    palette: isOverlayPalette(params.get("overlayPalette"))
+      ? (params.get("overlayPalette") as OverlayConfig["palette"])
+      : DEFAULT_OVERLAY_CONFIG.palette,
   };
   const jd = Number(params.get("jd"));
   const eyepieceParam = params.get("eyepiece");
@@ -323,6 +329,9 @@ function sessionUrl({ observer, view, overlays, atmosphere, planets, satellites,
   url.searchParams.set("grid", overlays.gridStepDeg.toFixed(0));
   url.searchParams.set("overlayOpacity", overlays.opacity.toFixed(2));
   url.searchParams.set("deepSkyMag", overlays.deepSkyMagnitudeLimit.toFixed(1));
+  if (overlays.palette !== DEFAULT_OVERLAY_CONFIG.palette) {
+    url.searchParams.set("overlayPalette", overlays.palette);
+  }
   url.searchParams.set("planets", planets.enabled ? "on" : "off");
   url.searchParams.set("satellites", satellites.enabled ? "on" : "off");
   url.searchParams.set("satExposure", satellites.exposureSeconds.toFixed(1));
@@ -373,6 +382,26 @@ const saveVariableMagnitudesPref = (enabled: boolean): void => {
   if (typeof localStorage === "undefined") return;
   try {
     localStorage.setItem(VARIABLE_MAG_PREF_KEY, enabled ? "1" : "0");
+  } catch {
+    // ignore quota / privacy-mode errors
+  }
+};
+
+// L-24 accessibility: opt-in Az/Alt audio cue, a device preference (not part of
+// the shareable session schema), persisted like the variable-magnitude toggle.
+const AUDIO_CUES_PREF_KEY = "stars.audioCues.v1";
+const loadAudioCuesPref = (): boolean => {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    return localStorage.getItem(AUDIO_CUES_PREF_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+const saveAudioCuesPref = (enabled: boolean): void => {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(AUDIO_CUES_PREF_KEY, enabled ? "1" : "0");
   } catch {
     // ignore quota / privacy-mode errors
   }
@@ -446,6 +475,8 @@ export function App() {
   const [pickedRecordJson, setPickedRecordJson] = useState<string | null>(null);
   const [variableMagnitudes, setVariableMagnitudes] = useState<boolean>(loadVariableMagnitudesPref);
   useEffect(() => saveVariableMagnitudesPref(variableMagnitudes), [variableMagnitudes]);
+  const [audioCues, setAudioCues] = useState<boolean>(loadAudioCuesPref);
+  useEffect(() => saveAudioCuesPref(audioCues), [audioCues]);
 
   // Persist observer + view + overlays + atmosphere + planets + projection + eyepiece whenever they change. We debounce
   // because the view updates on every mouse/touch frame during a drag, and
@@ -570,6 +601,7 @@ export function App() {
         eyepiece={eyepiece}
         outputColourspace={outputColourspace}
         variableMagnitudes={variableMagnitudes}
+        audioCues={audioCues}
         onPick={setPickedRecordJson}
         onDrag={(daz, dalt) =>
           setView((v) => ({
@@ -619,12 +651,14 @@ export function App() {
         aurora={aurora}
         comets={comets}
         variableMagnitudes={variableMagnitudes}
+        audioCues={audioCues}
         projection={projection}
         eyepiece={eyepiece}
         planning={planning}
         recommended={recommended}
         onExportIcal={() => exportIcal(searchApiRef.current?.planningIcal())}
         onSetVariableMagnitudes={setVariableMagnitudes}
+        onSetAudioCues={setAudioCues}
         onSetObserver={setObserver}
         onSetTime={setTimeMs}
         onSetOverlays={setOverlays}

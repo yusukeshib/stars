@@ -726,6 +726,24 @@ Implementation areas:
 - `crates/renderer/src/tonemap.rs`
 - renderer shaders.
 
+### Accessibility: colour-vision-deficiency overlay palette (`L-24`)
+
+The CVD-safe overlay palette is a small set of hard-coded sRGB constants (not
+a committed data file or runtime service, so it has no `data/manifest.toml`
+row), taken from the colour-universal qualitative palette:
+
+- Wong, B. 2011, *Nature Methods* 8, 441 ("Points of view: Color blindness")
+  — the eight-colour set is the Okabe, M. & Ito, K. 2008 "Color Universal
+  Design" palette (https://jfly.uni-koeln.de/color/).
+
+Used for the `OverlayPalette::ColorblindSafe` / `HighContrast` recolouring of
+the structural overlay line layers; `OverlayPalette::Default` keeps the
+historical colours. Black is omitted (the sky background is black).
+
+Implementation area:
+
+- `crates/renderer/src/overlay.rs` (`OverlayPalette`, `palette_color`).
+
 ### Atmosphere, skyglow, and extinction
 
 Used for:
