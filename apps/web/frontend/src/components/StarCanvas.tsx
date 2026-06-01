@@ -484,8 +484,11 @@ export function StarCanvas({
           e.currentTarget.releasePointerCapture(e.pointerId);
         }
         // L-18: a short, near-stationary single-pointer press is a pick tap.
-        // Map it to canvas-relative CSS pixels and notify the parent, which
-        // routes the resulting record into the info panel.
+        // Map it to canvas backing-store (device) pixels -- the same units as
+        // the render target the WASM pick inverts -- and notify the parent,
+        // which routes the resulting record into the info panel. The tap
+        // arrives in CSS pixels, so scale by the backing-store/CSS ratio
+        // (== devicePixelRatio) or HiDPI screens resolve the wrong location.
         const tap = tapStart.current;
         tapStart.current = null;
         const handle = handleRef.current;
@@ -494,7 +497,11 @@ export function StarCanvas({
           const elapsed = e.timeStamp - tap.t;
           if (moved <= 5 && elapsed <= 500) {
             const rect = e.currentTarget.getBoundingClientRect();
-            onPickRef.current(handle.pick_star(e.clientX - rect.left, e.clientY - rect.top));
+            const scaleX = rect.width > 0 ? e.currentTarget.width / rect.width : 1;
+            const scaleY = rect.height > 0 ? e.currentTarget.height / rect.height : 1;
+            onPickRef.current(
+              handle.pick_star((e.clientX - rect.left) * scaleX, (e.clientY - rect.top) * scaleY),
+            );
           }
         }
         activePointers.current.delete(e.pointerId);
