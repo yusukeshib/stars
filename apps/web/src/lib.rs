@@ -1158,8 +1158,10 @@ impl StarView {
         s
     }
 
-    /// `L-18` interactive canvas pick. Maps a CSS-pixel click `(x, y)` (origin
-    /// top-left) to a J2000 equatorial ray, finds the nearest rendered star
+    /// `L-18` interactive canvas pick. Maps a click `(x, y)` (origin top-left,
+    /// in **canvas backing-store / device pixels**, i.e. the same render-target
+    /// units as `config.width`/`height` -- the caller scales CSS pixels by the
+    /// device-pixel ratio) to a J2000 equatorial ray, finds the nearest star
     /// within ~0.6° (a comfortable tap radius), and returns the same JSON
     /// record `goto_object` produces so the host can open the existing info
     /// panel for the picked star. Returns `"null"` for a miss or for the
