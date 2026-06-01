@@ -53,6 +53,14 @@ pub struct StarSession {
     pub overlays: SessionOverlays,
     pub projection: SessionProjection,
     pub atmosphere: SessionAtmosphere,
+    /// V-39 light-pollution scaling. `#[serde(default)]` so sessions that do
+    /// not carry the block still deserialize (to the unpolluted default).
+    /// In particular the web host (`apps/web`) does not serialize this field,
+    /// so without a default a web-exported session would fail to load in the
+    /// native CLI / server hosts -- the cross-host import/export invariant.
+    /// Serialization is unchanged (no `skip_serializing_if`), so the
+    /// Rust-emitted preset JSON stays byte-identical.
+    #[serde(default)]
     pub light_pollution: SessionLightPollution,
     pub scintillation: SessionScintillation,
     pub planets: SessionPlanets,
@@ -1155,6 +1163,26 @@ mod tests {
         let mut session = StarSession::from_scene("0.1.0", "test", &sample_scene());
         session.schema_version = SESSION_SCHEMA_VERSION + 1;
         assert!(session.to_scene().is_err());
+    }
+
+    #[test]
+    fn session_without_light_pollution_deserializes_to_default() {
+        // Cross-host invariant: the web host (`apps/web`) does not serialize a
+        // `lightPollution` block, so a web-exported v7 session omits the key.
+        // The native hosts must still accept it (defaulting to unpolluted)
+        // rather than failing deserialization. Regression guard for the
+        // missing `#[serde(default)]` on `StarSession::light_pollution`.
+        let scene = sample_scene();
+        let session = StarSession::from_scene("0.1.0", "stars-web", &scene);
+        let json = serde_json::to_string(&session).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        value.as_object_mut().unwrap().remove("lightPollution");
+        let webish: StarSession =
+            serde_json::from_value(value).expect("session without lightPollution must load");
+        assert_eq!(
+            webish.to_scene().unwrap().light_pollution,
+            LightPollution::default()
+        );
     }
 
     #[test]
