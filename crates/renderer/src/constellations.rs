@@ -49,8 +49,9 @@ fn decode_constellation_segments(
     );
 
     let mut segments = Vec::with_capacity(count);
-    for record in
-        data[CONSTELLATION_BINARY_HEADER_LEN..].chunks_exact(CONSTELLATION_BINARY_RECORD_LEN)
+    for record in data[CONSTELLATION_BINARY_HEADER_LEN..]
+        .as_chunks::<CONSTELLATION_BINARY_RECORD_LEN>()
+        .0
     {
         segments.push(ConstellationSegment {
             start: [
