@@ -414,8 +414,8 @@ struct Args {
 
     /// V-50 output colour management: the primaries the PNG is encoded and
     /// tagged with. `srgb` (default) is the renderer's native working space;
-    /// `display-p3` and `rec2020` remap the gamut and write a PNG `cHRM`
-    /// chunk so a calibrated wide-gamut screen reproduces the same colour.
+    /// `display-p3` and `rec2020` remap the gamut and write PNG `cHRM` plus
+    /// `gAMA` metadata so a calibrated wide-gamut screen reproduces the same colour.
     /// Persisted in the session JSON so other hosts reproduce the choice.
     /// When omitted, a `--session` / `--preset` scene keeps its stored value;
     /// otherwise the default is sRGB.
