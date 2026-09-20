@@ -32,6 +32,7 @@
 //! - Rendtel, J. et al. (annual), *IMO Meteor Shower Calendar*.
 //! - McKinley, D. W. R. 1961, *Meteor Science and Engineering*.
 
+use crate::corrections::{mat_mul_vec, precession_matrix_iau2006};
 use crate::ephemeris::apparent_sun;
 use crate::horizontal::equatorial_to_horizontal;
 use crate::observer::Observer;
@@ -216,16 +217,26 @@ pub fn observed_rate_per_hour(
     zhr * sin_h * mag_factor / f
 }
 
+/// J2000 catalog radiant precessed to the mean equator and equinox of date.
+fn radiant_of_date(shower: &MeteorShower, jd_tt: f64) -> [f64; 3] {
+    mat_mul_vec(
+        precession_matrix_iau2006(jd_tt),
+        unit_vector_ra_dec(
+            shower.radiant_ra_deg.to_radians(),
+            shower.radiant_dec_deg.to_radians(),
+        ),
+    )
+}
+
 /// Radiant altitude (radians) of `shower` for `observer`.
 pub fn radiant_altitude_rad(shower: &MeteorShower, observer: Observer) -> f64 {
+    let radiant = radiant_of_date(shower, observer.time.jd_tt);
+    let ra = radiant[1]
+        .atan2(radiant[0])
+        .rem_euclid(std::f64::consts::TAU);
+    let dec = radiant[2].clamp(-1.0, 1.0).asin();
     let lst = lmst_radians(observer.time.jd_ut1, observer.longitude_rad);
-    let altaz = equatorial_to_horizontal(
-        shower.radiant_ra_deg.to_radians(),
-        shower.radiant_dec_deg.to_radians(),
-        lst,
-        observer.latitude_rad,
-    );
-    altaz.altitude
+    equatorial_to_horizontal(ra, dec, lst, observer.latitude_rad).altitude
 }
 
 /// A shower active for an observer at one instant, with its current ZHR,
@@ -306,24 +317,72 @@ fn next_unit(state: &mut u64) -> f64 {
 }
 
 /// Knuth Poisson sampler (deterministic given the RNG state).
+fn ln_factorial(n: u64) -> f64 {
+    if n < 2 {
+        return 0.0;
+    }
+    if n < 256 {
+        return (2..=n).map(|k| (k as f64).ln()).sum();
+    }
+
+    // Stirling series through O(n^-5), sufficiently accurate for the PTRS
+    // acceptance comparison while remaining constant-time for large counts.
+    let x = n as f64;
+    (x + 0.5) * x.ln() - x + 0.5 * std::f64::consts::TAU.ln() + 1.0 / (12.0 * x)
+        - 1.0 / (360.0 * x.powi(3))
+        + 1.0 / (1260.0 * x.powi(5))
+}
+
 fn poisson(lambda: f64, state: &mut u64) -> u32 {
     if lambda <= 0.0 {
         return 0;
     }
-    // For large lambda the multiplicative form underflows; the cap below keeps
-    // us in the regime where exp(-lambda) is representable, and the meteor cap
-    // bounds the visible count anyway.
-    let l = (-lambda.min(50.0)).exp();
-    let mut k = 0u32;
-    let mut p = 1.0;
-    loop {
-        p *= next_unit(state);
-        if p <= l {
-            return k;
+    if !lambda.is_finite() {
+        return u32::MAX;
+    }
+
+    // Knuth's exact multiplicative method is efficient for small means.
+    if lambda < 30.0 {
+        let limit = (-lambda).exp();
+        let mut k = 0u32;
+        let mut product = 1.0;
+        loop {
+            product *= next_unit(state);
+            if product <= limit {
+                return k;
+            }
+            k += 1;
         }
-        k += 1;
-        if k > 10_000 {
-            return k;
+    }
+
+    // Hörmann's transformed-rejection method (PTRS) samples the full Poisson
+    // distribution in expected constant time without truncating large lambda.
+    let sqrt_lambda = lambda.sqrt();
+    let b = 0.931 + 2.53 * sqrt_lambda;
+    let a = -0.059 + 0.02483 * b;
+    let inverse_alpha = 1.1239 + 1.1328 / (b - 3.4);
+    let v_r = 0.9277 - 3.6224 / (b - 2.0);
+    loop {
+        let u = next_unit(state) - 0.5;
+        let v = next_unit(state);
+        let us = 0.5 - u.abs();
+        if us <= 0.0 {
+            continue;
+        }
+        let k = ((2.0 * a / us + b) * u + lambda + 0.43).floor();
+        if k < 0.0 {
+            continue;
+        }
+        if us >= 0.07 && v <= v_r {
+            return k.min(u32::MAX as f64) as u32;
+        }
+        if us < 0.013 && v > us {
+            continue;
+        }
+        let log_acceptance = -lambda + k * lambda.ln() - ln_factorial(k as u64);
+        let log_candidate = (v * inverse_alpha / (a / (us * us) + b)).ln();
+        if log_candidate <= log_acceptance {
+            return k.min(u32::MAX as f64) as u32;
         }
     }
 }
@@ -483,10 +542,7 @@ pub fn meteor_stream(
         }
         let meteor = match chosen {
             Some(s) => {
-                let radiant = unit_vector_ra_dec(
-                    s.shower.radiant_ra_deg.to_radians(),
-                    s.shower.radiant_dec_deg.to_radians(),
-                );
+                let radiant = radiant_of_date(&s.shower, observer.time.jd_tt);
                 make_meteor(
                     radiant,
                     s.shower.code,
@@ -608,6 +664,51 @@ mod tests {
                 .map(|(x, y)| x.start_eq != y.start_eq || x.magnitude != y.magnitude)
                 .unwrap_or(true);
         assert!(differ, "different seeds should produce different streams");
+    }
+
+    #[test]
+    fn large_lambda_poisson_is_deterministic_and_uncapped() {
+        let mut state = 0x1234_5678_9abc_def0;
+        let first = poisson(200.0, &mut state);
+        let mut repeated_state = 0x1234_5678_9abc_def0;
+        assert_eq!(first, poisson(200.0, &mut repeated_state));
+        assert_eq!(first, 177, "large-lambda deterministic pin changed");
+        assert!(first > 50, "lambda=200 sample was still capped: {first}");
+
+        let sample_count = 10_000u64;
+        let sum: u64 = (0..sample_count)
+            .map(|seed| {
+                let mut sample_state = seed;
+                poisson(200.0, &mut sample_state) as u64
+            })
+            .sum();
+        let mean = sum as f64 / sample_count as f64;
+        assert!(
+            (mean - 200.0).abs() < 0.5,
+            "large-lambda sample mean {mean}"
+        );
+    }
+
+    #[test]
+    fn radiant_is_precessed_to_observation_date() {
+        let obs = observer_at(2_488_069.5); // 2100-01-01 UTC
+        let precessed_altitude = radiant_altitude_rad(perseids(), obs);
+        let lst = lmst_radians(obs.time.jd_ut1, obs.longitude_rad);
+        let unprecessed_altitude = equatorial_to_horizontal(
+            perseids().radiant_ra_deg.to_radians(),
+            perseids().radiant_dec_deg.to_radians(),
+            lst,
+            obs.latitude_rad,
+        )
+        .altitude;
+        assert!(
+            (precessed_altitude - 0.081_793_437_642_057_11).abs() < 1e-12,
+            "precessed altitude pin: {precessed_altitude}"
+        );
+        assert!(
+            (precessed_altitude - unprecessed_altitude).abs() > 0.002,
+            "precession should measurably move the 2100 radiant"
+        );
     }
 
     #[test]

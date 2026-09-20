@@ -12,14 +12,14 @@ use renderer::{
 };
 use stars_host_common::{
     atmosphere_from_args, aurora_from_args, catalog_snapshot_for, curated_comet_layer,
-    curated_satellite_layer, eyepiece_from_args, first_night_tour, light_pollution_from_args,
-    load_session, load_star_instances_for_backend, overlay_config_from_args,
-    parse_time_to_time_scales, resolve_goto_query, resolve_light_pollution, scene_from_preset,
-    scene_preset_infos, scintillation_from_args, viewpoint_from_args, AtmosphereOverrides,
-    AtmospherePresetArg, AuroraSeasonArg, CatalogBackendArg, CorrectionSnapshot,
-    ExternalViewpointOverrides, EyepieceOverrides, LightPollutionOverrides, OpticalDesign,
-    OutputColourspaceArg, OverlayArg, OverlayPaletteArg, ProjectionArg, ScenePresetArg,
-    ScintillationOverrides, SessionScene, Tour, ViewpointArg,
+    curated_satellite_layer, deep_sky_markers, eyepiece_from_args, first_night_tour,
+    light_pollution_from_args, load_session, load_star_instances_for_backend,
+    overlay_config_from_args, parse_time_to_time_scales, resolve_goto_query,
+    resolve_light_pollution, scene_from_preset, scene_preset_infos, scintillation_from_args,
+    viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg, AuroraSeasonArg,
+    CatalogBackendArg, CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides,
+    LightPollutionOverrides, OpticalDesign, OutputColourspaceArg, OverlayArg, OverlayPaletteArg,
+    ProjectionArg, ScenePresetArg, ScintillationOverrides, SessionScene, Tour, ViewpointArg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -862,6 +862,7 @@ impl ApplicationHandler for App {
         surface.configure(&device, &config);
 
         let mut renderer = Renderer::new(&device, format, size.width, size.height, &self.stars);
+        renderer.set_deep_sky_markers(&deep_sky_markers());
         renderer.set_overlays(&device, &self.overlays);
         let observer = Observer::from_degrees(self.lat, self.lng, self.sky_clock.current_jd());
         let mut camera = Camera::new(
@@ -1205,19 +1206,20 @@ impl ApplicationHandler for App {
                                     .copied()
                                     .map(renderer::OverlayKind::from)
                                     .collect();
-                                gpu.renderer.set_overlays(
-                                    &gpu.device,
-                                    &OverlayConfig {
-                                        layers,
-                                        grid_step_deg: 15.0,
-                                        opacity: 0.6,
-                                        deep_sky_magnitude_limit: OverlayConfig::default()
-                                            .deep_sky_magnitude_limit,
-                                        // Keep the user's chosen accessibility
-                                        // palette across tour steps.
-                                        palette: self.overlays.palette,
-                                    },
-                                );
+                                // Keep the application model canonical: live
+                                // palette changes and later renderer refreshes
+                                // must start from the active tour layers.
+                                self.overlays = OverlayConfig {
+                                    layers,
+                                    grid_step_deg: 15.0,
+                                    opacity: 0.6,
+                                    deep_sky_magnitude_limit: OverlayConfig::default()
+                                        .deep_sky_magnitude_limit,
+                                    // Keep the user's chosen accessibility
+                                    // palette across tour steps.
+                                    palette: self.overlays.palette,
+                                };
+                                gpu.renderer.set_overlays(&gpu.device, &self.overlays);
                                 let caption = format!(
                                     "Tour {}/{}: {} — {}",
                                     self.tour_step + 1,

@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use astronomy::Observer;
 use renderer::{Camera, Renderer, StarInstance};
 
@@ -19,6 +19,72 @@ use catalog::CatalogBackendKind;
 /// the CLI's previous local constant and the swap-chain format the desktop
 /// viewer uses, so the GPU tone-mapping path is identical across hosts.
 pub const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+/// Bounds shared by every headless host. The pixel budget limits aggregate GPU
+/// and readback memory even when each individual dimension is within range.
+pub const MIN_RENDER_DIMENSION: u32 = 16;
+pub const MAX_RENDER_DIMENSION: u32 = 8192;
+pub const MAX_RENDER_PIXELS: u64 = 16_777_216;
+const BYTES_PER_PIXEL: u32 = 4;
+
+#[derive(Debug, Clone, Copy)]
+struct RenderLayout {
+    unpadded_bytes_per_row: u32,
+    padded_bytes_per_row: u32,
+    readback_bytes: u64,
+    pixel_bytes: usize,
+}
+
+fn render_layout(width: u32, height: u32) -> Result<RenderLayout> {
+    if !(MIN_RENDER_DIMENSION..=MAX_RENDER_DIMENSION).contains(&width)
+        || !(MIN_RENDER_DIMENSION..=MAX_RENDER_DIMENSION).contains(&height)
+    {
+        bail!(
+            "render dimensions must each be in {MIN_RENDER_DIMENSION}..={MAX_RENDER_DIMENSION}; got {width}x{height}"
+        );
+    }
+
+    let pixel_count = u64::from(width)
+        .checked_mul(u64::from(height))
+        .context("render pixel count overflow")?;
+    if pixel_count > MAX_RENDER_PIXELS {
+        bail!(
+            "render pixel count {pixel_count} exceeds budget {MAX_RENDER_PIXELS} ({width}x{height})"
+        );
+    }
+
+    let unpadded_bytes_per_row = width
+        .checked_mul(BYTES_PER_PIXEL)
+        .context("render row byte count overflow")?;
+    let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let padded_units = unpadded_bytes_per_row
+        .checked_add(alignment - 1)
+        .context("aligned render row byte count overflow")?
+        / alignment;
+    let padded_bytes_per_row = padded_units
+        .checked_mul(alignment)
+        .context("aligned render row byte count overflow")?;
+    let readback_bytes = u64::from(padded_bytes_per_row)
+        .checked_mul(u64::from(height))
+        .context("render readback buffer size overflow")?;
+    let pixel_bytes_u64 = pixel_count
+        .checked_mul(u64::from(BYTES_PER_PIXEL))
+        .context("render output byte count overflow")?;
+    let pixel_bytes = usize::try_from(pixel_bytes_u64)
+        .context("render output does not fit this platform's address space")?;
+
+    Ok(RenderLayout {
+        unpadded_bytes_per_row,
+        padded_bytes_per_row,
+        readback_bytes,
+        pixel_bytes,
+    })
+}
+
+/// Validate headless dimensions before catalog loading or GPU work begins.
+pub fn validate_render_dimensions(width: u32, height: u32) -> Result<()> {
+    render_layout(width, height).map(|_| ())
+}
 
 /// Output-image control inputs that aren't part of the persisted scene JSON.
 /// Width / height come from the host (CLI flag, HTTP query) rather than the
@@ -61,6 +127,7 @@ pub async fn render_scene_pixels(
     stars: &[StarInstance],
     options: RenderOptions,
 ) -> Result<Vec<u8>> {
+    let layout = render_layout(options.width, options.height)?;
     let observer =
         Observer::from_degrees_with_time(scene.latitude_deg, scene.longitude_deg, scene.time);
 
@@ -93,14 +160,9 @@ pub async fn render_scene_pixels(
     });
     let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
 
-    let bytes_per_pixel: u32 = 4;
-    let unpadded_bytes_per_row = options.width * bytes_per_pixel;
-    let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
-        * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-
     let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Readback Buffer"),
-        size: (padded_bytes_per_row * options.height) as u64,
+        size: layout.readback_bytes,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
@@ -112,6 +174,7 @@ pub async fn render_scene_pixels(
         options.height,
         stars,
     );
+    renderer.set_deep_sky_markers(&crate::deep_sky_markers());
     renderer.set_overlays(&device, &scene.overlays);
     renderer.set_skyglow_enabled(options.skyglow_enabled);
     let mut camera = Camera::new(
@@ -152,7 +215,7 @@ pub async fn render_scene_pixels(
             buffer: &output_buffer,
             layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(padded_bytes_per_row),
+                bytes_per_row: Some(layout.padded_bytes_per_row),
                 rows_per_image: Some(options.height),
             },
         },
@@ -178,11 +241,11 @@ pub async fn render_scene_pixels(
         .context("Buffer mapping failed")?;
 
     let data = buffer_slice.get_mapped_range();
-    let mut pixels =
-        Vec::with_capacity((options.width * options.height * bytes_per_pixel) as usize);
+    let mut pixels = Vec::with_capacity(layout.pixel_bytes);
     for row in 0..options.height {
-        let start = (row * padded_bytes_per_row) as usize;
-        let end = start + unpadded_bytes_per_row as usize;
+        let start = usize::try_from(u64::from(row) * u64::from(layout.padded_bytes_per_row))
+            .context("render row offset does not fit address space")?;
+        let end = start + layout.unpadded_bytes_per_row as usize;
         pixels.extend_from_slice(&data[start..end]);
     }
     drop(data);
@@ -230,10 +293,34 @@ pub async fn render_scene_from_catalog_path(
 /// `/render` route, which returns the bytes directly instead of writing to
 /// disk like the CLI does.
 pub fn encode_png(width: u32, height: u32, pixels: Vec<u8>) -> Result<Vec<u8>> {
+    validate_render_dimensions(width, height)?;
     let img =
         image::RgbaImage::from_raw(width, height, pixels).context("Pixel buffer size mismatch")?;
     let mut buf = std::io::Cursor::new(Vec::new());
     img.write_to(&mut buf, image::ImageFormat::Png)
         .context("Encoding PNG buffer")?;
     Ok(buf.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_dimensions_enforce_bounds_and_pixel_budget() {
+        assert!(validate_render_dimensions(1280, 720).is_ok());
+        assert!(validate_render_dimensions(8192, 2048).is_ok());
+        assert!(validate_render_dimensions(0, 720).is_err());
+        assert!(validate_render_dimensions(8193, 720).is_err());
+        assert!(validate_render_dimensions(8192, 8192).is_err());
+    }
+
+    #[test]
+    fn render_layout_accounts_for_row_padding_with_checked_sizes() {
+        let layout = render_layout(17, 16).unwrap();
+        assert_eq!(layout.unpadded_bytes_per_row, 68);
+        assert_eq!(layout.padded_bytes_per_row, 256);
+        assert_eq!(layout.readback_bytes, 4096);
+        assert_eq!(layout.pixel_bytes, 17 * 16 * 4);
+    }
 }

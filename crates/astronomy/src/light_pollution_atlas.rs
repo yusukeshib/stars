@@ -51,20 +51,30 @@
 /// Errors returned when parsing a [`FalchiAtlas`] binary blob.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AtlasError {
-    /// The blob is shorter than the fixed header or its payload.
+    /// The blob is shorter than the fixed header or its declared payload.
     Truncated,
+    /// The blob contains bytes after its declared payload.
+    TrailingData,
     /// The leading magic bytes are not `b"FALATL01"`.
     BadMagic,
-    /// `rows` or `cols` was zero, or the declared grid bounds are degenerate.
+    /// The dimensions, bounds, or resulting payload size are invalid.
     BadDimensions,
+    /// A payload cell is infinite; only finite values and `NaN` are valid.
+    BadValue,
 }
 
 impl core::fmt::Display for AtlasError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             AtlasError::Truncated => f.write_str("Falchi atlas blob is truncated"),
+            AtlasError::TrailingData => {
+                f.write_str("Falchi atlas blob has data after its declared payload")
+            }
             AtlasError::BadMagic => f.write_str("Falchi atlas magic mismatch (expected FALATL01)"),
-            AtlasError::BadDimensions => f.write_str("Falchi atlas has degenerate dimensions"),
+            AtlasError::BadDimensions => {
+                f.write_str("Falchi atlas has invalid dimensions or bounds")
+            }
+            AtlasError::BadValue => f.write_str("Falchi atlas payload contains an infinite value"),
         }
     }
 }
@@ -92,22 +102,35 @@ pub struct FalchiAtlas {
 impl FalchiAtlas {
     /// Parse a `FALATL01` binary blob produced by `build-falchi-atlas.py`.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, AtlasError> {
-        if bytes.len() < HEADER_LEN {
-            return Err(AtlasError::Truncated);
-        }
-        if &bytes[0..8] != MAGIC {
+        let header = bytes.get(..HEADER_LEN).ok_or(AtlasError::Truncated)?;
+        if header.get(..MAGIC.len()) != Some(MAGIC.as_slice()) {
             return Err(AtlasError::BadMagic);
         }
-        let rows = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
-        let cols = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
+
+        let read_u32 = |start: usize| -> Result<u32, AtlasError> {
+            let raw = header
+                .get(start..start + size_of::<u32>())
+                .ok_or(AtlasError::Truncated)?;
+            let raw = <[u8; size_of::<u32>()]>::try_from(raw).map_err(|_| AtlasError::Truncated)?;
+            Ok(u32::from_le_bytes(raw))
+        };
+        let read_f64 = |start: usize| -> Result<f64, AtlasError> {
+            let raw = header
+                .get(start..start + size_of::<f64>())
+                .ok_or(AtlasError::Truncated)?;
+            let raw = <[u8; size_of::<f64>()]>::try_from(raw).map_err(|_| AtlasError::Truncated)?;
+            Ok(f64::from_le_bytes(raw))
+        };
+
+        let rows = read_u32(8)?;
+        let cols = read_u32(12)?;
         if rows == 0 || cols == 0 {
             return Err(AtlasError::BadDimensions);
         }
-        let read_f64 = |off: usize| f64::from_le_bytes(bytes[off..off + 8].try_into().unwrap());
-        let lat_north_deg = read_f64(16);
-        let lat_south_deg = read_f64(24);
-        let lng_west_deg = read_f64(32);
-        let lng_east_deg = read_f64(40);
+        let lat_north_deg = read_f64(16)?;
+        let lat_south_deg = read_f64(24)?;
+        let lng_west_deg = read_f64(32)?;
+        let lng_east_deg = read_f64(40)?;
         if !lat_north_deg.is_finite()
             || !lat_south_deg.is_finite()
             || !lng_west_deg.is_finite()
@@ -117,16 +140,42 @@ impl FalchiAtlas {
         {
             return Err(AtlasError::BadDimensions);
         }
-        let count = rows as usize * cols as usize;
-        let payload = &bytes[HEADER_LEN..];
-        if payload.len() < count * 4 {
-            return Err(AtlasError::Truncated);
+
+        let count = usize::try_from(rows)
+            .ok()
+            .and_then(|rows| {
+                usize::try_from(cols)
+                    .ok()
+                    .and_then(|cols| rows.checked_mul(cols))
+            })
+            .ok_or(AtlasError::BadDimensions)?;
+        let payload_len = count
+            .checked_mul(size_of::<f32>())
+            .ok_or(AtlasError::BadDimensions)?;
+        let expected_len = HEADER_LEN
+            .checked_add(payload_len)
+            .ok_or(AtlasError::BadDimensions)?;
+        match bytes.len().cmp(&expected_len) {
+            core::cmp::Ordering::Less => return Err(AtlasError::Truncated),
+            core::cmp::Ordering::Greater => return Err(AtlasError::TrailingData),
+            core::cmp::Ordering::Equal => {}
         }
-        let mut values = Vec::with_capacity(count);
-        for i in 0..count {
-            let o = i * 4;
-            values.push(f32::from_le_bytes(payload[o..o + 4].try_into().unwrap()));
+
+        let payload = bytes.get(HEADER_LEN..).ok_or(AtlasError::Truncated)?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(count)
+            .map_err(|_| AtlasError::BadDimensions)?;
+        for chunk in payload.chunks_exact(size_of::<f32>()) {
+            let raw =
+                <[u8; size_of::<f32>()]>::try_from(chunk).map_err(|_| AtlasError::Truncated)?;
+            let value = f32::from_le_bytes(raw);
+            if value.is_infinite() {
+                return Err(AtlasError::BadValue);
+            }
+            values.push(value);
         }
+
         Ok(Self {
             rows,
             cols,
@@ -260,32 +309,86 @@ mod tests {
     }
 
     #[test]
-    fn rejects_bad_magic_and_truncation() {
-        assert_eq!(
-            FalchiAtlas::from_bytes(b"nope").unwrap_err(),
-            AtlasError::Truncated
-        );
+    fn rejects_truncated_header_and_payload() {
+        let bytes = encode(2, 2, (10.0, 0.0, 0.0, 10.0), &[1.0, 2.0, 3.0, 4.0]);
+        for len in 0..HEADER_LEN {
+            assert_eq!(
+                FalchiAtlas::from_bytes(&bytes[..len]).unwrap_err(),
+                AtlasError::Truncated,
+                "header prefix of {len} bytes"
+            );
+        }
+        for len in HEADER_LEN..bytes.len() {
+            assert_eq!(
+                FalchiAtlas::from_bytes(&bytes[..len]).unwrap_err(),
+                AtlasError::Truncated,
+                "blob prefix of {len} bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_bad_magic() {
         let mut bytes = encode(2, 2, (10.0, 0.0, 0.0, 10.0), &[1.0, 2.0, 3.0, 4.0]);
         bytes[0] = b'X';
         assert_eq!(
             FalchiAtlas::from_bytes(&bytes).unwrap_err(),
             AtlasError::BadMagic
         );
-        // Drop the last value → payload too short.
-        let short = encode(2, 2, (10.0, 0.0, 0.0, 10.0), &[1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn rejects_zero_or_overflowing_dimensions() {
+        for dimensions in [(0, 2), (2, 0), (u32::MAX, u32::MAX)] {
+            let bytes = encode(dimensions.0, dimensions.1, (10.0, 0.0, 0.0, 10.0), &[]);
+            assert_eq!(
+                FalchiAtlas::from_bytes(&bytes).unwrap_err(),
+                AtlasError::BadDimensions,
+                "dimensions {dimensions:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_bounds() {
+        for bounds in [
+            (0.0, 0.0, 0.0, 10.0),
+            (0.0, 10.0, 0.0, 10.0),
+            (10.0, 0.0, 10.0, 0.0),
+            (f64::NAN, 0.0, 0.0, 10.0),
+            (10.0, f64::INFINITY, 0.0, 10.0),
+        ] {
+            let bytes = encode(1, 1, bounds, &[1.0]);
+            assert_eq!(
+                FalchiAtlas::from_bytes(&bytes).unwrap_err(),
+                AtlasError::BadDimensions,
+                "bounds {bounds:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_trailing_data() {
+        let mut bytes = encode(1, 1, (10.0, 0.0, 0.0, 10.0), &[1.0]);
+        bytes.push(0);
         assert_eq!(
-            FalchiAtlas::from_bytes(&short).unwrap_err(),
-            AtlasError::Truncated
+            FalchiAtlas::from_bytes(&bytes).unwrap_err(),
+            AtlasError::TrailingData
         );
     }
 
     #[test]
-    fn rejects_degenerate_bounds() {
-        let bytes = encode(2, 2, (0.0, 0.0, 0.0, 10.0), &[1.0, 2.0, 3.0, 4.0]);
-        assert_eq!(
-            FalchiAtlas::from_bytes(&bytes).unwrap_err(),
-            AtlasError::BadDimensions
-        );
+    fn rejects_infinite_payload_values_but_accepts_nan() {
+        for value in [f32::INFINITY, f32::NEG_INFINITY] {
+            let bytes = encode(1, 1, (10.0, 0.0, 0.0, 10.0), &[value]);
+            assert_eq!(
+                FalchiAtlas::from_bytes(&bytes).unwrap_err(),
+                AtlasError::BadValue
+            );
+        }
+
+        let bytes = encode(1, 1, (10.0, 0.0, 0.0, 10.0), &[f32::NAN]);
+        assert!(FalchiAtlas::from_bytes(&bytes).is_ok());
     }
 
     #[test]

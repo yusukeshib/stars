@@ -191,19 +191,75 @@ fn normalize_event_into_window(mut jd_utc: f64, start_jd_utc: f64, end_jd_utc: f
         .then_some(jd_utc)
 }
 
+fn signed_hour_angle(observer: Observer, body: PlanningBody, jd_utc: f64) -> f64 {
+    let at_time = observer_at(observer, jd_utc);
+    let (ra, _) = body_equatorial(at_time, body);
+    let lst = lmst_radians(at_time.time.jd_ut1, at_time.longitude_rad);
+    (lst - ra + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+}
+
+fn refine_transit(observer: Observer, body: PlanningBody, mut jd_utc: f64) -> f64 {
+    // The analytic estimate neglects the body's motion. Iteratively remove the
+    // measured hour angle; the sidereal rate is an excellent local derivative,
+    // and re-evaluating the ephemeris makes the result unquantized.
+    for _ in 0..8 {
+        let hour_angle = signed_hour_angle(observer, body, jd_utc);
+        jd_utc -= hour_angle / (std::f64::consts::TAU * SIDEREAL_RATE);
+    }
+    jd_utc
+}
+
+fn refine_altitude_crossing(
+    observer: Observer,
+    body: PlanningBody,
+    estimate_jd_utc: f64,
+    start_jd_utc: f64,
+    end_jd_utc: f64,
+    rising: bool,
+) -> Option<f64> {
+    let target = body.standard_altitude_rad();
+    let value = |jd| body_altitude_rad(observer_at(observer, jd), body) - target;
+    let mut half_width = SEARCH_STEP_DAYS;
+    let (mut lo, mut hi) = loop {
+        let lo = (estimate_jd_utc - half_width).max(start_jd_utc);
+        let hi = (estimate_jd_utc + half_width).min(end_jd_utc);
+        let (f_lo, f_hi) = (value(lo), value(hi));
+        let bracketed = if rising {
+            f_lo <= 0.0 && f_hi >= 0.0
+        } else {
+            f_lo >= 0.0 && f_hi <= 0.0
+        };
+        if bracketed {
+            break (lo, hi);
+        }
+        if lo <= start_jd_utc && hi >= end_jd_utc {
+            return None;
+        }
+        half_width *= 2.0;
+    };
+
+    for _ in 0..REFINE_ITERS {
+        let mid = 0.5 * (lo + hi);
+        let above = value(mid) >= 0.0;
+        if above == rising {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Some(0.5 * (lo + hi))
+}
+
 pub fn rise_transit_set(
     observer: Observer,
     body: PlanningBody,
     start_jd_utc: f64,
     end_jd_utc: f64,
 ) -> RiseTransitSet {
-    // Fast almanac-style approximation: evaluate each body once near the
-    // middle of the planning window, then solve the hour-angle geometry
-    // analytically. The previous implementation rescanned the whole day and
-    // refined each event by repeatedly re-running the full VSOP87 planet
-    // ephemeris; changing the date in the web UI could therefore block the
-    // render loop for hundreds of planet evaluations. For a planning table,
-    // minute-scale accuracy is enough and this keeps date changes interactive.
+    // Use one midpoint ephemeris evaluation for cheap almanac-style initial
+    // guesses, then refine those guesses against the time-varying topocentric
+    // coordinates. This avoids a full-day ephemeris scan while removing the
+    // several-minute error that a frozen midpoint RA/declination can produce.
     let sample_jd = 0.5 * (start_jd_utc + end_jd_utc);
     let sample_observer = observer_at(observer, sample_jd);
     let (ra, dec) = body_equatorial(sample_observer, body);
@@ -212,7 +268,9 @@ pub fn rise_transit_set(
     let transit0 = start_jd_utc
         + (ra - lst_start).rem_euclid(std::f64::consts::TAU)
             / (std::f64::consts::TAU * SIDEREAL_RATE);
-    let transit = normalize_event_into_window(transit0, start_jd_utc, end_jd_utc);
+    let transit = normalize_event_into_window(transit0, start_jd_utc, end_jd_utc).and_then(|jd| {
+        normalize_event_into_window(refine_transit(observer, body, jd), start_jd_utc, end_jd_utc)
+    });
 
     let (sin_lat, cos_lat) = observer.latitude_rad.sin_cos();
     let (sin_dec, cos_dec) = dec.sin_cos();
@@ -226,9 +284,15 @@ pub fn rise_transit_set(
     let (rise, set) = if let Some(transit_jd) = transit {
         if (-1.0..=1.0).contains(&cos_h) {
             let dt = cos_h.acos() / (std::f64::consts::TAU * SIDEREAL_RATE);
+            let rise_guess = normalize_event_into_window(transit_jd - dt, start_jd_utc, end_jd_utc);
+            let set_guess = normalize_event_into_window(transit_jd + dt, start_jd_utc, end_jd_utc);
             (
-                normalize_event_into_window(transit_jd - dt, start_jd_utc, end_jd_utc),
-                normalize_event_into_window(transit_jd + dt, start_jd_utc, end_jd_utc),
+                rise_guess.and_then(|jd| {
+                    refine_altitude_crossing(observer, body, jd, start_jd_utc, end_jd_utc, true)
+                }),
+                set_guess.and_then(|jd| {
+                    refine_altitude_crossing(observer, body, jd, start_jd_utc, end_jd_utc, false)
+                }),
             )
         } else {
             (None, None)
@@ -604,10 +668,9 @@ pub fn active_occluders(observer: Observer) -> ActiveOccluders {
         let shadows =
             galilean_shadow_disks_at(observer.time.jd_tdb, jupiter_dir_f64, jupiter_distance_km);
         for slot in shadows.iter().flatten() {
-            // The shadow's apparent disk is the moon's silhouette on
-            // Jupiter; its angular extent matches `moon.radius_km() /
-            // Δ_jupiter`. Approximate obscuration is the area ratio
-            // (front / back) — same closed form as V-51e Planet-on-Sun.
+            // The opaque disk uses the finite-Sun umbral radius at Jupiter's
+            // centre plane. Approximate obscuration is its area ratio against
+            // Jupiter — the same closed form as V-51e Planet-on-Sun.
             let r_front = slot.angular_radius_rad;
             let r_back = jupiter.angular_radius_rad.max(1.0e-12);
             let area_ratio = ((r_front / r_back).powi(2) as f64).clamp(0.0, 1.0);
@@ -1993,18 +2056,27 @@ mod tests {
         let list = active_occluders(observer);
         let jupiter_planet_target = OccluderTarget::Planet(3);
         let jupiter = apparent_planet_topocentric(observer, Planet::Jupiter);
-        let io_radius_km = crate::moons::GalileanMoon::Io.radius_km();
-        let earth_jupiter_km = jupiter.distance_au * crate::ephemeris::ASTRONOMICAL_UNIT_KM;
-        let io_shadow_radius_expected = (io_radius_km / earth_jupiter_km).atan();
+        let jupiter_dir = jupiter.direction_equatorial();
+        let shadows = crate::jupiter_shadows::galilean_shadow_disks_at(
+            observer.time.jd_tdb,
+            [
+                jupiter_dir.x as f64,
+                jupiter_dir.y as f64,
+                jupiter_dir.z as f64,
+            ],
+            jupiter.distance_au * crate::ephemeris::ASTRONOMICAL_UNIT_KM,
+        );
+        let io_shadow_radius_expected = shadows[0]
+            .as_ref()
+            .expect("Io shadow should be active")
+            .angular_radius_rad;
         let mut found = false;
         for occ in list.as_slice() {
             if occ.target != jupiter_planet_target {
                 continue;
             }
-            // Discriminate from any V-51d Moon-on-Jupiter / V-51f
-            // Planet-on-Jupiter entries by matching the radius to
-            // Io's silhouette extent on Jupiter (a few percent of the
-            // Jovian apparent radius).
+            // Discriminate from Moon/planet occluders by matching the
+            // finite-Sun Io umbral radius from the shadow producer.
             if (occ.front_radius_rad - io_shadow_radius_expected).abs()
                 < 0.1 * io_shadow_radius_expected
             {

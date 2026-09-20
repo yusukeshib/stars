@@ -2338,17 +2338,9 @@ impl Camera {
                 0.0,
             ]
         };
-        // V-51c: classify the Moon-occults-Sun apparent-disk geometry for
-        // this frame. The renderer disables the analytic-mask path on
-        // external galactic viewpoints (no atmosphere, no apparent disks)
-        // and on `Atmosphere::OFF` (which already turns daylight off, so
-        // there is nothing to darken). The Koomen 1952 daylight falloff is
-        // applied later inside the skyglow shader via this uniform.
-        // V-51b analytic-mask occluder uniform. Populated alongside the
-        // V-51c Sun-specific photometric falloff so the two paths cannot
-        // drift: the same predicate (`sunlit_scattering && !external`)
-        // gates both. Off-eclipse and on external viewpoints the list is
-        // empty and the shader short-circuits on `count == 0`.
+        // V-51b/c apparent-disk geometry. External viewpoints have no local
+        // apparent disks, but Atmosphere::OFF only disables atmospheric
+        // effects: physical disks and occultations remain.
         //
         // `active_occluders` returns date-of-epoch equatorial directions
         // without atmospheric refraction; the renderer's star, Sun, and
@@ -2360,7 +2352,7 @@ impl Camera {
         // breaks bit-parity with the V-51c golden frame.
         let mut occluders_uniform = [[0.0_f32; 4]; MAX_OCCLUDERS * 2];
         let mut occluder_count: u32 = 0;
-        if self.atmosphere.sunlit_scattering && !self.viewpoint.is_external() {
+        if !self.viewpoint.is_external() {
             let list = active_occluders(self.observer);
             for (i, occ) in list.as_slice().iter().enumerate() {
                 let dir_date = Vec3::new(
@@ -2394,34 +2386,33 @@ impl Camera {
         }
         let occluder_params_uniform = [occluder_count as f32, 0.0, 0.0, 0.0];
 
-        let solar_eclipse_state_uniform =
-            if self.atmosphere.sunlit_scattering && !self.viewpoint.is_external() {
-                let state = solar_eclipse_state(self.observer);
-                let totality_weight = if matches!(state.kind, SolarEclipseKind::Total) {
-                    // smoothstep(TOTALITY_ENVELOPE_LOW, TOTALITY_ENVELOPE_HIGH, obs):
-                    // the totality envelope only turns the corona on inside the
-                    // Moon-larger-than-Sun core, not during deep partial phases
-                    // that still leave a bright crescent.
-                    let span = TOTALITY_ENVELOPE_HIGH - TOTALITY_ENVELOPE_LOW;
-                    let t = ((state.obscuration - TOTALITY_ENVELOPE_LOW) / span).clamp(0.0, 1.0);
-                    t * t * (3.0 - 2.0 * t)
-                } else {
-                    0.0
-                };
-                let partial_weight = if matches!(state.kind, SolarEclipseKind::None) {
-                    0.0
-                } else {
-                    state.obscuration
-                };
-                [
-                    state.kind.shader_code(),
-                    state.obscuration,
-                    totality_weight,
-                    partial_weight,
-                ]
+        let solar_eclipse_state_uniform = if !self.viewpoint.is_external() {
+            let state = solar_eclipse_state(self.observer);
+            let totality_weight = if matches!(state.kind, SolarEclipseKind::Total) {
+                // smoothstep(TOTALITY_ENVELOPE_LOW, TOTALITY_ENVELOPE_HIGH, obs):
+                // the totality envelope only turns the corona on inside the
+                // Moon-larger-than-Sun core, not during deep partial phases
+                // that still leave a bright crescent.
+                let span = TOTALITY_ENVELOPE_HIGH - TOTALITY_ENVELOPE_LOW;
+                let t = ((state.obscuration - TOTALITY_ENVELOPE_LOW) / span).clamp(0.0, 1.0);
+                t * t * (3.0 - 2.0 * t)
             } else {
-                [0.0, 0.0, 0.0, 0.0]
+                0.0
             };
+            let partial_weight = if matches!(state.kind, SolarEclipseKind::None) {
+                0.0
+            } else {
+                state.obscuration
+            };
+            [
+                state.kind.shader_code(),
+                state.obscuration,
+                totality_weight,
+                partial_weight,
+            ]
+        } else {
+            [0.0, 0.0, 0.0, 0.0]
+        };
         CameraUniform {
             view_proj: view_proj.to_cols_array_2d(),
             inv_view_proj: inv_view_proj.to_cols_array_2d(),
@@ -3079,14 +3070,14 @@ mod tests {
     /// mask would still try to subtract a (now meaningless) front disk
     /// from a Sun source term that the renderer is no longer drawing.
     #[test]
-    fn occluder_uniform_zeros_on_external_or_atmosphere_off() {
+    fn occluder_uniform_survives_atmosphere_off_but_zeros_on_external_view() {
         let jd_utc = astronomy::julian_date_from_unix_seconds(1_712_599_980.0);
         let observer = Observer::from_degrees(23.219, -106.420, jd_utc);
 
         let mut cam = Camera::new(observer, LocalView::default(), 1.0);
         cam.atmosphere = Atmosphere::OFF;
         let off = cam.uniform_with_planets(800, 600, &PlanetUniforms::disabled());
-        assert_eq!(off.occluder_params[0], 0.0);
+        assert!(off.occluder_params[0] >= 2.0);
 
         let mut cam = Camera::new(observer, LocalView::default(), 1.0);
         cam.viewpoint = SkyViewpoint::GalacticNorth;

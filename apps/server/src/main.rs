@@ -30,9 +30,12 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use stars_host_common::{
     encode_png, render_scene_from_catalog_path, scene_preset_infos, session_from_preset,
-    ScenePresetArg, ScenePresetInfo, SessionScene, StarSession, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    validate_render_dimensions, ScenePresetArg, ScenePresetInfo, SessionScene, StarSession,
+    DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::Semaphore};
+
+const MAX_SIMULTANEOUS_GPU_RENDERS: usize = 1;
 
 /// Headless HTTP host that wraps the shared render pipeline.
 #[derive(Parser, Debug)]
@@ -55,6 +58,7 @@ struct Args {
 #[derive(Clone)]
 struct AppState {
     catalog: Arc<PathBuf>,
+    render_permits: Arc<Semaphore>,
 }
 
 #[tokio::main]
@@ -69,6 +73,7 @@ async fn main() -> Result<()> {
 
     let state = AppState {
         catalog: Arc::new(args.catalog.clone()),
+        render_permits: Arc::new(Semaphore::new(MAX_SIMULTANEOUS_GPU_RENDERS)),
     };
     let app = router(state);
     let addr: SocketAddr = format!("{}:{}", args.host, args.port)
@@ -205,20 +210,28 @@ async fn render_route(
     Query(q): Query<RenderQuery>,
     Json(session): Json<StarSession>,
 ) -> Result<Response, AppError> {
+    validate_render_dimensions(q.width, q.height).map_err(AppError::bad_request)?;
     let scene = session.to_scene().map_err(AppError::bad_request)?;
     let options = stars_host_common::RenderOptions {
-        width: q.width.clamp(16, 8192),
-        height: q.height.clamp(16, 8192),
+        width: q.width,
+        height: q.height,
         skyglow_enabled: q.skyglow,
         // L-20 variable override is a host-side view preference, not a stored
         // scene field; the headless server keeps catalogue magnitudes.
         variable_magnitudes: false,
     };
 
+    // Fail immediately rather than queueing unbounded catalog loads and GPU
+    // allocations. The owned permit stays live through rendering and encoding.
+    let _render_permit = state
+        .render_permits
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| AppError::overloaded())?;
+
     // The GPU pipeline is sync-driven (pollster) — run it on a blocking
-    // worker so the axum runtime stays responsive while a single render
-    // is in flight. This is fine for the V-L-22 reproducibility-first
-    // throughput target.
+    // worker so the axum runtime stays responsive while the bounded render is
+    // in flight.
     let scene_clone: SessionScene = scene;
     let catalog = state.catalog.clone();
     let pixels: Vec<u8> = tokio::task::spawn_blocking(move || {
@@ -266,6 +279,12 @@ impl AppError {
             message: format!("{err:#}"),
         }
     }
+    fn overloaded() -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: "GPU render capacity exhausted; retry later".to_string(),
+        }
+    }
 }
 
 impl IntoResponse for AppError {
@@ -290,6 +309,7 @@ mod tests {
     async fn healthz_and_presets_round_trip() {
         let state = AppState {
             catalog: Arc::new(PathBuf::from("crates/catalog/data/hyg_v42.csv")),
+            render_permits: Arc::new(Semaphore::new(MAX_SIMULTANEOUS_GPU_RENDERS)),
         };
         let app = router(state);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -325,6 +345,58 @@ mod tests {
         let json: serde_json::Value = resp.json().await.unwrap();
         assert_eq!(json["error"], "Not Found");
 
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn render_rejects_invalid_dimensions_and_overload_before_gpu_work() {
+        let state = AppState {
+            catalog: Arc::new(PathBuf::from("crates/catalog/data/hyg_v42.csv")),
+            render_permits: Arc::new(Semaphore::new(MAX_SIMULTANEOUS_GPU_RENDERS)),
+        };
+        let held_permit = state.render_permits.clone().acquire_owned().await.unwrap();
+        let app = router(state);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let session = session_from_preset(
+            ScenePresetArg::TokyoTonight,
+            env!("CARGO_PKG_VERSION"),
+            "stars-server-test",
+            "crates/catalog/data/hyg_v42.csv",
+            DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+        )
+        .unwrap();
+        let client = reqwest::Client::new();
+
+        let response = client
+            .post(format!("http://{addr}/render?width=0&height=720"))
+            .json(&session)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(body["error"], "Bad Request");
+        assert!(body["detail"]
+            .as_str()
+            .unwrap()
+            .contains("render dimensions"));
+
+        let response = client
+            .post(format!("http://{addr}/render?width=1280&height=720"))
+            .json(&session)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(body["error"], "Service Unavailable");
+        assert_eq!(body["detail"], "GPU render capacity exhausted; retry later");
+
+        drop(held_permit);
         server.abort();
     }
 }

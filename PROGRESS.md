@@ -8,6 +8,24 @@ A feature belongs here when it is implemented, documented in the relevant code
 or docs, covered by tests where numerical output matters, and wired into the
 relevant host applications.
 
+## Critical-review hardening
+
+The repository-wide 2026 critical review tightened shipped behavior without
+adding a new roadmap phase: catalogue-to-renderer deep-sky data now crosses a
+neutral host DTO; headless dimensions, GPU concurrency, LOD/CAS payloads, and
+catalogue ingest are validated rather than panicking or silently accepting
+corruption; browser session URLs preserve scintillation, meteor, and output
+colour settings; and the browser preview explicitly falls back to sRGB.
+
+Scientific corrections cover distance-monotonic Galactic dust integration,
+lunar phase photometry, high-rate meteor sampling and radiant epochs, southern
+aurora geometry, event-time refinement, SPK frame reduction, and finite-Sun
+Galilean shadow contacts. The physical Sun/Moon remain visible when atmospheric
+scattering is disabled, solar-system point sources receive atmospheric
+extinction when it is enabled, and fast moon ephemerides use a one-minute cache.
+Each numerical correction is pinned by focused regression tests; detailed
+limits remain in `VALIDATION.md`.
+
 ## Summary
 
 Work is organised along two orthogonal tracks (see [`ROADMAP.md`](ROADMAP.md)):

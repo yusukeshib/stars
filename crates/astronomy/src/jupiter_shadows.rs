@@ -12,14 +12,18 @@
 //!   `Z_e > 0`), and to drive moon-on-moon mutual occultation
 //!   classification.
 //! * From the **Sun**'s line of sight — the moon's projected offset
-//!   `(X_s, Y_s)` plus its line-of-sight depth `Z_s`. The shadow of the
-//!   moon falls on Jupiter at sky-plane position `(X_s, Y_s)` whenever
-//!   `X_s² + Y_s² < 1` and `Z_s < 0` (moon is between the Sun and
-//!   Jupiter's centre). The shadow's angular radius from the Earth is
-//!   the moon's physical radius divided by the Earth-Jupiter distance —
-//!   the same value the V-52b renderer already uses for the moon
-//!   sprite, because a moon's silhouette projected onto Jupiter spans
-//!   the same physical extent.
+//!   `(X_s, Y_s)` plus its line-of-sight depth `Z_s`. For a moon between
+//!   the Sun and Jupiter, the Sun-centred ray through the moon is
+//!   extended to Jupiter's centre plane. The finite solar disk makes
+//!   the umbra taper and the penumbra widen between the moon and that
+//!   plane. A shadow transit includes partial penumbral limb contact;
+//!   the opaque analytic disk uses the smaller umbral radius.
+//!
+//! The cone footprint is represented as a circle in Jupiter's centre
+//! plane. This intentionally neglects Jupiter's oblateness, surface
+//! curvature, and the slight ellipse made by an oblique plane/cone
+//! intersection. The penumbra is used for contact detection only; the
+//! current analytic renderer does not model its intensity gradient.
 //!
 //! Both perspectives share the same intrinsic moon-orbit angle `u` and
 //! orbital radius `r_J`; they differ only in two of Meeus's per-frame
@@ -62,6 +66,9 @@ use glam::Vec3;
 /// et al. 2018). Mirrors the constant in [`crate::moons`].
 const JUPITER_EQUATORIAL_RADIUS_KM: f64 = 71_492.0;
 
+/// Nominal solar radius in kilometres, IAU 2015 Resolution B3.
+const SOLAR_RADIUS_KM: f64 = 695_700.0;
+
 /// Index of Jupiter inside [`Planet::ALL`]. Mercury = 0, Venus = 1,
 /// Mars = 2, Jupiter = 3, …
 pub const JUPITER_PLANET_INDEX: u8 = 3;
@@ -89,6 +96,9 @@ pub struct GalileanShadowState {
     /// Moon's Jovicentric rectangular position from the Sun's
     /// perspective. Units: Jupiter equatorial radii (R_J).
     pub sun_xyz_r_j: [f64; 3],
+    /// Jupiter's heliocentric distance used to construct the finite-Sun
+    /// shadow cone. Units: kilometres.
+    pub sun_jupiter_distance_km: f64,
 }
 
 impl GalileanShadowState {
@@ -110,15 +120,24 @@ impl GalileanShadowState {
         z > 0.0 && (x * x + y * y) < 1.0
     }
 
-    /// `true` if the moon's shadow currently falls on Jupiter's disk —
-    /// i.e. the moon is **between the Sun and Jupiter** and projects
-    /// inside the (R_J = 1) cylinder. The shadow's sky-plane offset
-    /// (from Earth) tracks the Sun-perspective `(x, y)` up to the
-    /// small Sun-Jupiter-Earth phase-angle correction handled by
-    /// [`galilean_shadow_disk`].
+    /// `true` if any part of the moon's finite-Sun penumbra contacts
+    /// Jupiter's projected disk. This includes partial limb contacts
+    /// for which the shadow axis itself is outside the limb.
+    ///
+    /// The contact test uses the circular centre-plane approximation
+    /// documented at module level; it is not a Jovian surface-contact
+    /// timing model.
     pub fn shadow_on_jupiter(&self) -> bool {
-        let [x, y, z] = self.sun_xyz_r_j;
-        z < 0.0 && (x * x + y * y) < 1.0
+        self.shadow_cone_at_jupiter()
+            .is_some_and(ShadowConeAtJupiter::contacts_jupiter)
+    }
+
+    fn shadow_cone_at_jupiter(&self) -> Option<ShadowConeAtJupiter> {
+        shadow_cone_at_jupiter(
+            self.sun_xyz_r_j,
+            self.moon.radius_km(),
+            self.sun_jupiter_distance_km,
+        )
     }
 }
 
@@ -143,6 +162,7 @@ pub fn galilean_shadow_states(julian_date: f64) -> [GalileanShadowState; 4] {
             moon,
             earth_xyz_r_j: [xe, ye, ze],
             sun_xyz_r_j: [xs, ys, zs],
+            sun_jupiter_distance_km: f.sun_jupiter_distance_km,
         }
     })
 }
@@ -167,6 +187,8 @@ struct JovianFrame {
     /// `d_minus_delta_by_173` — Meeus's light-time-corrected days
     /// since J2000 used as the argument for each moon's mean motion.
     d_light: f64,
+    /// Jupiter-Sun centre distance used by the finite-Sun shadow cone.
+    sun_jupiter_distance_km: f64,
 }
 
 impl JovianFrame {
@@ -199,6 +221,7 @@ impl JovianFrame {
             b_correction: b,
             lambda,
             d_light,
+            sun_jupiter_distance_km: r_jup_sun * ASTRONOMICAL_UNIT_KM,
         }
     }
 }
@@ -289,6 +312,67 @@ fn project_jovicentric(r_moon: f64, u: f64, _lambda: f64, observer_lat: f64) -> 
     (x_east, y_north, z_los)
 }
 
+/// Circular cross-section of a moon's finite-Sun shadow cone in the
+/// plane through Jupiter's centre normal to the Jupiter-Sun line.
+#[derive(Debug, Clone, Copy)]
+struct ShadowConeAtJupiter {
+    axis_xy_r_j: [f64; 2],
+    umbra_radius_km: f64,
+    penumbra_radius_km: f64,
+}
+
+impl ShadowConeAtJupiter {
+    fn contacts_jupiter(self) -> bool {
+        let axis_distance_r_j = self.axis_xy_r_j[0].hypot(self.axis_xy_r_j[1]);
+        let penumbra_radius_r_j = self.penumbra_radius_km / JUPITER_EQUATORIAL_RADIUS_KM;
+        axis_distance_r_j <= 1.0 + penumbra_radius_r_j
+    }
+}
+
+/// Project the Sun-moon line to Jupiter's centre plane and evaluate the
+/// umbral and penumbral radii there. The linear cone slopes are the
+/// standard similar-triangle finite-source construction. They differ
+/// from the exact tangent-cone slopes only at second order in the
+/// Sun's angular radius (well below this module's Meeus accuracy).
+fn shadow_cone_at_jupiter(
+    moon_xyz_r_j: [f64; 3],
+    moon_radius_km: f64,
+    sun_jupiter_distance_km: f64,
+) -> Option<ShadowConeAtJupiter> {
+    let [x_r_j, y_r_j, z_r_j] = moon_xyz_r_j;
+    if z_r_j >= 0.0 || moon_radius_km <= 0.0 || sun_jupiter_distance_km <= 0.0 {
+        return None;
+    }
+
+    let x_km = x_r_j * JUPITER_EQUATORIAL_RADIUS_KM;
+    let y_km = y_r_j * JUPITER_EQUATORIAL_RADIUS_KM;
+    let z_km = z_r_j * JUPITER_EQUATORIAL_RADIUS_KM;
+    let sun_to_moon_axial_km = sun_jupiter_distance_km + z_km;
+    if sun_to_moon_axial_km <= 0.0 {
+        return None;
+    }
+
+    // The shadow axis is the line from the Sun's centre through the
+    // moon's centre. Continue it from z = z_moon to Jupiter's z = 0
+    // centre plane rather than treating (x_moon, y_moon) as the shadow
+    // centre. The correction is small but has the same finite-distance
+    // origin as the cone radii.
+    let axis_scale = sun_jupiter_distance_km / sun_to_moon_axial_km;
+    let axis_xy_r_j = [x_r_j * axis_scale, y_r_j * axis_scale];
+
+    let transverse_km = x_km.hypot(y_km);
+    let sun_moon_distance_km = sun_to_moon_axial_km.hypot(transverse_km);
+    let moon_to_plane_km = (-z_km / sun_to_moon_axial_km) * sun_moon_distance_km;
+    let umbra_slope = (SOLAR_RADIUS_KM - moon_radius_km) / sun_moon_distance_km;
+    let penumbra_slope = (SOLAR_RADIUS_KM + moon_radius_km) / sun_moon_distance_km;
+
+    Some(ShadowConeAtJupiter {
+        axis_xy_r_j,
+        umbra_radius_km: (moon_radius_km - moon_to_plane_km * umbra_slope).max(0.0),
+        penumbra_radius_km: moon_radius_km + moon_to_plane_km * penumbra_slope,
+    })
+}
+
 /// Galilean shadow analytic disk, ready to plug into the V-51b
 /// occluder array.
 ///
@@ -298,11 +382,14 @@ fn project_jovicentric(r_moon: f64, u: f64, _lambda: f64, observer_lat: f64) -> 
 #[derive(Debug, Clone, Copy)]
 pub struct GalileanShadowDisk {
     pub moon: GalileanMoon,
-    /// Apparent angular radius of the shadow on Jupiter's disk, in
-    /// radians. Equals `moon.radius_km() / earth_jupiter_distance_km`
-    /// because the shadow is the moon's silhouette projected onto
-    /// Jupiter and subtends the same physical extent.
+    /// Apparent angular radius of the opaque umbra on Jupiter's centre
+    /// plane, in radians. The finite solar disk makes this smaller than
+    /// the moon's own apparent radius.
     pub angular_radius_rad: f64,
+    /// Apparent outer penumbral radius on Jupiter's centre plane, in
+    /// radians. This is used for partial-limb contact detection; the
+    /// current analytic renderer does not draw a penumbral gradient.
+    pub penumbra_angular_radius_rad: f64,
     /// Apparent direction of the shadow centre in the equatorial
     /// frame of date (unit vector). Lies near Jupiter's apparent
     /// direction with an arcsecond-scale offset for the projected
@@ -321,9 +408,10 @@ impl GalileanShadowDisk {
 }
 
 /// Active shadow discs whose moon is currently between the Sun and
-/// Jupiter's centre **and** whose Sun-projected `(X_s, Y_s)` falls
-/// inside Jupiter's disk. Returned in [`GalileanMoon::ALL`] order with
-/// an `Option` per slot so callers can index by moon.
+/// Jupiter's centre and whose finite-Sun penumbra overlaps Jupiter's
+/// projected disk, including partial limb contacts. Returned in
+/// [`GalileanMoon::ALL`] order with an `Option` per slot so callers can
+/// index by moon.
 ///
 /// `jupiter` is the precomputed apparent Jupiter state from
 /// [`apparent_planet`] / `apparent_planet_topocentric`; the same
@@ -345,13 +433,15 @@ pub fn galilean_shadow_disks_at(
         if !state.shadow_on_jupiter() {
             continue;
         }
-        // Sun-perspective sky-plane offset, in km, around Jupiter's
+        let cone = state
+            .shadow_cone_at_jupiter()
+            .expect("an active shadow transit must have a valid shadow cone");
+        // Finite-distance shadow-axis offset, in km, around Jupiter's
         // centre. Reusing the same east / north basis the V-52b moon
         // sprite path uses keeps the analytic mask aligned with the
         // moon-disk pixels.
-        let [xs, ys, _zs] = state.sun_xyz_r_j;
-        let east_offset_km = xs * r_j_km;
-        let north_offset_km = ys * r_j_km;
+        let east_offset_km = cone.axis_xy_r_j[0] * r_j_km;
+        let north_offset_km = cone.axis_xy_r_j[1] * r_j_km;
         let pos_km = [
             jupiter_dir_eq[0] * jupiter_distance_km
                 + east_hat[0] * east_offset_km
@@ -365,11 +455,12 @@ pub fn galilean_shadow_disks_at(
         ];
         let (ra, dec, _) = ra_dec_from_equatorial_vector(pos_km);
         let dir = equatorial_unit_vector_f64(ra, dec);
-        let radius_km = state.moon.radius_km();
-        let angular_radius_rad = (radius_km / jupiter_distance_km).atan();
+        let angular_radius_rad = (cone.umbra_radius_km / jupiter_distance_km).atan();
+        let penumbra_angular_radius_rad = (cone.penumbra_radius_km / jupiter_distance_km).atan();
         out[i] = Some(GalileanShadowDisk {
             moon: state.moon,
             angular_radius_rad,
+            penumbra_angular_radius_rad,
             direction_eq: dir,
         });
     }
@@ -462,34 +553,27 @@ mod tests {
         }
     }
 
-    /// At J2000 (no major shadow transit listed in JPL Horizons inside
-    /// the ±0.5 hr window), `galilean_shadow_disks` should not return
-    /// a stale entry: the predicate fires only when the moon is
-    /// between the Sun and Jupiter's centre *and* projects inside the
-    /// disk.
+    /// At a quiet epoch, every emitted disk must satisfy the
+    /// finite-Sun penumbral overlap predicate rather than the old
+    /// shadow-axis-centre predicate.
     #[test]
     fn shadow_predicate_excludes_off_event_moons() {
-        // Pick a quiet date (no canonical shadow transit) and
-        // verify that every active disk's Sun-projected (x, y) sits
-        // inside the (R_J = 1) cylinder. The point is the predicate,
-        // not the event — at most epochs zero or one moon is active.
         let jd = 2_451_545.0;
         let disks = galilean_shadow_disks(jd);
         let states = galilean_shadow_states(jd);
-        for (i, opt) in disks.iter().enumerate() {
-            let state = states[i];
-            if opt.is_some() {
-                let r = (state.sun_xyz_r_j[0].powi(2) + state.sun_xyz_r_j[1].powi(2)).sqrt();
-                assert!(
-                    r < 1.0,
-                    "{} shadow disk emitted with r = {r} R_J",
-                    state.moon.name()
-                );
-                assert!(
-                    state.sun_xyz_r_j[2] < 0.0,
-                    "{} shadow disk emitted while moon is behind Jupiter from Sun",
-                    state.moon.name()
-                );
+        for (state, disk) in states.iter().zip(disks.iter()) {
+            assert_eq!(
+                disk.is_some(),
+                state.shadow_on_jupiter(),
+                "{} disk presence disagrees with contact predicate",
+                state.moon.name(),
+            );
+            if disk.is_some() {
+                let cone = state
+                    .shadow_cone_at_jupiter()
+                    .expect("active shadow must have a cone");
+                assert!(cone.contacts_jupiter());
+                assert!(state.sun_xyz_r_j[2] < 0.0);
             }
         }
     }
@@ -674,6 +758,81 @@ mod tests {
         }
     }
 
+    #[test]
+    fn finite_sun_cone_shrinks_umbra_and_expands_penumbra() {
+        let sun_jupiter_distance_km = 5.2 * ASTRONOMICAL_UNIT_KM;
+        let cone = shadow_cone_at_jupiter(
+            [0.0, 0.0, -5.9],
+            GalileanMoon::Io.radius_km(),
+            sun_jupiter_distance_km,
+        )
+        .expect("sunward Io must cast a cone toward Jupiter");
+
+        // Independently pinned similar-triangle values for an Io-like
+        // moon 5.9 R_J in front of Jupiter at 5.2 AU from the Sun.
+        assert!((cone.umbra_radius_km - 1_445.156_657_6).abs() < 1e-6);
+        assert!((cone.penumbra_radius_km - 2_200.019_853_6).abs() < 1e-6);
+        assert!(cone.umbra_radius_km < GalileanMoon::Io.radius_km());
+        assert!(cone.penumbra_radius_km > GalileanMoon::Io.radius_km());
+    }
+
+    #[test]
+    fn shadow_axis_is_extended_from_sun_to_jupiter_plane() {
+        let sun_jupiter_distance_km = 5.2 * ASTRONOMICAL_UNIT_KM;
+        let moon_xyz_r_j = [0.75, -0.25, -5.9];
+        let cone = shadow_cone_at_jupiter(
+            moon_xyz_r_j,
+            GalileanMoon::Io.radius_km(),
+            sun_jupiter_distance_km,
+        )
+        .unwrap();
+        let expected_scale = sun_jupiter_distance_km
+            / (sun_jupiter_distance_km + moon_xyz_r_j[2] * JUPITER_EQUATORIAL_RADIUS_KM);
+        assert!((cone.axis_xy_r_j[0] - moon_xyz_r_j[0] * expected_scale).abs() < 1e-14);
+        assert!((cone.axis_xy_r_j[1] - moon_xyz_r_j[1] * expected_scale).abs() < 1e-14);
+        assert!(cone.axis_xy_r_j[0] > moon_xyz_r_j[0]);
+    }
+
+    #[test]
+    fn penumbra_detects_partial_limb_contact_and_tangency() {
+        let sun_jupiter_distance_km = 5.2 * ASTRONOMICAL_UNIT_KM;
+        let z_r_j = -5.9;
+        let centred = shadow_cone_at_jupiter(
+            [0.0, 0.0, z_r_j],
+            GalileanMoon::Io.radius_km(),
+            sun_jupiter_distance_km,
+        )
+        .unwrap();
+        let penumbra_r_j = centred.penumbra_radius_km / JUPITER_EQUATORIAL_RADIUS_KM;
+        let axis_scale = sun_jupiter_distance_km
+            / (sun_jupiter_distance_km + z_r_j * JUPITER_EQUATORIAL_RADIUS_KM);
+
+        let state_at_axis_distance = |axis_distance_r_j: f64| GalileanShadowState {
+            moon: GalileanMoon::Io,
+            earth_xyz_r_j: [0.0; 3],
+            sun_xyz_r_j: [axis_distance_r_j / axis_scale, 0.0, z_r_j],
+            sun_jupiter_distance_km,
+        };
+
+        let partial = state_at_axis_distance(1.0 + 0.5 * penumbra_r_j);
+        assert!(partial.sun_xyz_r_j[0] > 1.0);
+        assert!(partial.shadow_on_jupiter());
+
+        let tangent = state_at_axis_distance(1.0 + penumbra_r_j);
+        assert!(tangent.shadow_on_jupiter());
+
+        let separated = state_at_axis_distance(1.0 + penumbra_r_j + 1e-9);
+        assert!(!separated.shadow_on_jupiter());
+    }
+
+    #[test]
+    fn exhausted_umbra_is_clamped_without_losing_penumbra() {
+        let cone =
+            shadow_cone_at_jupiter([0.0, 0.0, -26.0], 1.0, 5.2 * ASTRONOMICAL_UNIT_KM).unwrap();
+        assert_eq!(cone.umbra_radius_km, 0.0);
+        assert!(cone.penumbra_radius_km > 1.0);
+    }
+
     /// Pinned epoch where Io's shadow sits well inside the Jovian
     /// disk: 2008-12-20 14:00 UT, roughly 45 min after the
     /// 2008-12-20 13:14 UT ingress canon pinned by
@@ -709,26 +868,26 @@ mod tests {
         );
     }
 
-    /// Shadow radius must equal the moon's physical radius divided by
-    /// the Earth-Jupiter distance: the shadow is a silhouette on
-    /// Jupiter, so its apparent extent on the sky matches the moon's
-    /// physical radius at the Jupiter range.
+    /// Emitted angular radii must use the finite-Sun cone at Jupiter,
+    /// not the moon's physical radius, while preserving umbra < moon <
+    /// penumbra.
     #[test]
-    fn shadow_radius_matches_moon_radius_at_jupiter_distance() {
+    fn shadow_disk_uses_finite_sun_cone_radii() {
         let target_jd = pinned_io_mid_transit_jd();
         let jupiter = apparent_planet(Planet::Jupiter, target_jd);
         let distance_km = jupiter.distance_au * ASTRONOMICAL_UNIT_KM;
+        let states = galilean_shadow_states(target_jd);
         let disks = galilean_shadow_disks(target_jd);
-        for disk in disks.iter().flatten() {
-            let expected = (disk.moon.radius_km() / distance_km).atan();
-            let rel_err = (disk.angular_radius_rad - expected).abs() / expected;
-            assert!(
-                rel_err < 1e-6,
-                "{} shadow radius {} vs expected {}",
-                disk.moon.name(),
-                disk.angular_radius_rad,
-                expected,
-            );
+        for (state, disk) in states.iter().zip(disks.iter()) {
+            let Some(disk) = disk else { continue };
+            let cone = state.shadow_cone_at_jupiter().unwrap();
+            let expected_umbra = (cone.umbra_radius_km / distance_km).atan();
+            let expected_penumbra = (cone.penumbra_radius_km / distance_km).atan();
+            let moon_radius = (disk.moon.radius_km() / distance_km).atan();
+            assert!((disk.angular_radius_rad - expected_umbra).abs() < 1e-16);
+            assert!((disk.penumbra_angular_radius_rad - expected_penumbra).abs() < 1e-16);
+            assert!(disk.angular_radius_rad < moon_radius);
+            assert!(disk.penumbra_angular_radius_rad > moon_radius);
         }
     }
 

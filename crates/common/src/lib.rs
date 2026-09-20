@@ -14,7 +14,8 @@ use anyhow::{Context, Result};
 use astronomy::{FalchiAtlas, TimeScales};
 use catalog::{
     load_from_file, parse_gaia_dr3_csv, parse_hipparcos_csv, parse_tycho2_csv, render_magnitude_at,
-    CatalogObjectId, CatalogSource, Star,
+    CatalogObjectId, CatalogSource, DeepSkyCatalog, DeepSkyId, MessierCatalog, NgcBrightCatalog,
+    Star,
 };
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
@@ -37,9 +38,9 @@ pub use render::*;
 pub use renderer::OpticalDesign;
 pub use renderer::DEFAULT_SCREEN_LIMITING_MAGNITUDE;
 use renderer::{
-    build_star_instance, Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation,
-    LightPollution, OutputColourSpace, OverlayConfig, OverlayKind, OverlayPalette, Scintillation,
-    SkyProjection, SkyViewpoint, StarInstance,
+    build_star_instance, Atmosphere, AtmospherePreset, DeepSkyMarker, DeepSkyMarkerShape,
+    ExternalViewpoint, EyepieceSimulation, LightPollution, OutputColourSpace, OverlayConfig,
+    OverlayKind, OverlayPalette, Scintillation, SkyProjection, SkyViewpoint, StarInstance,
 };
 pub use satellites::{
     curated_satellite_layer, curated_satellite_tles, CURATED_TLE_TEXT,
@@ -359,6 +360,32 @@ pub fn aurora_from_args(enabled: bool, kp: f32, season: AuroraSeasonArg) -> rend
 /// `deep_sky_magnitude_limit` controls the density filter for the Messier
 /// deep-sky markers and labels; the renderer clamps it again on the inside
 /// so a stale host value cannot crash the marker builder.
+/// Adapt catalogue records into renderer-neutral marker DTOs, applying the
+/// catalogue-owned resolved-cluster suppression policy at the host boundary.
+pub fn deep_sky_markers() -> Vec<DeepSkyMarker> {
+    let ngc = NgcBrightCatalog;
+    let messier = MessierCatalog;
+    ngc.objects(f32::INFINITY)
+        .into_iter()
+        .filter(|object| !ngc.resolve_as_member_field(object.id))
+        .chain(
+            messier
+                .objects(f32::INFINITY)
+                .into_iter()
+                .filter(|object| !messier.resolve_as_member_field(object.id)),
+        )
+        .map(|object| DeepSkyMarker {
+            position: object.position,
+            magnitude: object.magnitude,
+            size_arcmin: object.size_arcmin,
+            shape: match object.id {
+                DeepSkyId::Messier(_) => DeepSkyMarkerShape::Diamond,
+                DeepSkyId::Ngc(_) | DeepSkyId::Ic(_) => DeepSkyMarkerShape::Ring,
+            },
+        })
+        .collect()
+}
+
 pub fn overlay_config_from_args(
     overlays_disabled: bool,
     overlays: &[OverlayArg],

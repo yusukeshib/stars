@@ -103,14 +103,14 @@ pub const FULL_MOON_XYZ_Y_NORMALIZED: [f64; 3] = [1.01, 1.0, 0.82];
 ///
 /// The phase term follows the widely used Krisciunas & Schaefer 1991 full-Moon
 /// relative magnitude polynomial, normalised so `phase_angle_rad = 0` preserves
-/// [`FULL_MOON_ILLUMINANCE_LUX`]. The illuminated fraction remains an endpoint
-/// guard for callers that only know the geometric disk fraction.
+/// [`FULL_MOON_ILLUMINANCE_LUX`]. That empirical phase law already includes the
+/// changing illuminated area, so `illuminated_fraction` is retained only for
+/// API compatibility and must not be applied as a second phase factor.
 pub fn lunar_illuminance_lux(
-    illuminated_fraction: f64,
+    _illuminated_fraction: f64,
     distance_km: f64,
     phase_angle_rad: f64,
 ) -> f64 {
-    let fraction = illuminated_fraction.clamp(0.0, 1.0);
     let distance = if distance_km.is_finite() && distance_km > 0.0 {
         distance_km
     } else {
@@ -126,10 +126,7 @@ pub fn lunar_illuminance_lux(
     // innermost lunar aureole.
     let phase_mag = 0.026 * phase_deg + 4.0e-9 * phase_deg.powi(4);
     let phase_scale = 10_f64.powf(-0.4 * phase_mag);
-    FULL_MOON_ILLUMINANCE_LUX
-        * fraction.sqrt()
-        * phase_scale
-        * (MEAN_MOON_DISTANCE_KM / distance).powi(2)
+    FULL_MOON_ILLUMINANCE_LUX * phase_scale * (MEAN_MOON_DISTANCE_KM / distance).powi(2)
 }
 
 /// Mean dark-side ("Da Vinci glow" / earthshine) surface luminance of the
@@ -213,14 +210,22 @@ mod tests {
     }
 
     #[test]
-    fn lunar_illuminance_tracks_phase_and_distance() {
+    fn lunar_illuminance_phase_law_and_distance_are_pinned() {
         let full = lunar_illuminance_lux(1.0, MEAN_MOON_DISTANCE_KM, 0.0);
-        assert!((full - FULL_MOON_ILLUMINANCE_LUX).abs() < 1e-12);
-        assert_eq!(lunar_illuminance_lux(0.0, MEAN_MOON_DISTANCE_KM, 0.0), 0.0);
-        assert!(
-            lunar_illuminance_lux(0.5, MEAN_MOON_DISTANCE_KM, 90_f64.to_radians()) < full * 0.5
+        let quarter = lunar_illuminance_lux(0.5, MEAN_MOON_DISTANCE_KM, 90_f64.to_radians());
+        let new_moon = lunar_illuminance_lux(0.0, MEAN_MOON_DISTANCE_KM, std::f64::consts::PI);
+        assert!((full - 0.25).abs() < 1e-12);
+        assert!((quarter - 0.022_749_088_942_184_147).abs() < 1e-15);
+        assert!((new_moon - 0.000_070_197_881_969_730_68).abs() < 1e-18);
+
+        // The empirical phase law already includes illuminated area: supplying
+        // a duplicate geometric fraction must not dim the result again.
+        assert_eq!(
+            quarter,
+            lunar_illuminance_lux(1.0, MEAN_MOON_DISTANCE_KM, 90_f64.to_radians())
         );
-        assert!(lunar_illuminance_lux(1.0, MEAN_MOON_DISTANCE_KM * 0.9, 0.0) > full);
+        let closer = lunar_illuminance_lux(0.5, MEAN_MOON_DISTANCE_KM * 0.9, 90_f64.to_radians());
+        assert!((closer / quarter - 1.0 / 0.9_f64.powi(2)).abs() < 1e-12);
     }
 
     /// V-26: earthshine vanishes at full Moon, grows monotonically toward

@@ -258,6 +258,12 @@ export function StarCanvas({
       await wasm.default();
       if (cancelled) return;
       const handle = await wasm.StarView.create("star-canvas");
+      if (cancelled) {
+        // wasm-bindgen instances expose `free()` at runtime even though the
+        // checked-in package declaration omits that generated helper.
+        (handle as unknown as { free: () => void }).free();
+        return;
+      }
       handleRef.current = handle;
       onSearchReadyRef.current?.({
         lookup: (query: string, limit: number) => handle.lookup_object(query, limit),

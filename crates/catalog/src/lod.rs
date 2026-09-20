@@ -65,6 +65,11 @@ pub struct TileId {
 }
 
 impl TileId {
+    /// Whether every component names a cell in the fixed LOD grid.
+    pub fn is_valid(self) -> bool {
+        usize::from(self.tier) < TIER_BOUNDS.len() && self.lat < LAT_BANDS && self.lon < LON_BANDS
+    }
+
     /// The tier a given apparent magnitude belongs to, or `None` if it is
     /// fainter than the deepest tier and is therefore not tiled.
     pub fn tier_for_magnitude(magnitude: f32) -> Option<u8> {
@@ -194,8 +199,14 @@ impl MemoryBlobStore {
 }
 
 impl BlobStore for MemoryBlobStore {
-    fn get(&self, content_hash: &str) -> Option<Vec<u8>> {
-        self.blobs.get(content_hash).cloned()
+    fn get(&self, requested_hash: &str) -> Option<Vec<u8>> {
+        if !is_valid_content_hash(requested_hash) {
+            return None;
+        }
+        self.blobs
+            .get(requested_hash)
+            .filter(|bytes| content_hash(bytes) == requested_hash)
+            .cloned()
     }
 }
 
@@ -235,8 +246,12 @@ impl FsCasBlobStore {
 
 #[cfg(feature = "filesystem")]
 impl BlobStore for FsCasBlobStore {
-    fn get(&self, content_hash: &str) -> Option<Vec<u8>> {
-        std::fs::read(self.blob_path(content_hash)).ok()
+    fn get(&self, requested_hash: &str) -> Option<Vec<u8>> {
+        if !is_valid_content_hash(requested_hash) {
+            return None;
+        }
+        let bytes = std::fs::read(self.blob_path(requested_hash)).ok()?;
+        (content_hash(&bytes) == requested_hash).then_some(bytes)
     }
 }
 
@@ -331,6 +346,11 @@ impl<S: BlobStore> LodCatalog<S> {
         let mut selected: Vec<&LodTileEntry> = Vec::new();
         let mut tiles_examined = 0usize;
         for entry in self.index.entries() {
+            // Index files are external inputs. Ignore impossible IDs before
+            // indexing tier bounds or evaluating their cell geometry.
+            if !entry.tile.is_valid() {
+                continue;
+            }
             // A tier can be skipped without geometry work only when even its
             // *brightest* possible star is fainter than the limit. A tier holds
             // stars in `(TIER_BOUNDS[tier-1], TIER_BOUNDS[tier]]`, so its
@@ -383,6 +403,10 @@ impl<S: BlobStore> LodCatalog<S> {
 /// key inside the engine. Provenance-grade hashing of committed fixtures stays
 /// SHA-256 via `data/manifest.toml`; this only needs to be deterministic and
 /// collision-resistant enough to dedupe identical tile payloads.
+fn is_valid_content_hash(value: &str) -> bool {
+    value.len() == 16 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 pub fn content_hash(bytes: &[u8]) -> String {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -583,7 +607,37 @@ mod tests {
     }
 
     #[test]
-    fn content_hash_dedupes_identical_payloads() {
+    fn invalid_tile_ids_are_ignored_without_panicking() {
+        let mut store = MemoryBlobStore::new();
+        let hash = store.put(gaia_tile(1, 0.0, 0.0, 4.0).into_bytes());
+        let mut index = LodIndex::new();
+        for tile in [
+            TileId {
+                tier: TIER_BOUNDS.len() as u8,
+                lat: 0,
+                lon: 0,
+            },
+            TileId {
+                tier: 0,
+                lat: LAT_BANDS,
+                lon: 0,
+            },
+            TileId {
+                tier: 0,
+                lat: 0,
+                lon: LON_BANDS,
+            },
+        ] {
+            index.insert(tile, hash.clone(), 1);
+        }
+        let stream = LodCatalog::new(index, store).stream(&LodQuery::all_sky(12.0));
+        assert_eq!(stream.tiles_examined, 0);
+        assert_eq!(stream.tiles_loaded, 0);
+        assert!(stream.stars.is_empty());
+    }
+
+    #[test]
+    fn content_hash_dedupes_identical_payloads_and_rejects_mismatches() {
         let mut store = MemoryBlobStore::new();
         let h1 = store.put(b"abc".to_vec());
         let h2 = store.put(b"abc".to_vec());
@@ -591,6 +645,10 @@ mod tests {
         assert_eq!(h1, h2);
         assert_ne!(h1, h3);
         assert_eq!(store.get(&h1).as_deref(), Some(b"abc".as_slice()));
+
+        store.blobs.insert(h1.clone(), b"corrupted".to_vec());
+        assert_eq!(store.get(&h1), None);
+        assert_eq!(store.get("../../outside-cas"), None);
     }
 
     #[cfg(feature = "filesystem")]
@@ -613,16 +671,21 @@ mod tests {
             BASE_TIER,
             crate::coords::radec_hours_deg_to_cartesian(101.287 / 15.0, -16.716),
         );
-        index.insert(tile, hash, 1);
+        index.insert(tile, hash.clone(), 1);
         let cat = LodCatalog::new(index, store);
 
         let stream = cat.stream(&LodQuery::all_sky(6.0));
-        std::fs::remove_dir_all(&root).ok();
         assert_eq!(stream.tiles_loaded, 1);
         assert_eq!(stream.stars.len(), 1);
         assert_eq!(
             stream.stars[0].identifiers.primary,
             Some(CatalogObjectId::GaiaDr3(2947050466531873024))
         );
+
+        std::fs::write(cat.store.blob_path(&hash), b"corrupted").unwrap();
+        let corrupted = cat.stream(&LodQuery::all_sky(6.0));
+        assert_eq!(corrupted.tiles_loaded, 0);
+        assert!(corrupted.stars.is_empty());
+        std::fs::remove_dir_all(&root).ok();
     }
 }

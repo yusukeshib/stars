@@ -248,6 +248,46 @@ fn csv_reader(data: &str) -> csv::Reader<&[u8]> {
         .from_reader(data.as_bytes())
 }
 
+/// A non-fatal problem found while ingesting a CSV export.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CsvIngestWarning {
+    /// One-based CSV row number (the header is row 1).
+    pub row: usize,
+    pub message: String,
+}
+
+/// Parsed stars plus diagnostics for rows or schemas that could not be used.
+/// The legacy `parse_*_csv` functions return only `stars` for compatibility.
+#[derive(Debug, Default)]
+pub struct CsvIngestReport {
+    pub stars: Vec<Star>,
+    pub warnings: Vec<CsvIngestWarning>,
+}
+
+fn warn(report: &mut CsvIngestReport, row: usize, message: impl Into<String>) {
+    report.warnings.push(CsvIngestWarning {
+        row,
+        message: message.into(),
+    });
+}
+
+fn require_columns(report: &mut CsvIngestReport, columns: &[(&str, Option<usize>)]) -> bool {
+    let missing: Vec<_> = columns
+        .iter()
+        .filter_map(|(name, index)| index.is_none().then_some(*name))
+        .collect();
+    if missing.is_empty() {
+        true
+    } else {
+        warn(
+            report,
+            1,
+            format!("missing required columns: {}", missing.join(", ")),
+        );
+        false
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Hipparcos
 // ---------------------------------------------------------------------------
@@ -259,11 +299,21 @@ fn csv_reader(data: &str) -> csv::Reader<&[u8]> {
 /// `Plx` (mas); `pmRA`/`pmDE` (mas/yr, `pmRA` includes cos δ); `B-V`/`BV`; and
 /// an optional `HD` cross-ID. Rows without HIP/position/magnitude are skipped.
 pub fn parse_hipparcos_csv(data: &str) -> Vec<Star> {
+    parse_hipparcos_csv_report(data).stars
+}
+
+/// Parse Hipparcos CSV while retaining diagnostics for malformed input.
+pub fn parse_hipparcos_csv_report(data: &str) -> CsvIngestReport {
+    let mut report = CsvIngestReport::default();
     let mut reader = csv_reader(data);
-    let Ok(header) = reader.headers() else {
-        return Vec::new();
+    let header = match reader.headers() {
+        Ok(header) => header.clone(),
+        Err(error) => {
+            warn(&mut report, 1, format!("invalid CSV header: {error}"));
+            return report;
+        }
     };
-    let cols = Columns::from_header(header);
+    let cols = Columns::from_header(&header);
     let hip_i = cols.index(&["HIP"]);
     let ra_i = cols.index(&["RAICRS", "RAdeg", "_RAJ2000", "ra"]);
     let dec_i = cols.index(&["DEICRS", "DEdeg", "_DEJ2000", "dec"]);
@@ -273,21 +323,44 @@ pub fn parse_hipparcos_csv(data: &str) -> Vec<Star> {
     let pmde_i = cols.index(&["pmDE", "pmdec"]);
     let bv_i = cols.index(&["B-V", "BV", "bp_rp"]);
     let hd_i = cols.index(&["HD"]);
+    if !require_columns(
+        &mut report,
+        &[
+            ("HIP", hip_i),
+            ("RA", ra_i),
+            ("Dec", dec_i),
+            ("V magnitude", vmag_i),
+        ],
+    ) {
+        return report;
+    }
 
-    let mut stars = Vec::new();
-    for record in reader.records().flatten() {
+    for (record_index, record) in reader.records().enumerate() {
+        let row = record_index + 2;
+        let record = match record {
+            Ok(record) => record,
+            Err(error) => {
+                warn(&mut report, row, format!("malformed CSV record: {error}"));
+                continue;
+            }
+        };
         let (Some(hip), Some(ra), Some(dec), Some(mag)) = (
             parse_u32(&record, hip_i),
             parse_f64(&record, ra_i),
             parse_f64(&record, dec_i),
             parse_f64(&record, vmag_i),
         ) else {
+            warn(
+                &mut report,
+                row,
+                "missing or invalid required Hipparcos field",
+            );
             continue;
         };
         let distance_pc =
             distance_from_parallax_mas(parse_f64(&record, plx_i)).unwrap_or(UNKNOWN_DISTANCE_PC);
         let identifiers = CatalogIdentifiers::from_hipparcos_row(hip, parse_u32(&record, hd_i));
-        stars.push(star_from_fields(
+        report.stars.push(star_from_fields(
             identifiers,
             ra,
             dec,
@@ -298,7 +371,7 @@ pub fn parse_hipparcos_csv(data: &str) -> Vec<Star> {
             parse_f64(&record, bv_i).unwrap_or(0.0) as f32,
         ));
     }
-    stars
+    report
 }
 
 /// Filesystem-backed Hipparcos main-catalogue backend (CSV export from VizieR
@@ -360,11 +433,21 @@ pub fn unpack_tyc(packed: u64) -> (u32, u32, u32) {
 /// VT/BT by the ESA 1997 transformation. Tycho-2 carries no parallax, so the
 /// distance is left unknown (unit sphere).
 pub fn parse_tycho2_csv(data: &str) -> Vec<Star> {
+    parse_tycho2_csv_report(data).stars
+}
+
+/// Parse Tycho-2 CSV while retaining diagnostics for malformed input.
+pub fn parse_tycho2_csv_report(data: &str) -> CsvIngestReport {
+    let mut report = CsvIngestReport::default();
     let mut reader = csv_reader(data);
-    let Ok(header) = reader.headers() else {
-        return Vec::new();
+    let header = match reader.headers() {
+        Ok(header) => header.clone(),
+        Err(error) => {
+            warn(&mut report, 1, format!("invalid CSV header: {error}"));
+            return report;
+        }
     };
-    let cols = Columns::from_header(header);
+    let cols = Columns::from_header(&header);
     let tyc1_i = cols.index(&["TYC1"]);
     let tyc2_i = cols.index(&["TYC2"]);
     let tyc3_i = cols.index(&["TYC3"]);
@@ -375,9 +458,29 @@ pub fn parse_tycho2_csv(data: &str) -> Vec<Star> {
     let pmra_i = cols.index(&["pmRA", "pmra"]);
     let pmde_i = cols.index(&["pmDE", "pmdec"]);
     let hip_i = cols.index(&["HIP"]);
+    if !require_columns(
+        &mut report,
+        &[
+            ("TYC1", tyc1_i),
+            ("TYC2", tyc2_i),
+            ("TYC3", tyc3_i),
+            ("RA", ra_i),
+            ("Dec", dec_i),
+            ("VT magnitude", vt_i),
+        ],
+    ) {
+        return report;
+    }
 
-    let mut stars = Vec::new();
-    for record in reader.records().flatten() {
+    for (record_index, record) in reader.records().enumerate() {
+        let row = record_index + 2;
+        let record = match record {
+            Ok(record) => record,
+            Err(error) => {
+                warn(&mut report, row, format!("malformed CSV record: {error}"));
+                continue;
+            }
+        };
         let (Some(tyc1), Some(tyc2), Some(tyc3), Some(ra), Some(dec), Some(vt)) = (
             parse_u32(&record, tyc1_i),
             parse_u32(&record, tyc2_i),
@@ -386,6 +489,11 @@ pub fn parse_tycho2_csv(data: &str) -> Vec<Star> {
             parse_f64(&record, dec_i),
             parse_f64(&record, vt_i),
         ) else {
+            warn(
+                &mut report,
+                row,
+                "missing or invalid required Tycho-2 field",
+            );
             continue;
         };
         // BT may be absent for faint red stars; fall back to VT (=> B−V 0).
@@ -396,7 +504,7 @@ pub fn parse_tycho2_csv(data: &str) -> Vec<Star> {
             pack_tyc(tyc1, tyc2, tyc3),
             parse_u32(&record, hip_i),
         );
-        stars.push(star_from_fields(
+        report.stars.push(star_from_fields(
             identifiers,
             ra,
             dec,
@@ -407,7 +515,7 @@ pub fn parse_tycho2_csv(data: &str) -> Vec<Star> {
             bv as f32,
         ));
     }
-    stars
+    report
 }
 
 /// Filesystem-backed Tycho-2 backend (CSV export from VizieR I/259).
@@ -454,11 +562,21 @@ impl CatalogBackend for Tycho2CsvBackend {
 /// [`gaia_bv_from_bp_rp`]); optional `HIP` / `HD` cross-IDs from a cross-match
 /// join. When `bp_rp` is absent the raw `G` magnitude is used unchanged.
 pub fn parse_gaia_dr3_csv(data: &str) -> Vec<Star> {
+    parse_gaia_dr3_csv_report(data).stars
+}
+
+/// Parse Gaia DR3 CSV while retaining diagnostics for malformed input.
+pub fn parse_gaia_dr3_csv_report(data: &str) -> CsvIngestReport {
+    let mut report = CsvIngestReport::default();
     let mut reader = csv_reader(data);
-    let Ok(header) = reader.headers() else {
-        return Vec::new();
+    let header = match reader.headers() {
+        Ok(header) => header.clone(),
+        Err(error) => {
+            warn(&mut report, 1, format!("invalid CSV header: {error}"));
+            return report;
+        }
     };
-    let cols = Columns::from_header(header);
+    let cols = Columns::from_header(&header);
     let src_i = cols.index(&["source_id", "Source", "DR3Name"]);
     let ra_i = cols.index(&["ra", "RA_ICRS", "RAICRS", "RAdeg", "_RAJ2000"]);
     let dec_i = cols.index(&["dec", "DE_ICRS", "DEICRS", "DEdeg", "_DEJ2000"]);
@@ -469,15 +587,38 @@ pub fn parse_gaia_dr3_csv(data: &str) -> Vec<Star> {
     let bprp_i = cols.index(&["bp_rp", "BP-RP", "BPRP"]);
     let hip_i = cols.index(&["HIP"]);
     let hd_i = cols.index(&["HD"]);
+    if !require_columns(
+        &mut report,
+        &[
+            ("source_id", src_i),
+            ("RA", ra_i),
+            ("Dec", dec_i),
+            ("G magnitude", gmag_i),
+        ],
+    ) {
+        return report;
+    }
 
-    let mut stars = Vec::new();
-    for record in reader.records().flatten() {
+    for (record_index, record) in reader.records().enumerate() {
+        let row = record_index + 2;
+        let record = match record {
+            Ok(record) => record,
+            Err(error) => {
+                warn(&mut report, row, format!("malformed CSV record: {error}"));
+                continue;
+            }
+        };
         let (Some(source_id), Some(ra), Some(dec), Some(gmag)) = (
             parse_u64(&record, src_i),
             parse_f64(&record, ra_i),
             parse_f64(&record, dec_i),
             parse_f64(&record, gmag_i),
         ) else {
+            warn(
+                &mut report,
+                row,
+                "missing or invalid required Gaia DR3 field",
+            );
             continue;
         };
         let distance_pc =
@@ -495,7 +636,7 @@ pub fn parse_gaia_dr3_csv(data: &str) -> Vec<Star> {
             parse_u32(&record, hip_i),
             parse_u32(&record, hd_i),
         );
-        stars.push(star_from_fields(
+        report.stars.push(star_from_fields(
             identifiers,
             ra,
             dec,
@@ -506,7 +647,7 @@ pub fn parse_gaia_dr3_csv(data: &str) -> Vec<Star> {
             bv as f32,
         ));
     }
-    stars
+    report
 }
 
 /// Filesystem-backed Gaia DR3 backend (CSV export). The full Gaia source is far
@@ -711,6 +852,28 @@ mod tests {
             "dist={}",
             star.distance_pc
         );
+    }
+
+    #[test]
+    fn malformed_ingest_reports_schema_and_row_diagnostics() {
+        let missing_header = parse_hipparcos_csv_report("HIP,RAICRS\n1,10.0\n");
+        assert!(missing_header.stars.is_empty());
+        assert_eq!(missing_header.warnings[0].row, 1);
+        assert!(missing_header.warnings[0]
+            .message
+            .contains("missing required columns"));
+
+        let input = "source_id,ra,dec,phot_g_mean_mag\n\
+                     not-an-id,10.0,20.0,5.0\n\
+                     2,11.0,21.0,6.0\n";
+        let malformed_row = parse_gaia_dr3_csv_report(input);
+        assert_eq!(malformed_row.stars.len(), 1);
+        assert_eq!(malformed_row.warnings.len(), 1);
+        assert_eq!(malformed_row.warnings[0].row, 2);
+        assert!(malformed_row.warnings[0].message.contains("Gaia DR3"));
+
+        // Existing callers retain the original stars-only API and behavior.
+        assert_eq!(parse_gaia_dr3_csv(input).len(), 1);
     }
 
     #[test]

@@ -50,6 +50,18 @@ the CLI and the HTTP server both call so the two hosts cannot drift on
 device initialisation, readback alignment, or PNG encoding. The web host
 bypasses it so WASM stays free of native-only dependencies.
 
+`renderer` does **not** depend on `catalog`. Deep-sky catalogues and the policy
+that suppresses resolved member-field clusters remain catalog/host concerns.
+Native hosts adapt those records in `crates/common`; the WASM host performs the
+same boundary conversion locally. Both provide renderer-neutral
+`DeepSkyMarker` DTOs before rebuilding overlays. This keeps storage, catalogue
+identity, and filtering policy out of the GPU crate.
+
+Headless rendering validates non-zero dimensions, checked buffer arithmetic,
+and a bounded pixel budget before GPU allocation. The HTTP server additionally
+serialises render work with a one-permit semaphore and returns `503` when that
+GPU slot is occupied.
+
 ## Crate boundaries
 
 ### `crates/astronomy`

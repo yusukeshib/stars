@@ -573,7 +573,8 @@ fn earthshine_disk_luminance_cd_m2(phase_rad: f32) -> f32 {
 }
 
 fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_sr: f32) -> vec3<f32> {
-    if camera.atmosphere_params.w <= 0.0 || sin_alt <= 0.0 {
+    // Atmosphere::OFF disables atmospheric effects, not physical disks.
+    if sin_alt <= 0.0 {
         return vec3<f32>(0.0);
     }
 
@@ -683,6 +684,16 @@ fn sun_moon_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixe
 
 fn magnitude_to_flux(magnitude: f32, zeropoint: f32) -> f32 {
     return exp(NEG_OH_FOUR_LN10 * (magnitude - zeropoint));
+}
+
+fn point_source_extinction(direction_eq: vec3<f32>) -> vec3<f32> {
+    if camera.extinction_k_rgb.x + camera.extinction_k_rgb.y + camera.extinction_k_rgb.z <= 0.0 {
+        return vec3<f32>(1.0);
+    }
+    let sin_source_alt = dot(normalize(direction_eq), camera.zenith_eq.xyz);
+    let altitude = asin(clamp(sin_source_alt, -1.0, 1.0));
+    let air_x = airmass_kasten_young(max(altitude, 0.5 * DEG_TO_RAD));
+    return exp(NEG_OH_FOUR_LN10 * camera.extinction_k_rgb.xyz * air_x);
 }
 
 // V-52a Saturn ring constants.
@@ -837,8 +848,9 @@ fn planet_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_
         let subtract = occluder_subtract_mask(ray_dir, occluder_target, pixel_sr);
         let flux = magnitude_to_flux(camera.planet_rgb_magnitude[i].w, zeropoint);
         let mask = disk_mask(ray_dir, dir, visual_radius, pixel_sr);
+        let attenuation = point_source_extinction(dir);
         let body_contribution = camera.planet_rgb_magnitude[i].xyz
-            * flux * mask * (1.0 - subtract) / footprint_pixels;
+            * attenuation * flux * mask * (1.0 - subtract) / footprint_pixels;
         rgb += body_contribution;
 
         // V-52a: add the Saturn ring system using the same per-pixel flux
@@ -850,7 +862,7 @@ fn planet_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_
             let ring_band = saturn_ring_brightness(ray_dir, visual_radius);
             if ring_band > 0.0 {
                 rgb += camera.planet_rgb_magnitude[i].xyz
-                    * flux * ring_band * (1.0 - subtract) / footprint_pixels;
+                    * attenuation * flux * ring_band * (1.0 - subtract) / footprint_pixels;
             }
         }
     }
@@ -903,7 +915,8 @@ fn galilean_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixe
         let footprint_pixels = max((visual_radius * visual_radius) / max(pixel_sr, 1e-12), 1.0);
         let flux = magnitude_to_flux(camera.galilean_rgb_magnitude[i].w, zeropoint);
         let mask = disk_mask(ray_dir, dir, visual_radius, pixel_sr);
-        rgb += camera.galilean_rgb_magnitude[i].xyz * flux * mask / footprint_pixels;
+        rgb += camera.galilean_rgb_magnitude[i].xyz
+            * point_source_extinction(dir) * flux * mask / footprint_pixels;
     }
     return rgb;
 }
@@ -941,7 +954,8 @@ fn titan_disk_radiance(ray_dir: vec3<f32>, sin_alt: f32, zeropoint: f32, pixel_s
     let footprint_pixels = max((visual_radius * visual_radius) / max(pixel_sr, 1e-12), 1.0);
     let flux = magnitude_to_flux(camera.titan_rgb_magnitude.w, zeropoint);
     let mask = disk_mask(ray_dir, dir, visual_radius, pixel_sr);
-    return camera.titan_rgb_magnitude.xyz * flux * mask / footprint_pixels;
+    return camera.titan_rgb_magnitude.xyz
+        * point_source_extinction(dir) * flux * mask / footprint_pixels;
 }
 
 // V-55 streak mask: angular falloff for a satellite that moved from `a` to `b`
