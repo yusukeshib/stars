@@ -166,10 +166,8 @@ impl FalchiAtlas {
         values
             .try_reserve_exact(count)
             .map_err(|_| AtlasError::BadDimensions)?;
-        for chunk in payload.chunks_exact(size_of::<f32>()) {
-            let raw =
-                <[u8; size_of::<f32>()]>::try_from(chunk).map_err(|_| AtlasError::Truncated)?;
-            let value = f32::from_le_bytes(raw);
+        for chunk in payload.as_chunks::<{ size_of::<f32>() }>().0 {
+            let value = f32::from_le_bytes(*chunk);
             if value.is_infinite() {
                 return Err(AtlasError::BadValue);
             }
