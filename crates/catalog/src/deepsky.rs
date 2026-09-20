@@ -251,7 +251,10 @@ fn decode_table(
     );
 
     let mut out = Vec::with_capacity(count);
-    for record in data[DEEP_SKY_HEADER_LEN..].chunks_exact(DEEP_SKY_RECORD_LEN) {
+    for record in data[DEEP_SKY_HEADER_LEN..]
+        .as_chunks::<DEEP_SKY_RECORD_LEN>()
+        .0
+    {
         let x = decode_unit_i16(record, 0);
         let y = decode_unit_i16(record, 2);
         let z = decode_unit_i16(record, 4);
