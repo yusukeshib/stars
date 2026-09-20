@@ -797,7 +797,7 @@ fn overlay_vertex(position: [f32; 3]) -> OverlayVertex {
 }
 
 fn attach_segment_partners(mut verts: Vec<OverlayVertex>) -> Vec<OverlayVertex> {
-    for pair in verts.chunks_exact_mut(2) {
+    for pair in verts.as_chunks_mut::<2>().0 {
         let a = pair[0].position;
         let b = pair[1].position;
         pair[0].other_position = b;
