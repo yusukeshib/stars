@@ -38,7 +38,7 @@ make demo-gallery   # docs/assets/demo-gallery/ にキュレーション済み�
 - perspective に加えて Mollweide / Aitoff / Hammer の全天投影。
 - 地球外の `galactic-north` / `custom-external` 視点による、IAU 銀河座標系パーセクスケールカメラからの局所的な天の川円盤表示。
 - OTA と接眼レンズの組み合わせから倍率、プレートスケール、射出瞳、実視野を求める望遠鏡接眼レンズシミュレーション。
-- CLI / desktop / web で共有できる schema-versioned JSON session と、流星・シンチレーション・出力色空間設定も保持する Web session URL。広色域 canvas 経路が利用可能になるまで、ブラウザ preview は意図的に sRGB へフォールバックします。
+- CLI / desktop / web で共有でき、v1–v7 migration と catalog SHA-256 検証を備える schema-versioned JSON session と、流星・シンチレーション・出力色空間設定も保持する Web session URL。広色域 canvas 経路が利用可能になるまで、ブラウザ preview は意図的に sRGB へフォールバックします。
 - Web UI の英語 / 日本語バイリンガル対応。ブラウザ言語の自動判定、共有用 `?lang=en|ja` URL パラメータ、設定パネル内の言語スイッチャーを備えます。
 - 全 3 ホスト対応のオブジェクト検索 / GoTo / 情報パネル (V-56)。検索ボックスから、
   固有名 / Bayer / Flamsteed / HR / HD / HIP で示される 1,200 より多い明るい恒星、
@@ -114,6 +114,7 @@ make ci
 crates/astronomy   時刻系、座標変換、補正、天体暦、測光、大気、空の輝き、観測計画
 crates/catalog     HYG カタログ読み込み、色変換、座標変換
 crates/renderer    wgpu レンダラー、カメラ、オーバーレイ、トーンマップ、星インスタンス
+crates/scene       WASM-safe な catalog-to-renderer DTO integration
 crates/common      CLI / desktop viewer / server で共有する native host 共通処理
 apps/cli           PNG を出力する headless renderer
 apps/server        ヘッドレス HTTP host (axum)

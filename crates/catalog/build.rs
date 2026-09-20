@@ -1,10 +1,11 @@
 //! Build-time compaction for catalog data.
 //!
-//! Three artifacts are emitted into `OUT_DIR`:
+//! Four artifacts are emitted into `OUT_DIR`:
 //!
 //! - `messier.bin` — i16-quantised Messier catalogue (always built; small).
 //! - `openngc_bright.bin` — i16-quantised bright NGC / IC subset
 //!   (always built; ~30 KB).
+//! - `label_data.rs` — neutral star, constellation, and deep-sky labels.
 //! - `stars.bin` — quantised HYG star catalogue (only when the `embedded`
 //!   feature is enabled, because the source CSV is 30 MB).
 //!
@@ -12,6 +13,7 @@
 //! Messier / NGC decoder and `src/catalog.rs` for the HYG decoder.
 
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::fs::File;
@@ -50,6 +52,8 @@ const DEEP_SKY_RECORD_LEN: usize = 6 + 3 * 2 + 2;
 
 #[derive(Debug, Clone)]
 struct DeepSkyRow {
+    /// Display label as published by the source (for example `NGC4567A`).
+    label: String,
     /// Encoded primary ID: positive Messier numbers (1..=110); positive NGC
     /// numbers (no Messier conflicts because Messier is filtered upstream);
     /// negative `-(IC_number + 1)` for IC entries so IC1 -> -2, IC500 -> -501.
@@ -106,8 +110,10 @@ fn parse_csv_rows(
                 .parse::<f64>()
                 .unwrap_or_else(|_| panic!("{input}: invalid {name} at line {}", line_number + 1))
         };
-        let primary_id = decode_primary(get(primary_column), line_number + 1);
+        let primary = get(primary_column);
+        let primary_id = decode_primary(primary, line_number + 1);
         rows.push(DeepSkyRow {
+            label: primary.to_string(),
             primary_id,
             ra_hours: parse_f("ra_hours"),
             dec_deg: parse_f("dec_deg"),
@@ -228,6 +234,14 @@ struct RawStar {
     dist: Option<f64>,
     mag: f64,
     ci: Option<f64>,
+    #[serde(default)]
+    proper: String,
+    #[serde(default)]
+    bayer: String,
+    #[serde(default)]
+    flam: String,
+    #[serde(default)]
+    con: String,
     pmrarad: Option<f64>,
     pmdecrad: Option<f64>,
     /// L-18: preserve the Hipparcos / Henry Draper primary + cross identifiers
@@ -245,37 +259,222 @@ const MIN_DISTANCE_PC: f64 = 0.0;
 const MAX_DISTANCE_PC: f64 = 100_000.0;
 // STRBIN4 appends the L-18 HIP / HD identifier columns (two trailing u32).
 const STAR_MAGIC: &[u8; 8] = b"STRBIN4\0";
+const STAR_LABEL_COUNT: usize = 50;
+const NGC_LABEL_MAG_CEILING: f32 = 90.0;
+
+const CONSTELLATION_NAMES: &[(&str, &str)] = &[
+    ("And", "Andromeda"),
+    ("Ant", "Antlia"),
+    ("Aps", "Apus"),
+    ("Aql", "Aquila"),
+    ("Aqr", "Aquarius"),
+    ("Ara", "Ara"),
+    ("Ari", "Aries"),
+    ("Aur", "Auriga"),
+    ("Boo", "Bootes"),
+    ("CMa", "Canis Major"),
+    ("CMi", "Canis Minor"),
+    ("CVn", "Canes Venatici"),
+    ("Cae", "Caelum"),
+    ("Cam", "Camelopardalis"),
+    ("Cap", "Capricornus"),
+    ("Car", "Carina"),
+    ("Cas", "Cassiopeia"),
+    ("Cen", "Centaurus"),
+    ("Cep", "Cepheus"),
+    ("Cet", "Cetus"),
+    ("Cha", "Chamaeleon"),
+    ("Cir", "Circinus"),
+    ("Cnc", "Cancer"),
+    ("Col", "Columba"),
+    ("Com", "Coma Berenices"),
+    ("CrA", "Corona Australis"),
+    ("CrB", "Corona Borealis"),
+    ("Crt", "Crater"),
+    ("Cru", "Crux"),
+    ("Crv", "Corvus"),
+    ("Cyg", "Cygnus"),
+    ("Del", "Delphinus"),
+    ("Dor", "Dorado"),
+    ("Dra", "Draco"),
+    ("Equ", "Equuleus"),
+    ("Eri", "Eridanus"),
+    ("For", "Fornax"),
+    ("Gem", "Gemini"),
+    ("Gru", "Grus"),
+    ("Her", "Hercules"),
+    ("Hor", "Horologium"),
+    ("Hya", "Hydra"),
+    ("Hyi", "Hydrus"),
+    ("Ind", "Indus"),
+    ("LMi", "Leo Minor"),
+    ("Lac", "Lacerta"),
+    ("Leo", "Leo"),
+    ("Lep", "Lepus"),
+    ("Lib", "Libra"),
+    ("Lup", "Lupus"),
+    ("Lyn", "Lynx"),
+    ("Lyr", "Lyra"),
+    ("Men", "Mensa"),
+    ("Mic", "Microscopium"),
+    ("Mon", "Monoceros"),
+    ("Mus", "Musca"),
+    ("Nor", "Norma"),
+    ("Oct", "Octans"),
+    ("Oph", "Ophiuchus"),
+    ("Ori", "Orion"),
+    ("Pav", "Pavo"),
+    ("Peg", "Pegasus"),
+    ("Per", "Perseus"),
+    ("Phe", "Phoenix"),
+    ("Pic", "Pictor"),
+    ("PsA", "Piscis Austrinus"),
+    ("Psc", "Pisces"),
+    ("Pup", "Puppis"),
+    ("Pyx", "Pyxis"),
+    ("Ret", "Reticulum"),
+    ("Scl", "Sculptor"),
+    ("Sco", "Scorpius"),
+    ("Sct", "Scutum"),
+    ("Ser", "Serpens"),
+    ("Sex", "Sextans"),
+    ("Sge", "Sagitta"),
+    ("Sgr", "Sagittarius"),
+    ("Tau", "Taurus"),
+    ("Tel", "Telescopium"),
+    ("TrA", "Triangulum Australe"),
+    ("Tri", "Triangulum"),
+    ("Tuc", "Tucana"),
+    ("UMa", "Ursa Major"),
+    ("UMi", "Ursa Minor"),
+    ("Vel", "Vela"),
+    ("Vir", "Virgo"),
+    ("Vol", "Volans"),
+    ("Vul", "Vulpecula"),
+];
 
 fn main() {
     println!("cargo:rerun-if-changed={MESSIER_CATALOG}");
     println!("cargo:rerun-if-changed={OPENNGC_CATALOG}");
+    println!("cargo:rerun-if-changed=data/hyg_v42.csv");
+
     let messier_rows = read_messier_rows(MESSIER_CATALOG);
     write_deepsky_binary(&messier_rows, MESSIER_BINARY, MESSIER_BINARY_MAGIC);
     let openngc_rows = read_openngc_rows(OPENNGC_CATALOG);
     write_deepsky_binary(&openngc_rows, OPENNGC_BINARY, OPENNGC_BINARY_MAGIC);
+    let stars = read_hyg_rows();
+    write_label_catalog(&stars, &messier_rows, &openngc_rows);
 
-    // Only the WASM/browser build uses the embedded star catalog. Native/test
-    // builds keep using the CSV reader and should not require the large data file.
-    if env::var_os("CARGO_FEATURE_EMBEDDED").is_none() {
-        return;
+    // Only the WASM/browser build embeds the complete render-star table.
+    if env::var_os("CARGO_FEATURE_EMBEDDED").is_some() {
+        generate_star_catalog(&stars);
     }
-
-    println!("cargo:rerun-if-changed=data/hyg_v42.csv");
-    generate_star_catalog();
 }
 
-fn generate_star_catalog() {
-    let csv_path = Path::new("data/hyg_v42.csv");
-    let out_path = Path::new(&env::var("OUT_DIR").expect("OUT_DIR is set")).join("stars.bin");
-
+fn read_hyg_rows() -> Vec<RawStar> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
-        .from_path(csv_path)
-        .expect("open embedded star catalog CSV");
+        .from_path("data/hyg_v42.csv")
+        .expect("open HYG star catalog CSV");
+    reader
+        .deserialize::<RawStar>()
+        .map(|result| result.expect("parse HYG star catalog row"))
+        .collect()
+}
+
+fn write_label_catalog(stars: &[RawStar], messier_rows: &[DeepSkyRow], ngc_rows: &[DeepSkyRow]) {
+    let mut brightest: Vec<_> = stars.iter().filter(|row| row.proper != "Sol").collect();
+    brightest.sort_by(|a, b| a.mag.total_cmp(&b.mag));
+
+    let mut sums: HashMap<String, ([f64; 3], f64)> = HashMap::new();
+    for row in stars {
+        if row.proper == "Sol" || row.con.trim().is_empty() || row.mag > 5.5 {
+            continue;
+        }
+        let pos = radec_to_unit(row.ra, row.dec);
+        let weight = 10.0_f64.powf(-0.4 * (row.mag + 1.5));
+        let entry = sums.entry(row.con.clone()).or_insert(([0.0; 3], 0.0));
+        for (sum, value) in entry.0.iter_mut().zip(pos) {
+            *sum += f64::from(value) * weight;
+        }
+        entry.1 += weight;
+    }
+
+    let mut code = String::from("// @generated by crates/catalog/build.rs; do not edit.\n");
+    code.push_str("pub const STAR_LABELS: &[CatalogLabel] = &[\n");
+    for row in brightest.into_iter().take(STAR_LABEL_COUNT) {
+        let designation = designation(row);
+        let text = if row.proper.trim().is_empty() {
+            designation
+        } else if designation.is_empty() {
+            row.proper.clone()
+        } else {
+            format!("{} / {}", row.proper, designation)
+        };
+        let pos = radec_to_unit(row.ra, row.dec);
+        code.push_str(&format!(
+            "    CatalogLabel {{ position: [{:.6}, {:.6}, {:.6}], text: {:?}, magnitude: {:.3}, kind: CatalogLabelKind::Star }},\n",
+            pos[0], pos[1], pos[2], text, row.mag as f32
+        ));
+    }
+    code.push_str("];\n");
+
+    code.push_str("pub const CONSTELLATION_LABELS: &[CatalogLabel] = &[\n");
+    for (abbr, name) in CONSTELLATION_NAMES {
+        let Some((sum, _weight)) = sums.get(*abbr) else {
+            continue;
+        };
+        let len = (sum[0] * sum[0] + sum[1] * sum[1] + sum[2] * sum[2]).sqrt();
+        if len == 0.0 {
+            continue;
+        }
+        code.push_str(&format!(
+            "    CatalogLabel {{ position: [{:.6}, {:.6}, {:.6}], text: {:?}, magnitude: 50.0, kind: CatalogLabelKind::Constellation }},\n",
+            sum[0] / len, sum[1] / len, sum[2] / len, name
+        ));
+    }
+    code.push_str("];\n");
+
+    code.push_str("pub const DEEP_SKY_LABELS: &[CatalogLabel] = &[\n");
+    for (rows, kind) in [
+        (messier_rows, "CatalogLabelKind::Messier"),
+        (ngc_rows, "CatalogLabelKind::Ngc"),
+    ] {
+        for row in rows {
+            if kind == "CatalogLabelKind::Ngc" && row.mag as f32 > NGC_LABEL_MAG_CEILING {
+                continue;
+            }
+            let pos = radec_to_unit(row.ra_hours, row.dec_deg);
+            code.push_str(&format!(
+                "    CatalogLabel {{ position: [{:.6}, {:.6}, {:.6}], text: {:?}, magnitude: {:.3}, kind: {kind} }},\n",
+                pos[0], pos[1], pos[2], row.label, row.mag as f32
+            ));
+        }
+    }
+    code.push_str("];\n");
+
+    let out_path = Path::new(&env::var("OUT_DIR").expect("OUT_DIR is set")).join("label_data.rs");
+    fs::write(out_path, code).expect("write neutral catalog labels");
+}
+
+fn designation(row: &RawStar) -> String {
+    let con = row.con.trim();
+    if !row.flam.trim().is_empty() && !row.bayer.trim().is_empty() && !con.is_empty() {
+        format!("{} {} {}", row.flam.trim(), row.bayer.trim(), con)
+    } else if !row.bayer.trim().is_empty() && !con.is_empty() {
+        format!("{} {}", row.bayer.trim(), con)
+    } else if !row.flam.trim().is_empty() && !con.is_empty() {
+        format!("{} {}", row.flam.trim(), con)
+    } else {
+        String::new()
+    }
+}
+
+fn generate_star_catalog(stars: &[RawStar]) {
+    let out_path = Path::new(&env::var("OUT_DIR").expect("OUT_DIR is set")).join("stars.bin");
 
     let mut records = Vec::new();
-    for result in reader.deserialize::<RawStar>() {
-        let raw = result.expect("parse embedded star catalog row");
+    for raw in stars {
         if raw.mag > MAX_MAGNITUDE {
             continue;
         }

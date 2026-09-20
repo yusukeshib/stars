@@ -27,6 +27,16 @@ extinction when it is enabled, and fast moon ephemerides use a one-minute cache.
 Each numerical correction is pinned by focused regression tests; detailed
 limits remain in `VALIDATION.md`.
 
+The follow-up architecture pass removed the renderer build script's undeclared
+reads of catalog source files. Catalog-owned generated labels and row data now
+cross one WASM-safe `stars-scene` integration crate as neutral marker, label,
+and star-instance DTOs. Picking uses a host-owned identity sidecar rather than
+catalog fields inside `StarInstance`. Strict catalog ingestion, real opaque
+continuation cursors, explicit LOD completeness/errors, catalog SHA-256
+verification, v1–v7 session migration, correction-capability validation,
+pass-specific tonemap uniforms with WGSL/Rust ABI checks, shared colour-tagged
+PNG encoding, and a pinned Rust 1.98 toolchain are shipped together.
+
 ## Summary
 
 Work is organised along two orthogonal tracks (see [`ROADMAP.md`](ROADMAP.md)):
@@ -2217,8 +2227,8 @@ Primary implementation areas:
 - `crates/catalog/build.rs`
 - `crates/catalog/src/deepsky.rs`
 - `crates/catalog/src/lib.rs`
-- `crates/renderer/build.rs` (label generation only; binaries moved)
-- `crates/renderer/Cargo.toml` (new `catalog` dependency)
+- `crates/catalog/build.rs` (catalog-owned label generation)
+- `crates/scene` (catalog-to-renderer neutral label/marker adapters)
 - `crates/renderer/src/lib.rs` (drop `mod deepsky`)
 - `crates/renderer/src/overlay.rs` (consume `MessierCatalog` /
   `NgcBrightCatalog`; ring marker added)
@@ -3871,8 +3881,8 @@ object info panel consume.
    - The compact embedded catalog is bumped `STRBIN3 → STRBIN4` (build.rs +
      decoder), appending HIP / HD columns so identifiers survive the embedded /
      WASM path, not only the CSV path.
-   - `renderer`: `StarInstance` gains an appended packed pick handle
-     (`catalog_id` + `catalog_id_kind`; **not** a GPU vertex attribute),
+   - `stars-scene`: catalog identities are retained in an index-aligned host
+     sidecar; `renderer::StarInstance` remains catalog-agnostic,
      `build_star_instance` threads it, and `pick_nearest(instances, ray_eq,
      tol)` resolves an equatorial ray to the nearest instance (brighter star
      wins ties).
@@ -3953,7 +3963,7 @@ per-star identity / time-varying magnitude reaching the instance buffer.
    under the few-arcminute `pick_nearest` tolerance and are documented, not
    inverted). Web: a canvas tap (distinguished from a pan drag by movement +
    duration) calls `StarView::pick_star(x, y)`, which feeds the ray to
-   `pick_nearest`, resolves the nearest instance's `L-18` pick handle, and
+   `pick_nearest`, resolves the host-owned `L-18` identity sidecar index, and
    returns the same goto-record JSON the search panel already renders — so the
    tap opens the existing info panel (without re-slewing the camera). Viewer: a
    left-click release that barely moved calls `stars_host_common::pick_star_label`
@@ -3988,7 +3998,7 @@ per-star identity / time-varying magnitude reaching the instance buffer.
 5. **Conflict-avoidance.** No session-schema bump (the variable toggle is a
    host-side view preference, persisted only in web `localStorage`). No new
    `StarInstance` / `CameraUniform` field — the override reuses the existing
-   instance magnitude, and the pick reuses the existing `L-18` pick handle.
+   instance magnitude, and picking reuses the existing `L-18` host sidecar.
 
 References: see `L-18` and `L-20` in ROADMAP.md.
 

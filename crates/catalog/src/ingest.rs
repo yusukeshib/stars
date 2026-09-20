@@ -29,7 +29,11 @@
 //! - Gaia Collaboration 2022, A&A 674, A1 (Gaia DR3).
 
 #[cfg(any(feature = "filesystem", test))]
-use crate::backend::{CatalogBackend, CatalogError, CatalogPage, CatalogQuery, CatalogSource};
+use crate::backend::{
+    page_from_report, CatalogBackend, CatalogError, CatalogIngestMode, CatalogPage, CatalogQuery,
+    CatalogSource,
+};
+use crate::backend::{CatalogDiagnostic, CatalogIngestReport};
 use crate::color::bv_to_rgb;
 use crate::coords::{proper_motion_vector_radians_per_year, radec_hours_deg_to_cartesian};
 use crate::CatalogIdentifiers;
@@ -225,23 +229,21 @@ fn gaia_g_minus_i(bp_rp: f64) -> f64 {
 
 /// Apply the source-side magnitude filter and `max_rows` page cap shared by all
 /// ingest backends. Returns the page plus whether more rows were dropped.
-#[cfg(any(feature = "filesystem", test))]
-fn paginate(mut stars: Vec<Star>, query: CatalogQuery, source: CatalogSource) -> CatalogPage {
-    stars.retain(|star| star.magnitude <= query.max_magnitude);
-    let truncated = if let Some(max_rows) = query.max_rows {
-        let truncated = stars.len() > max_rows;
-        stars.truncate(max_rows);
-        truncated
-    } else {
-        false
-    };
-    CatalogPage {
-        source,
+#[cfg(test)]
+fn paginate(
+    stars: Vec<Star>,
+    query: CatalogQuery,
+    source: CatalogSource,
+) -> Result<CatalogPage, CatalogError> {
+    page_from_report(
+        CatalogIngestReport {
+            stars,
+            diagnostics: Vec::new(),
+        },
         query,
-        stars,
-        truncated,
-        next_page: None,
-    }
+        source,
+        CatalogIngestMode::Strict,
+    )
 }
 
 fn csv_reader(data: &str) -> csv::Reader<&[u8]> {
@@ -251,24 +253,11 @@ fn csv_reader(data: &str) -> csv::Reader<&[u8]> {
         .from_reader(data.as_bytes())
 }
 
-/// A non-fatal problem found while ingesting a CSV export.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CsvIngestWarning {
-    /// One-based CSV row number (the header is row 1).
-    pub row: usize,
-    pub message: String,
-}
-
-/// Parsed stars plus diagnostics for rows or schemas that could not be used.
-/// The legacy `parse_*_csv` functions return only `stars` for compatibility.
-#[derive(Debug, Default)]
-pub struct CsvIngestReport {
-    pub stars: Vec<Star>,
-    pub warnings: Vec<CsvIngestWarning>,
-}
+/// Backwards-compatible report name retained for parser callers.
+pub type CsvIngestReport = CatalogIngestReport;
 
 fn warn(report: &mut CsvIngestReport, row: usize, message: impl Into<String>) {
-    report.warnings.push(CsvIngestWarning {
+    report.diagnostics.push(CatalogDiagnostic {
         row,
         message: message.into(),
     });
@@ -383,12 +372,23 @@ pub fn parse_hipparcos_csv_report(data: &str) -> CsvIngestReport {
 #[derive(Debug, Clone)]
 pub struct HipparcosCsvBackend {
     path: std::path::PathBuf,
+    ingest_mode: CatalogIngestMode,
 }
 
 #[cfg(feature = "filesystem")]
 impl HipparcosCsvBackend {
     pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            ingest_mode: CatalogIngestMode::Strict,
+        }
+    }
+
+    pub fn best_effort(path: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            ingest_mode: CatalogIngestMode::BestEffort,
+        }
     }
 
     pub fn path(&self) -> &std::path::Path {
@@ -404,7 +404,12 @@ impl CatalogBackend for HipparcosCsvBackend {
 
     fn load(&self, query: CatalogQuery) -> Result<CatalogPage, CatalogError> {
         let data = std::fs::read_to_string(&self.path)?;
-        Ok(paginate(parse_hipparcos_csv(&data), query, self.source()))
+        page_from_report(
+            parse_hipparcos_csv_report(&data),
+            query,
+            self.source(),
+            self.ingest_mode,
+        )
     }
 }
 
@@ -526,12 +531,23 @@ pub fn parse_tycho2_csv_report(data: &str) -> CsvIngestReport {
 #[derive(Debug, Clone)]
 pub struct Tycho2CsvBackend {
     path: std::path::PathBuf,
+    ingest_mode: CatalogIngestMode,
 }
 
 #[cfg(feature = "filesystem")]
 impl Tycho2CsvBackend {
     pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            ingest_mode: CatalogIngestMode::Strict,
+        }
+    }
+
+    pub fn best_effort(path: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            ingest_mode: CatalogIngestMode::BestEffort,
+        }
     }
 
     pub fn path(&self) -> &std::path::Path {
@@ -547,7 +563,12 @@ impl CatalogBackend for Tycho2CsvBackend {
 
     fn load(&self, query: CatalogQuery) -> Result<CatalogPage, CatalogError> {
         let data = std::fs::read_to_string(&self.path)?;
-        Ok(paginate(parse_tycho2_csv(&data), query, self.source()))
+        page_from_report(
+            parse_tycho2_csv_report(&data),
+            query,
+            self.source(),
+            self.ingest_mode,
+        )
     }
 }
 
@@ -678,12 +699,23 @@ pub(crate) fn parse_gaia_dr3_csv_report_bounded(
 #[derive(Debug, Clone)]
 pub struct GaiaDr3CsvBackend {
     path: std::path::PathBuf,
+    ingest_mode: CatalogIngestMode,
 }
 
 #[cfg(feature = "filesystem")]
 impl GaiaDr3CsvBackend {
     pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            ingest_mode: CatalogIngestMode::Strict,
+        }
+    }
+
+    pub fn best_effort(path: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            ingest_mode: CatalogIngestMode::BestEffort,
+        }
     }
 
     pub fn path(&self) -> &std::path::Path {
@@ -699,7 +731,12 @@ impl CatalogBackend for GaiaDr3CsvBackend {
 
     fn load(&self, query: CatalogQuery) -> Result<CatalogPage, CatalogError> {
         let data = std::fs::read_to_string(&self.path)?;
-        Ok(paginate(parse_gaia_dr3_csv(&data), query, self.source()))
+        page_from_report(
+            parse_gaia_dr3_csv_report(&data),
+            query,
+            self.source(),
+            self.ingest_mode,
+        )
     }
 }
 
@@ -878,8 +915,8 @@ mod tests {
     fn malformed_ingest_reports_schema_and_row_diagnostics() {
         let missing_header = parse_hipparcos_csv_report("HIP,RAICRS\n1,10.0\n");
         assert!(missing_header.stars.is_empty());
-        assert_eq!(missing_header.warnings[0].row, 1);
-        assert!(missing_header.warnings[0]
+        assert_eq!(missing_header.diagnostics[0].row, 1);
+        assert!(missing_header.diagnostics[0]
             .message
             .contains("missing required columns"));
 
@@ -888,9 +925,9 @@ mod tests {
                      2,11.0,21.0,6.0\n";
         let malformed_row = parse_gaia_dr3_csv_report(input);
         assert_eq!(malformed_row.stars.len(), 1);
-        assert_eq!(malformed_row.warnings.len(), 1);
-        assert_eq!(malformed_row.warnings[0].row, 2);
-        assert!(malformed_row.warnings[0].message.contains("Gaia DR3"));
+        assert_eq!(malformed_row.diagnostics.len(), 1);
+        assert_eq!(malformed_row.diagnostics[0].row, 2);
+        assert!(malformed_row.diagnostics[0].message.contains("Gaia DR3"));
 
         // Existing callers retain the original stars-only API and behavior.
         assert_eq!(parse_gaia_dr3_csv(input).len(), 1);
@@ -901,18 +938,18 @@ mod tests {
         let hip =
             parse_hipparcos_csv_report("HIP,RAICRS,DEICRS,Vmag\n1,NaN,20.0,5.0\n2,10.0,20.0,inf\n");
         assert!(hip.stars.is_empty());
-        assert_eq!(hip.warnings.len(), 2);
+        assert_eq!(hip.diagnostics.len(), 2);
 
         let tycho =
             parse_tycho2_csv_report("TYC1,TYC2,TYC3,RAmdeg,DEmdeg,VTmag\n1,2,3,-inf,20.0,5.0\n");
         assert!(tycho.stars.is_empty());
-        assert_eq!(tycho.warnings.len(), 1);
+        assert_eq!(tycho.diagnostics.len(), 1);
 
         let gaia = parse_gaia_dr3_csv_report(
             "source_id,ra,dec,phot_g_mean_mag\n1,10.0,NaN,5.0\n2,10.0,20.0,-inf\n",
         );
         assert!(gaia.stars.is_empty());
-        assert_eq!(gaia.warnings.len(), 2);
+        assert_eq!(gaia.diagnostics.len(), 2);
     }
 
     #[test]
@@ -922,8 +959,8 @@ mod tests {
             Some(1),
         );
         assert_eq!(report.stars.len(), 1);
-        assert_eq!(report.warnings.len(), 1);
-        assert!(report.warnings[0].message.contains("decode limit"));
+        assert_eq!(report.diagnostics.len(), 1);
+        assert!(report.diagnostics[0].message.contains("decode limit"));
     }
 
     #[test]
@@ -989,9 +1026,11 @@ mod tests {
             CatalogQuery {
                 max_magnitude: 6.0,
                 max_rows: Some(1),
+                cursor: None,
             },
             CatalogSource::HIPPARCOS,
-        );
+        )
+        .expect("valid page");
         // mag 9 dropped by the filter; mag 2 + 5 remain but capped to 1 row.
         assert_eq!(page.stars.len(), 1);
         assert!(page.truncated);

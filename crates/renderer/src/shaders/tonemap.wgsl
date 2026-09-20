@@ -43,24 +43,11 @@
 //   * Adams, A. 1948, *The Negative*, ch. 4 (Zone V = middle gray =
 //     0.18 reflectance, the photopic key).
 
-struct CameraUniform {
-    view_proj: mat4x4<f32>,
-    inv_view_proj: mat4x4<f32>,
-    eq_to_local: mat4x4<f32>,
-    view_proj_local: mat4x4<f32>,
-    j2000_to_date: mat4x4<f32>,
-    aberration_pm: vec4<f32>,
-    refraction_params: vec4<f32>,
-    // [viewport_w, viewport_h, pixel_solid_angle_sr, magnitude_zeropoint]
-    viewport_pixel_sr_zeropoint: vec4<f32>,
-    zenith_eq: vec4<f32>,
-    extinction_k_rgb: vec4<f32>,
-    sun_eq_radius: vec4<f32>,
-    atmosphere_params: vec4<f32>,
-    solar_rgb: vec4<f32>,
-    atmosphere_optics: vec4<f32>,
-    moon_eq_illuminance: vec4<f32>,
-    moon_disk: vec4<f32>,
+struct TonemapUniform {
+    magnitude_zeropoint: f32,
+    _padding0: f32,
+    _padding1: f32,
+    _padding2: f32,
 };
 
 // V-50 output colour management: linear sRGB→target gamut matrix. Rows are
@@ -75,7 +62,7 @@ struct ColourManagement {
 @group(0) @binding(0) var hdr_texture: texture_2d<f32>;
 @group(0) @binding(1) var hdr_sampler: sampler;
 @group(0) @binding(2) var adaptation_texture: texture_2d<f32>;
-@group(0) @binding(3) var<uniform> camera: CameraUniform;
+@group(0) @binding(3) var<uniform> tonemap: TonemapUniform;
 @group(0) @binding(4) var<uniform> colour_management: ColourManagement;
 
 const LN10: f32 = 2.30258509299;
@@ -188,7 +175,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let la_flux = exp(log_la_flux);
 
     // Step 2: convert to absolute cd/m² for the mesopic-regime test.
-    let zeropoint = camera.viewport_pixel_sr_zeropoint.w;
+    let zeropoint = tonemap.magnitude_zeropoint;
     let la_cd_m2 = hdr_flux_to_cd_m2(la_flux, zeropoint);
 
     // Step 3: photographic key by adaptation regime.

@@ -58,6 +58,13 @@ struct ColourManagementUniform {
     info: [f32; 4],
 }
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct TonemapUniform {
+    magnitude_zeropoint: f32,
+    _padding: [f32; 3],
+}
+
 impl ColourManagementUniform {
     fn from_colourspace(cs: crate::colourspace::OutputColourSpace) -> Self {
         let m = cs.linear_from_srgb_matrix();
@@ -91,6 +98,9 @@ pub(crate) struct Tonemap {
     adaptation_view: wgpu::TextureView,
     luminance_bind_group: wgpu::BindGroup,
     tonemap_bind_group: wgpu::BindGroup,
+    /// Pass-specific photometric conversion state. Keeping this separate from
+    /// `CameraUniform` prevents the tonemap shader from duplicating its ABI.
+    tonemap_buffer: wgpu::Buffer,
     /// V-50 colour-management uniform buffer (gamut matrix + info). Bound at
     /// tonemap binding 4 and rewritten by [`Tonemap::set_output_colourspace`].
     cm_buffer: wgpu::Buffer,
@@ -101,16 +111,9 @@ pub(crate) struct Tonemap {
 impl Tonemap {
     /// Build the tone-reproduction stage.
     ///
-    /// `camera_buffer` is the per-frame camera uniform owned by
-    /// [`crate::renderer::Renderer`]; the tonemap pass needs to sample
-    /// `magnitude_zeropoint` from it to perform the HDR-flux → cd/m²
-    /// conversion that drives the Ferwerda mesopic-regime split. The
-    /// pass keeps an internal bind group pointing at that buffer; if the
-    /// buffer is ever recreated the renderer must rebuild the `Tonemap`.
     pub fn new(
         device: &wgpu::Device,
         final_format: wgpu::TextureFormat,
-        camera_buffer: &wgpu::Buffer,
         width: u32,
         height: u32,
     ) -> Self {
@@ -222,10 +225,9 @@ impl Tonemap {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
                             min_binding_size: Some(
-                                std::num::NonZeroU64::new(std::mem::size_of::<
-                                    crate::camera::CameraUniform,
-                                >()
-                                    as u64)
+                                std::num::NonZeroU64::new(
+                                    std::mem::size_of::<TonemapUniform>() as u64
+                                )
                                 .unwrap(),
                             ),
                         },
@@ -312,6 +314,14 @@ impl Tonemap {
 
         // Default to sRGB (identity gamut transform) so a host that never
         // selects a colour space renders bit-identically to the pre-V-50 path.
+        let tonemap_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Tonemap Photometry Uniform"),
+            contents: bytemuck::bytes_of(&TonemapUniform {
+                magnitude_zeropoint: 1.0,
+                _padding: [0.0; 3],
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let cm_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Tonemap Colour Management Uniform"),
             contents: bytemuck::bytes_of(&ColourManagementUniform::from_colourspace(
@@ -326,7 +336,7 @@ impl Tonemap {
             &hdr_view,
             &sampler,
             &adaptation_view,
-            camera_buffer,
+            &tonemap_buffer,
             &cm_buffer,
         );
 
@@ -342,6 +352,7 @@ impl Tonemap {
             adaptation_view,
             luminance_bind_group,
             tonemap_bind_group,
+            tonemap_buffer,
             cm_buffer,
             width,
             height,
@@ -351,6 +362,17 @@ impl Tonemap {
     /// Update the V-50 output colour space. Writes the linear sRGB→target
     /// gamut matrix into the colour-management uniform; the tonemap shader
     /// applies it as its final step. Cheap enough to call every frame.
+    pub fn set_magnitude_zeropoint(&self, queue: &wgpu::Queue, value: f32) {
+        queue.write_buffer(
+            &self.tonemap_buffer,
+            0,
+            bytemuck::bytes_of(&TonemapUniform {
+                magnitude_zeropoint: value,
+                _padding: [0.0; 3],
+            }),
+        );
+    }
+
     pub fn set_output_colourspace(
         &self,
         queue: &wgpu::Queue,
@@ -365,16 +387,7 @@ impl Tonemap {
 
     /// Recreate the HDR target at the new size. No-op when the size is
     /// unchanged so this is safe to call from per-frame paths. The
-    /// `camera_buffer` argument is the same buffer passed to
-    /// [`Tonemap::new`]; we re-bind it because the bind group is rebuilt
-    /// in lock-step with the resized scene texture.
-    pub fn resize(
-        &mut self,
-        device: &wgpu::Device,
-        camera_buffer: &wgpu::Buffer,
-        width: u32,
-        height: u32,
-    ) {
+    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
         if width == self.width && height == self.height {
             return;
         }
@@ -386,7 +399,7 @@ impl Tonemap {
             &hdr_view,
             &self.sampler,
             &adaptation_view,
-            camera_buffer,
+            &self.tonemap_buffer,
             &self.cm_buffer,
         );
         self._hdr_texture = hdr_texture;
@@ -528,7 +541,7 @@ fn create_tonemap_bind_group(
     hdr_view: &wgpu::TextureView,
     sampler: &wgpu::Sampler,
     adaptation_view: &wgpu::TextureView,
-    camera_buffer: &wgpu::Buffer,
+    tonemap_buffer: &wgpu::Buffer,
     cm_buffer: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -549,7 +562,7 @@ fn create_tonemap_bind_group(
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: camera_buffer.as_entire_binding(),
+                resource: tonemap_buffer.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 4,

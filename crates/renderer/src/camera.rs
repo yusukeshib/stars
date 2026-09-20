@@ -3486,7 +3486,6 @@ mod tests {
                 1.0,
                 NAKED_EYE_LIMITING_MAGNITUDE,
                 10.0,
-                (2, 12345),
             );
             assert_eq!(
                 crate::pick_nearest(&[inst], ray, 0.5_f32.to_radians()),
@@ -3525,6 +3524,61 @@ mod tests {
     #[test]
     fn shaders_parse_and_validate() {
         use naga::valid::{Capabilities, ValidationFlags, Validator};
+
+        let rust_source = include_str!("camera.rs");
+        let uniform_body = rust_source
+            .split_once("pub(crate) struct CameraUniform {")
+            .expect("CameraUniform declaration")
+            .1
+            .split_once("\n}")
+            .expect("CameraUniform body")
+            .0;
+        let rust_fields: Vec<_> = uniform_body
+            .lines()
+            .filter_map(|line| {
+                let declaration = line.trim().strip_prefix("pub ")?;
+                declaration.split_once(':').map(|(name, _)| name.trim())
+            })
+            .collect();
+
+        let canonical_module = naga::front::wgsl::parse_str(include_str!("shaders/skyglow.wgsl"))
+            .expect("canonical skyglow shader parses");
+        let canonical_type = canonical_module
+            .types
+            .iter()
+            .find(|(_, ty)| ty.name.as_deref() == Some("CameraUniform"))
+            .map(|(_, ty)| ty)
+            .expect("skyglow CameraUniform");
+        let naga::TypeInner::Struct {
+            members: canonical_members,
+            span: canonical_span,
+        } = &canonical_type.inner
+        else {
+            panic!("skyglow CameraUniform is not a struct");
+        };
+        let canonical_fields: Vec<_> = canonical_members
+            .iter()
+            .map(|member| {
+                (
+                    member.name.clone().expect("named uniform member"),
+                    member.offset,
+                )
+            })
+            .collect();
+        assert_eq!(
+            canonical_fields
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            rust_fields,
+            "canonical WGSL CameraUniform fields drifted"
+        );
+        assert_eq!(
+            *canonical_span as usize,
+            std::mem::size_of::<CameraUniform>(),
+            "canonical WGSL CameraUniform byte size drifted"
+        );
+
         for (name, src) in [
             ("star.wgsl", include_str!("shaders/star.wgsl")),
             ("skyglow.wgsl", include_str!("shaders/skyglow.wgsl")),
@@ -3536,6 +3590,32 @@ mod tests {
             Validator::new(ValidationFlags::all(), Capabilities::all())
                 .validate(&module)
                 .unwrap_or_else(|e| panic!("{name} failed to validate: {e:?}"));
+
+            if let Some((_, ty)) = module
+                .types
+                .iter()
+                .find(|(_, ty)| ty.name.as_deref() == Some("CameraUniform"))
+            {
+                let naga::TypeInner::Struct { members, span } = &ty.inner else {
+                    panic!("{name} CameraUniform is not a struct");
+                };
+                assert!(
+                    (*span as usize) <= std::mem::size_of::<CameraUniform>(),
+                    "{name} CameraUniform exceeds the Rust buffer"
+                );
+                for (index, member) in members.iter().enumerate() {
+                    let actual = member.name.as_deref().expect("named uniform member");
+                    let normalized = actual.strip_suffix("_pad").unwrap_or(actual);
+                    let Some((expected, expected_offset)) = canonical_fields.get(index) else {
+                        panic!("{name} has an extra CameraUniform field {actual}");
+                    };
+                    assert_eq!(normalized, expected, "{name} CameraUniform field drifted");
+                    assert_eq!(
+                        member.offset, *expected_offset,
+                        "{name} CameraUniform offset drifted for {actual}"
+                    );
+                }
+            };
         }
     }
 }

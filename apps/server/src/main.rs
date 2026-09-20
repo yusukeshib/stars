@@ -33,9 +33,9 @@ use axum::{
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use stars_host_common::{
-    encode_png, hyg_catalog_snapshot, render_scene_from_catalog_path, scene_preset_infos,
-    session_from_preset, validate_render_dimensions, ScenePresetArg, ScenePresetInfo, SessionScene,
-    StarSession, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    encode_png, hyg_catalog_snapshot, parse_session_json, render_scene_from_catalog_path,
+    scene_preset_infos, session_from_preset, validate_render_dimensions, ScenePresetArg,
+    ScenePresetInfo, SessionScene, StarSession, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use tokio::{net::TcpListener, sync::Semaphore};
 
@@ -215,9 +215,10 @@ fn force_configured_catalog(scene: &mut SessionScene, catalog: &Path) {
 async fn render_route(
     State(state): State<AppState>,
     Query(q): Query<RenderQuery>,
-    Json(session): Json<StarSession>,
+    Json(session): Json<serde_json::Value>,
 ) -> Result<Response, AppError> {
     validate_render_dimensions(q.width, q.height).map_err(AppError::bad_request)?;
+    let session = parse_session_json(&session.to_string()).map_err(AppError::bad_request)?;
     let mut scene = session.to_scene().map_err(AppError::bad_request)?;
     force_configured_catalog(&mut scene, state.catalog.as_path());
     let options = stars_host_common::RenderOptions {
@@ -243,6 +244,7 @@ async fn render_route(
     // disconnected client may cancel the request future, but cannot free GPU
     // capacity while its blocking render is still running.
     let catalog = state.catalog.clone();
+    let colourspace = scene.output_colourspace;
     let png = tokio::task::spawn_blocking(move || {
         let _render_permit = render_permit;
         let pixels = pollster::block_on(render_scene_from_catalog_path(
@@ -250,7 +252,7 @@ async fn render_route(
             catalog.as_path(),
             options,
         ))?;
-        encode_png(options.width, options.height, pixels)
+        encode_png(options.width, options.height, pixels, colourspace)
     })
     .await
     .map_err(|e| AppError::internal(anyhow::anyhow!(e)))?

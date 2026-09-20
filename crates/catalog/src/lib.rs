@@ -6,14 +6,16 @@ mod coords;
 mod deepsky;
 mod doubles;
 mod ingest;
+mod labels;
 mod links;
 mod lod;
 pub mod search;
 mod variables;
 
 pub use backend::{
-    CatalogBackend, CatalogBackendKind, CatalogError, CatalogIdentifiers, CatalogObjectId,
-    CatalogPage, CatalogQuery, CatalogSource,
+    CatalogBackend, CatalogBackendKind, CatalogCursor, CatalogDiagnostic, CatalogError,
+    CatalogIdentifiers, CatalogIngestMode, CatalogIngestReport, CatalogObjectId, CatalogPage,
+    CatalogQuery, CatalogSource,
 };
 pub use catalog::{load_from_csv, Star};
 pub use clusters::{
@@ -31,10 +33,14 @@ pub use ingest::{
     gaia_v_from_g_bp_rp, pack_tyc, parse_gaia_dr3_csv, parse_hipparcos_csv, parse_tycho2_csv,
     tycho_bv_from_vt_bt, tycho_v_from_vt_bt, unpack_tyc, BrightStarCrossId,
 };
+pub use labels::{
+    CatalogLabel, CatalogLabelKind, CONSTELLATION_LABELS, DEEP_SKY_LABELS, STAR_LABELS,
+};
 pub use links::{simbad_query_url, vizier_query_url, StarIdentifiers};
 pub use lod::{
-    content_hash, BlobStore, LodCatalog, LodIndex, LodQuery, LodStream, LodTileEntry,
-    MemoryBlobStore, TileId, TileKey, BASE_TIER, LAT_BANDS, LON_BANDS, TIER_BOUNDS,
+    content_hash, BlobStore, LodCatalog, LodIndex, LodIssue, LodIssueKind, LodQuery, LodStream,
+    LodStreamError, LodTileEntry, MemoryBlobStore, TileId, TileKey, BASE_TIER, LAT_BANDS,
+    LON_BANDS, TIER_BOUNDS,
 };
 pub use search::{search, SearchId, SearchKind, SearchMatch, SEARCH_LIMIT_DEFAULT};
 pub use variables::{

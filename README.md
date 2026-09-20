@@ -53,7 +53,8 @@ The current engine already includes:
   the local Milky Way disc from parsec-scale IAU galactic-frame cameras;
 - telescope eyepiece simulation that derives magnification, plate scale, exit
   pupil, and true field of view from an OTA + eyepiece pair;
-- shareable schema-versioned JSON sessions across CLI, desktop, and web, plus
+- shareable schema-versioned JSON sessions across CLI, desktop, and web, with
+  deterministic v1–v7 migration and catalog SHA-256 verification, plus
   web session URLs that preserve meteor, scintillation, and output-colour
   settings (browser preview is intentionally sRGB until a wide-gamut canvas
   path is available);
@@ -136,6 +137,7 @@ crates/astronomy   astronomical time, coordinates, corrections, ephemerides,
                    photometry, atmosphere, skyglow, planning helpers
 crates/catalog     HYG catalog loading and colour / coordinate conversion
 crates/renderer    wgpu renderer, camera, overlays, tonemap, star instances
+crates/scene       WASM-safe catalog-to-renderer DTO integration
 crates/common      native-host glue shared by CLI, desktop viewer, and server
 apps/cli           headless PNG renderer
 apps/server        headless HTTP host (axum)

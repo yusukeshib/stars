@@ -3252,7 +3252,8 @@ generated from HYG); and manifest rows for all four artifacts.
 
 **Shipped (follow-up — completes the item):**
 - **Gaia LOD / spatial-tile streaming** — `crates/catalog/src/lod.rs` cuts the
-  sky into a fixed equirectangular grid (`TileId`, 18×36 cells) split into
+  sky into a fixed equirectangular grid and exposes explicit best-effort
+  completeness diagnostics plus a strict validation API (`TileId`, 18×36 cells) split into
   magnitude tiers (`TIER_BOUNDS = [6, 9, 12, 16]`). The bright tier-0 base is
   always streamed; fainter tiers load only for cells intersecting the view
   cone (conservative `radius + cell-half-diagonal` cull). Tiles are
@@ -3330,22 +3331,22 @@ identifiers; the catalogs above publish them under documented conventions
 source_id u64).
 
 **Implementation scope.**
-- `crates/catalog`: `CatalogObjectId::label` / `CatalogIdentifiers::{resolved_primary,
-  primary_label, pick_handle}` give a single canonical primary-ID source
+- `crates/catalog`: `CatalogObjectId::label` /
+  `CatalogIdentifiers::{resolved_primary, primary_label}` give a single canonical primary-ID source
   (HIP → HD → TYC → Gaia → HYG). The compact embedded catalog format is
   bumped `STRBIN3 → STRBIN4` to carry HIP / HD so identifiers survive the
   embedded / WASM path, not just the CSV path. ✅
-- `crates/renderer`: `StarInstance` carries the packed primary-id pick handle
-  (appended; not a GPU vertex attribute), `build_star_instance` threads it,
-  and `renderer::pick_nearest(instances, ray_eq, tol)` resolves a ray to the
-  nearest instance. ✅
+- `crates/scene` creates renderer instances plus an index-aligned,
+  host-owned `CatalogObjectId` sidecar. `StarInstance` contains render data
+  only, and `renderer::pick_nearest(instances, ray_eq, tol)` returns the
+  sidecar index. ✅
 - `apps/*`: the canonical primary ID is surfaced in the CLI `--goto` metadata
   (`ID HIP 32349`) and the web info panel as a click-to-copy chip; `GotoTarget`
   /the web goto JSON expose `primary_id`/`primaryId`. ✅
 - **Interactive canvas pick ✅:** `Camera::screen_ray_equatorial` inverts the
   perspective `view_proj` so a click/tap maps to a J2000 equatorial ray, fed
-  to `pick_nearest`; the resolved instance's pick handle becomes a canonical
-  primary-id label. Web taps open the existing info panel for the picked
+  to `pick_nearest`; the returned index resolves through the host identity
+  sidecar into a canonical primary-id label. Web taps open the existing info panel for the picked
   star (`StarView::pick_star` → goto-record JSON); the viewer shows the id in
   the title bar (`stars_host_common::pick_star_label`). CLI has no canvas, so
   it is unaffected. The optional session "primary ID family" preference is a
@@ -3354,8 +3355,9 @@ source_id u64).
 **Tests / validation.**
 - Unit: Sirius identifiers round-trip end-to-end across CSV / embedded /
   WASM paths (`stars-py` `l18_embedded_preserves_sirius_identifiers`). ✅
-- Unit: primary-ID label per family, resolved-primary priority, pick-handle
-  round-trip (`catalog`), instance pick-handle + `pick_nearest` (`renderer`). ✅
+- Unit: primary-ID label per family, resolved-primary priority (`catalog`),
+  host identity-sidecar alignment (`stars-scene`), and index-only
+  `pick_nearest` (`renderer`). ✅
 - Cross-check: the resolved Sirius identity (HIP 32349 / HD 48915) matches
   the `L-17` cross-ID test outputs.
 

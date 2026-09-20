@@ -7,13 +7,12 @@ use astronomy::Observer;
 use clap::Parser;
 use renderer::{
     Atmosphere, AuroraLayer, Camera, CometLayer, LightPollution, LocalView, MeteorLayer,
-    OutputColourSpace, OverlayConfig, Renderer, SatelliteLayer, StarInstance,
-    DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    OutputColourSpace, OverlayConfig, Renderer, SatelliteLayer, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use stars_host_common::{
     atmosphere_from_args, aurora_from_args, catalog_snapshot_for, curated_comet_layer,
     curated_satellite_layer, deep_sky_markers, eyepiece_from_args, first_night_tour,
-    light_pollution_from_args, load_session, load_star_instances_for_backend,
+    light_pollution_from_args, load_render_catalog_for_backend, load_session,
     overlay_config_from_args, parse_time_to_time_scales, resolve_goto_query,
     resolve_light_pollution, scene_from_preset, scene_preset_infos, scintillation_from_args,
     viewpoint_from_args, AtmosphereOverrides, AtmospherePresetArg, AuroraSeasonArg,
@@ -491,16 +490,17 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| args.catalog.clone());
     // L-20: when `--variable-magnitudes` is set, render known variables at
     // their phase-folded magnitude for the scene's session time.
+    stars_host_common::verify_catalog_digest(&catalog_path, scene.catalog.hash.as_deref())?;
     let variable_jd = args.variable_magnitudes.then_some(scene.time.jd_utc);
     let backend = stars_host_common::CatalogBackendKind::from_kebab_str(&scene.catalog.backend)
         .unwrap_or(stars_host_common::CatalogBackendKind::HygCsv);
-    let instances = load_star_instances_for_backend(
+    let render_catalog = load_render_catalog_for_backend(
         backend,
         &catalog_path,
         scene.catalog.limiting_magnitude,
         variable_jd,
     )?;
-    log::info!("Loaded {} stars", instances.len());
+    log::info!("Loaded {} stars", render_catalog.instances.len());
 
     if scene.eyepiece.enabled {
         log::info!(
@@ -514,7 +514,7 @@ fn main() -> Result<()> {
 
     let event_loop = EventLoop::new()?;
     let mut app = App::new(
-        instances,
+        render_catalog,
         scene.latitude_deg,
         scene.longitude_deg,
         scene.time.jd_utc,
@@ -573,7 +573,7 @@ struct GpuState {
 struct App {
     gpu: Option<GpuState>,
     window: Option<Arc<Window>>,
-    stars: Vec<StarInstance>,
+    stars: stars_host_common::RenderCatalog,
     lat: f64,
     lng: f64,
     initial_view: LocalView,
@@ -685,7 +685,7 @@ impl SkyClock {
 impl App {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        stars: Vec<StarInstance>,
+        stars: stars_host_common::RenderCatalog,
         lat: f64,
         lng: f64,
         start_jd: f64,
@@ -861,8 +861,15 @@ impl ApplicationHandler for App {
         };
         surface.configure(&device, &config);
 
-        let mut renderer = Renderer::new(&device, format, size.width, size.height, &self.stars);
+        let mut renderer = Renderer::new(
+            &device,
+            format,
+            size.width,
+            size.height,
+            &self.stars.instances,
+        );
         renderer.set_deep_sky_markers(&deep_sky_markers());
+        renderer.set_sky_labels(&stars_host_common::sky_labels());
         renderer.set_overlays(&device, &self.overlays);
         let observer = Observer::from_degrees(self.lat, self.lng, self.sky_clock.current_jd());
         let mut camera = Camera::new(

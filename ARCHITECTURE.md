@@ -43,24 +43,29 @@ between engine crates and host applications.
 `crates/common` is intentionally outside the engine tier even though it lives
 under `crates/`. It contains native-host glue: `clap` mirrors of renderer enums,
 `chrono` time parsing, schema-versioned JSON session conversion, deterministic
-scene preset construction, atmosphere / overlay argument mapping, the shared
-catalog-to-renderer conversion for CLI / desktop / server, and — since `L-22`
-— the shared headless GPU render pipeline (`crates::common::render`) that
-the CLI and the HTTP server both call so the two hosts cannot drift on
-device initialisation, readback alignment, or PNG encoding. The web host
-bypasses it so WASM stays free of native-only dependencies.
+scene preset construction, atmosphere / overlay argument mapping, and — since
+`L-22` — the shared headless GPU render and colour-tagged PNG pipeline that the
+CLI and HTTP server both call. The web host bypasses native-only device and
+filesystem code.
 
-`renderer` does **not** depend on `catalog`. Deep-sky catalogues and the policy
-that suppresses resolved member-field clusters remain catalog/host concerns.
-Native hosts adapt those records in `crates/common`; the WASM host performs the
-same boundary conversion locally. Both provide renderer-neutral
-`DeepSkyMarker` DTOs before rebuilding overlays. This keeps storage, catalogue
-identity, and filtering policy out of the GPU crate.
+`crates/scene` is the platform-neutral integration tier shared by native and
+WASM hosts. It depends on `catalog` and `renderer`, converts catalog rows,
+labels, and deep-sky policy into renderer DTOs, and returns host-owned,
+index-aligned catalog-identity sidecars for picking. It deliberately has no
+filesystem, `clap`, `chrono`, `winit`, device-owning `wgpu`, or `wasm-bindgen`
+dependency.
+
+`renderer` does **not** depend on `catalog` and its build script reads no catalog
+files. Deep-sky filtering, generated labels, storage, and object identities are
+catalog/integration concerns. Hosts provide renderer-neutral `DeepSkyMarker`
+and `SkyLabel` DTOs; `StarInstance` contains render data only.
 
 Headless rendering validates non-zero dimensions, checked buffer arithmetic,
-and a bounded pixel budget before GPU allocation. The HTTP server additionally
-serialises render work with a one-permit semaphore and returns `503` when that
-GPU slot is occupied.
+and a bounded pixel budget before GPU allocation. Session catalog snapshots
+carry a `sha256:` digest when the source is readable, and headless rendering
+verifies it before ingestion. The HTTP server additionally serialises render
+work with a one-permit semaphore and returns `503` when that GPU slot is
+occupied.
 
 ## Crate boundaries
 
@@ -136,7 +141,9 @@ Owns star catalog ingestion, deep-sky catalogues, and catalog-space conversions:
   `Tycho2CsvBackend`, and `GaiaDr3CsvBackend` parse normalised VizieR / Gaia
   CSV exports by column name behind the same `CatalogBackend` trait, preserve
   native + cross identifiers, derive Tycho V/B−V from VT/BT (ESA 1997), and
-  page through `CatalogQuery`/`CatalogPage`. The raw archives are fetched on
+  page through an opaque `CatalogCursor` carried by `CatalogQuery` and
+  `CatalogPage`. Strict backends reject malformed schemas/rows; explicit
+  best-effort backends return structured `CatalogDiagnostic`s. The raw archives are fetched on
   demand (`scripts/fetch-{hipparcos,tycho2,gaia-dr3-subset}.sh`, manifest
   `runtime-service` rows) and never committed; a committed HIP↔HD bright-star
   anchor index (`bright_star_xmatch.csv`, generated from HYG) backs the
@@ -144,23 +151,22 @@ Owns star catalog ingestion, deep-sky catalogues, and catalog-space conversions:
   `L-17` follow-up;
 - CPU-side `CatalogIdentifiers` for HYG / HIP / HD / Tycho-2 / Gaia DR3,
   populated by the HYG and large-catalog backends. Identifier preservation
-  (`L-18`) adds `CatalogObjectId::label` + `CatalogIdentifiers::{resolved_primary,
-  primary_label, pick_handle}` as the single canonical primary-ID source
-  (priority HIP → HD → TYC → Gaia → HYG). The compact embedded catalog format
-  is `STRBIN4`, which carries HIP / HD so identifiers survive the embedded /
-  WASM path; `renderer::build_star_instance` packs the primary id onto every
-  `StarInstance` (a CPU-side pick handle, not a GPU vertex attribute) and
-  `renderer::pick_nearest` resolves an equatorial ray to the nearest instance,
-  so an on-screen star maps back to its catalogue identity. The CLI `--goto`
+  (`L-18`) adds `CatalogObjectId::label` +
+  `CatalogIdentifiers::{resolved_primary, primary_label}` as the canonical
+  primary-ID source (priority HIP → HD → TYC → Gaia → HYG). The compact
+  embedded format is `STRBIN4`, which carries HIP / HD. `stars-scene` creates
+  render instances plus an index-aligned identity sidecar;
+  `renderer::pick_nearest` returns only the instance index, so catalog semantics
+  never enter the GPU crate. The CLI `--goto`
   metadata and the web info panel surface the canonical primary ID; an
   interactive pick closes the loop: `Camera::screen_ray_equatorial` inverts the
   perspective `view_proj` (a click/tap pixel → J2000 ray), `pick_nearest`
-  selects the star, and the resolved pick handle becomes a label
+  selects the star, and the host sidecar identity becomes a label
   (`stars_host_common::pick_star_label`, viewer title bar) or the existing
   goto-record info panel (`StarView::pick_star`, web canvas tap);
 - the `DeepSkyCatalog` trait + embedded `MessierCatalog` and
-  `NgcBrightCatalog` implementations consumed by the renderer's deep-sky
-  overlay (`V-42`); the trait is the slot for the planned runtime
+  `NgcBrightCatalog` implementations adapted by `stars-scene` into the
+  renderer's deep-sky overlay DTOs (`V-42`); the trait is the slot for the planned runtime
   full-OpenNGC streaming backend;
 - visual double / binary resolution (`V-54`): `doubles::resolve_doubles`
   runs inside both load paths (`load_from_csv` and the embedded
@@ -185,6 +191,9 @@ Owns star catalog ingestion, deep-sky catalogues, and catalog-space conversions:
 Catalog stars are renderer-independent. They should not know about `wgpu`,
 window size, camera state, or UI labels. Large-catalog storage, paging, and LOD
 rules are specified in [`docs/catalog-backend-design.md`](docs/catalog-backend-design.md).
+LOD best-effort streams expose `complete` plus per-tile `LodIssue`s; validation
+and reproducible renders use `stream_strict`, which rejects any missing,
+corrupt, oversized, malformed, or metadata-inconsistent selected tile.
 
 ### `crates/renderer`
 
@@ -322,23 +331,27 @@ All crates should preserve these conventions:
 ## Session files
 
 Portable scene state uses schema-versioned JSON with the current top-level
-`schemaVersion: 6` (v2 unified the spectral extinction state via `V-37`; v3
+`schemaVersion: 7` (v2 unified the spectral extinction state via `V-37`; v3
 added `surfaceAlbedo` for the Hošek-Wilkie daylight model in `V-38`; v4 added
 the scintillation block for `V-24`; v6 added the `outputColourspace` field for
 `V-50` output colour management). The
-native representation lives in
-`stars_host_common::session`; the web frontend keeps a TypeScript mirror in
-`apps/web/frontend/src/session.ts`. Field names are stable host-facing names
-(camel-case objects and kebab-case enum values), with degrees for UI-facing
-angles and explicit time-scale fields (`jdUtc`, `jdUt1`, `jdTai`, `jdTt`,
-`jdTdb`, `taiMinusUtcSeconds`, `dut1Seconds`).
+native representation lives in `stars_host_common::session`; the web frontend
+keeps the host-facing TypeScript shape in `apps/web/frontend/src/session.ts`.
+Native loading migrates v1–v6 to v7, including the v1 turbidity → aerosol state
+conversion; web import applies the same historical conversion. Unknown future
+versions are rejected. Field names are stable host-facing names (camel-case
+objects and kebab-case enum values), with degrees for UI-facing angles.
+`jdUtc` and `dut1Seconds` are authoritative; UT1/TAI/TT/TDB and leap-second
+offsets are recomputed by `astronomy::TimeScales`. Web exports therefore do not
+carry a second leap-second table.
 
 A session records observer, view, overlays, projection/viewpoint, custom
 external viewpoint vectors, atmosphere/refraction controls, planet visibility,
 eyepiece optics, the output colour space (`V-50`: `srgb` / `display-p3` /
 `rec2020`), active correction flags, catalog snapshot metadata, and app
-version. Hosts should reject unknown future schema versions instead of silently
-interpreting them. Compact web URL query parameters remain a convenience format;
+version. Correction metadata is validated against capabilities rather than
+silently ignored, and catalog SHA-256 is verified before native headless
+rendering. Compact web URL query parameters remain a convenience format;
 JSON sessions are the reproducibility format intended for presets, validation
 scenes, and cross-host exchange.
 
@@ -518,9 +531,12 @@ The exact pass layout can change, but responsibilities should stay separated:
   from HDR radiance-like values to display output, and the `V-50` output
   colour-management step — a linear sRGB→target gamut matrix
   (`renderer::colourspace`) applied after the Reinhard operator and uploaded
-  via a dedicated tonemap uniform. The swap-chain / PNG keeps the sRGB
+  via a dedicated, pass-specific tonemap uniform rather than a partial copy of
+  `CameraUniform`. Tests parse each shader and compare every camera-uniform
+  member offset against the canonical full WGSL layout and Rust byte size.
+  The swap-chain / PNG keeps the sRGB
   transfer function; only the primaries change and are then tagged on the
-  output (PNG `cHRM`, sRGB-fallback canvas).
+  output (shared native PNG `sRGB`/`cHRM` tagging; explicitly sRGB browser canvas).
 
 ## Adding a new host
 

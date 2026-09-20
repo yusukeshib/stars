@@ -9,18 +9,16 @@ use astronomy::{
 };
 use catalog::load_embedded;
 use catalog::{
-    render_magnitude_at, simbad_query_url, variable_for, vizier_query_url, DeepSkyCatalog,
-    DeepSkyId, DeepSkyObject, MessierCatalog, NgcBrightCatalog, Star, StarIdentifiers,
-    VariableSummary,
+    simbad_query_url, variable_for, vizier_query_url, DeepSkyCatalog, DeepSkyId, DeepSkyObject,
+    MessierCatalog, NgcBrightCatalog, Star, StarIdentifiers, VariableSummary,
 };
 use catalog::search::{
     named_star, search as catalog_search, SearchId, SearchKind, SearchMatch, SOLAR_SYSTEM_BODIES,
 };
 use renderer::{
-    build_star_instance, pick_nearest, Atmosphere, AtmospherePreset, AuroraLayer, Camera,
-    CometLayer, DeepSkyMarker, DeepSkyMarkerShape, ExternalViewpoint, EyepieceSimulation,
-    LightPollution, LocalView, MeteorLayer, OpticalDesign, OutputColourSpace, OverlayConfig,
-    OverlayKind, OverlayPalette, Renderer, SatelliteLayer,
+    pick_nearest, Atmosphere, AtmospherePreset, AuroraLayer, Camera, CometLayer,
+    ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView, MeteorLayer, OpticalDesign,
+    OutputColourSpace, OverlayConfig, OverlayKind, OverlayPalette, Renderer, SatelliteLayer,
     Scintillation, SkyProjection, SkyViewpoint, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 
@@ -44,30 +42,6 @@ use wasm_bindgen::JsCast;
 /// conditions (the on-screen dynamic range is much smaller than a dark-adapted
 /// observer's). See `renderer::magnitude_to_render_params` for the model.
 const LIMITING_MAGNITUDE: f32 = DEFAULT_SCREEN_LIMITING_MAGNITUDE;
-
-fn deep_sky_markers() -> Vec<DeepSkyMarker> {
-    let ngc = NgcBrightCatalog;
-    let messier = MessierCatalog;
-    ngc.objects(f32::INFINITY)
-        .into_iter()
-        .filter(|object| !ngc.resolve_as_member_field(object.id))
-        .chain(
-            messier
-                .objects(f32::INFINITY)
-                .into_iter()
-                .filter(|object| !messier.resolve_as_member_field(object.id)),
-        )
-        .map(|object| DeepSkyMarker {
-            position: object.position,
-            magnitude: object.magnitude,
-            size_arcmin: object.size_arcmin,
-            shape: match object.id {
-                DeepSkyId::Messier(_) => DeepSkyMarkerShape::Diamond,
-                DeepSkyId::Ngc(_) | DeepSkyId::Ic(_) => DeepSkyMarkerShape::Ring,
-            },
-        })
-        .collect()
-}
 
 #[wasm_bindgen(start)]
 pub fn main() {
@@ -536,27 +510,7 @@ impl RenderState {
     fn rebuild_instances(&mut self) {
         self.variable_rebuild_jd = self.camera.observer.time.jd_utc;
         let jd = self.variable_magnitudes.then(|| self.camera.observer.time.jd_utc);
-        self.instances = self
-            .stars
-            .iter()
-            .map(|s| {
-                let magnitude = match jd {
-                    Some(jd) => {
-                        render_magnitude_at(s.identifiers.hip, s.identifiers.hd, None, s.magnitude, jd)
-                    }
-                    None => s.magnitude,
-                };
-                build_star_instance(
-                    s.position.into(),
-                    s.proper_motion.into(),
-                    s.color,
-                    magnitude,
-                    LIMITING_MAGNITUDE,
-                    s.distance_pc,
-                    s.identifiers.pick_handle(),
-                )
-            })
-            .collect();
+        self.instances = stars_scene::star_instances(&self.stars, LIMITING_MAGNITUDE, jd).0;
         self.renderer.update_instances(&self.device, &self.instances);
     }
 }
@@ -633,25 +587,11 @@ impl StarView {
         log::info!("Loading star catalog...");
         let stars = load_embedded();
         log::info!("Loaded {} stars", stars.len());
-        let instances: Vec<StarInstance> = stars
-            .iter()
-            .map(|s| {
-                build_star_instance(
-                    s.position.into(),
-                    s.proper_motion.into(),
-                    s.color,
-                    s.magnitude,
-                    LIMITING_MAGNITUDE,
-                    s.distance_pc,
-                    // L-18: carry the catalogue primary id onto the instance so
-                    // a canvas pick maps back to the star's identity.
-                    s.identifiers.pick_handle(),
-                )
-            })
-            .collect();
+        let instances = stars_scene::star_instances(&stars, LIMITING_MAGNITUDE, None).0;
 
         let mut renderer = Renderer::new(&device, format, width, height, &instances);
-        renderer.set_deep_sky_markers(&deep_sky_markers());
+        renderer.set_deep_sky_markers(&stars_scene::deep_sky_markers());
+        renderer.set_sky_labels(&stars_scene::sky_labels());
         let mut camera = Camera::new(
             // Defaults; JS will overwrite immediately.
             Observer::from_degrees(0.0, 0.0, 2_451_545.0),

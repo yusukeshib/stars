@@ -23,6 +23,7 @@ pub use overlay::{
     DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT,
 };
 pub use renderer::Renderer;
+pub use text::{SkyLabel, SkyLabelKind};
 pub use vertex::{
     build_star_instance, magnitude_to_render_params, pick_nearest, RenderParams, StarInstance,
     DEFAULT_SCREEN_LIMITING_MAGNITUDE, NAKED_EYE_LIMITING_MAGNITUDE, SHADER_INTENSITY_CUTOFF,

@@ -299,11 +299,51 @@ impl LodQuery {
     }
 }
 
-/// The result of streaming a [`LodQuery`]: the decoded stars plus the cull
-/// bookkeeping the bench / scaling tests assert on.
+/// Why a selected LOD tile could not be loaded atomically.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LodIssueKind {
+    InvalidIndexEntry,
+    MissingOrCorruptBlob,
+    PayloadTooLarge,
+    InvalidUtf8,
+    InvalidRows,
+}
+
+/// A caller-visible problem associated with one indexed tile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LodIssue {
+    pub tile: TileId,
+    pub kind: LodIssueKind,
+    pub message: String,
+}
+
+/// Strict streaming failure. The partial stream is retained for diagnostics,
+/// but reproducible callers must not render it as a complete catalogue.
+#[derive(Debug, Clone)]
+pub struct LodStreamError {
+    pub partial: LodStream,
+}
+
+impl std::fmt::Display for LodStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "LOD stream incomplete: {} tile issue(s)",
+            self.partial.issues.len()
+        )
+    }
+}
+
+impl std::error::Error for LodStreamError {}
+
+/// The result of streaming a [`LodQuery`]: the decoded stars plus explicit
+/// completeness and cull bookkeeping.
 #[derive(Debug, Clone)]
 pub struct LodStream {
     pub stars: Vec<Star>,
+    /// False when a selected or structurally invalid index entry was skipped.
+    pub complete: bool,
+    pub issues: Vec<LodIssue>,
     /// Tiles in the index that the query considered (the cull denominator).
     pub tiles_examined: usize,
     /// Tiles actually loaded + decoded (the cull numerator — this is the work
@@ -346,23 +386,32 @@ impl<S: BlobStore> LodCatalog<S> {
         sep <= query.radius_rad + TileId::max_half_diagonal_rad()
     }
 
-    /// Stream the tiles needed for `query`, decode their payloads, and return
-    /// the stars in stable tier-then-row order.
+    /// Stream the tiles needed for `query` in explicit best-effort mode.
+    /// Callers must inspect [`LodStream::complete`] before treating the result
+    /// as a reproducible catalogue.
     pub fn stream(&self, query: &LodQuery) -> LodStream {
         if query.max_rows == Some(0) {
             return LodStream {
                 stars: Vec::new(),
+                complete: true,
+                issues: Vec::new(),
                 tiles_examined: 0,
                 tiles_loaded: 0,
             };
         }
 
         let mut selected: Vec<&LodTileEntry> = Vec::new();
+        let mut issues = Vec::new();
         let mut tiles_examined = 0usize;
         for entry in self.index.entries() {
-            // Index files are external inputs. Ignore impossible IDs before
-            // indexing tier bounds or evaluating their cell geometry.
+            // Index files are external inputs. Record impossible IDs/metadata
+            // rather than silently presenting a partial catalogue as complete.
             if !entry.tile.is_valid() || !(1..=MAX_TILE_ROWS).contains(&entry.rows) {
+                issues.push(LodIssue {
+                    tile: entry.tile,
+                    kind: LodIssueKind::InvalidIndexEntry,
+                    message: format!("invalid tile metadata (rows={})", entry.rows),
+                });
                 continue;
             }
             // A tier can be skipped without geometry work only when even its
@@ -399,17 +448,44 @@ impl<S: BlobStore> LodCatalog<S> {
             }
 
             let Some(bytes) = self.store.get(&entry.content_hash) else {
-                continue; // missing blob: skip rather than fail the whole frame
+                issues.push(LodIssue {
+                    tile: entry.tile,
+                    kind: LodIssueKind::MissingOrCorruptBlob,
+                    message: format!(
+                        "missing blob or content-hash mismatch: {}",
+                        entry.content_hash
+                    ),
+                });
+                continue;
             };
             if bytes.len() > MAX_TILE_PAYLOAD_BYTES {
+                issues.push(LodIssue {
+                    tile: entry.tile,
+                    kind: LodIssueKind::PayloadTooLarge,
+                    message: format!("tile payload is {} bytes", bytes.len()),
+                });
                 continue;
             }
             let Ok(text) = std::str::from_utf8(&bytes) else {
+                issues.push(LodIssue {
+                    tile: entry.tile,
+                    kind: LodIssueKind::InvalidUtf8,
+                    message: "tile payload is not UTF-8".to_owned(),
+                });
                 continue;
             };
             let expected_rows = entry.rows as usize;
             let report = parse_gaia_dr3_csv_report_bounded(text, Some(expected_rows));
-            if !report.warnings.is_empty() || report.stars.len() != expected_rows {
+            if !report.diagnostics.is_empty() || report.stars.len() != expected_rows {
+                issues.push(LodIssue {
+                    tile: entry.tile,
+                    kind: LodIssueKind::InvalidRows,
+                    message: format!(
+                        "decoded {} of {expected_rows} rows with {} diagnostic(s)",
+                        report.stars.len(),
+                        report.diagnostics.len()
+                    ),
+                });
                 continue;
             }
 
@@ -424,8 +500,20 @@ impl<S: BlobStore> LodCatalog<S> {
         }
         LodStream {
             stars,
+            complete: issues.is_empty(),
+            issues,
             tiles_examined,
             tiles_loaded,
+        }
+    }
+
+    /// Strict variant for validation and reproducible renders.
+    pub fn stream_strict(&self, query: &LodQuery) -> Result<LodStream, LodStreamError> {
+        let stream = self.stream(query);
+        if stream.complete {
+            Ok(stream)
+        } else {
+            Err(LodStreamError { partial: stream })
         }
     }
 }
@@ -721,7 +809,31 @@ mod tests {
             let stream = LodCatalog::new(index, store).stream(&LodQuery::all_sky(6.0));
             assert!(stream.stars.is_empty());
             assert_eq!(stream.tiles_loaded, 0);
+            assert!(!stream.complete);
+            assert_eq!(stream.issues.len(), 1);
         }
+    }
+
+    #[test]
+    fn strict_stream_rejects_incomplete_catalog() {
+        let mut index = LodIndex::new();
+        index.insert(
+            TileId {
+                tier: BASE_TIER,
+                lat: 9,
+                lon: 0,
+            },
+            "0000000000000000",
+            1,
+        );
+        let catalog = LodCatalog::new(index, MemoryBlobStore::new());
+        let error = catalog
+            .stream_strict(&LodQuery::all_sky(6.0))
+            .expect_err("missing tile must fail strict streaming");
+        assert_eq!(
+            error.partial.issues[0].kind,
+            LodIssueKind::MissingOrCorruptBlob
+        );
     }
 
     #[test]
@@ -752,6 +864,8 @@ mod tests {
         let stream = LodCatalog::new(index, store).stream(&LodQuery::all_sky(6.0));
         assert!(stream.stars.is_empty());
         assert_eq!(stream.tiles_loaded, 0);
+        assert!(!stream.complete);
+        assert_eq!(stream.issues.len(), 2);
     }
 
     #[test]
