@@ -131,13 +131,25 @@ pub fn geomagnetic_latitude_deg(geographic_lat_deg: f64, geographic_lon_deg: f64
 }
 
 /// Initial great-circle bearing (radians, from local north toward east, in
-/// `[0, 2π)`) from a geographic position to the north geomagnetic pole. This is
-/// the azimuth toward which the poleward part of the oval lies.
+/// `[0, 2π)`) from a geographic position to the north geomagnetic pole.
 pub fn bearing_to_geomagnetic_pole_rad(geographic_lat_deg: f64, geographic_lon_deg: f64) -> f64 {
-    let lp = GEOMAGNETIC_NORTH_POLE_LAT_DEG * DEG_TO_RAD;
-    let phip = GEOMAGNETIC_NORTH_POLE_LON_DEG * DEG_TO_RAD;
+    bearing_to_geographic_point_rad(
+        geographic_lat_deg,
+        geographic_lon_deg,
+        GEOMAGNETIC_NORTH_POLE_LAT_DEG,
+        GEOMAGNETIC_NORTH_POLE_LON_DEG,
+    )
+}
+
+fn bearing_to_geographic_point_rad(
+    geographic_lat_deg: f64,
+    geographic_lon_deg: f64,
+    target_lat_deg: f64,
+    target_lon_deg: f64,
+) -> f64 {
+    let lp = target_lat_deg * DEG_TO_RAD;
     let l = geographic_lat_deg * DEG_TO_RAD;
-    let dphi = phip - geographic_lon_deg * DEG_TO_RAD;
+    let dphi = (target_lon_deg - geographic_lon_deg) * DEG_TO_RAD;
     let y = dphi.sin() * lp.cos();
     let x = l.cos() * lp.sin() - l.sin() * lp.cos() * dphi.cos();
     y.atan2(x).rem_euclid(2.0 * PI)
@@ -156,8 +168,10 @@ pub fn emission_apparent_altitude_rad(central_angle_rad: f64, height_km: f64) ->
     let num = gamma.cos() - rh;
     let den = gamma.sin();
     if den.abs() < 1e-9 {
-        // Directly overhead.
-        return PI / 2.0;
+        // At zero separation the emission is overhead; at the antipode it is
+        // directly below the observer. `atan2` cannot distinguish those cases
+        // once the tiny sine denominator is treated as zero.
+        return if num >= 0.0 { PI / 2.0 } else { -PI / 2.0 };
     }
     num.atan2(den)
 }
@@ -195,14 +209,13 @@ pub struct AuroraView {
     pub intensity: f64,
 }
 
-/// Compute the statistically-expected apparent aurora arc for a northern-
-/// hemisphere geographic observer and a supplied Kp index.
+/// Compute the statistically-expected apparent aurora arc for an observer in
+/// either geomagnetic hemisphere and a supplied Kp index.
 ///
-/// The discrete bright arc is placed at the equatorward oval boundary and the
-/// red curtain rises poleward/upward from it. When the observer is poleward of
-/// the boundary the arc appears toward the geomagnetic pole; when equatorward,
-/// it appears low toward the pole-ward horizon and vanishes once the boundary
-/// drops below the local horizon.
+/// The discrete bright arc is placed at the equatorward oval boundary in the
+/// observer's geomagnetic hemisphere. For a sub-auroral observer it appears
+/// toward that hemisphere's geomagnetic pole; for an observer poleward of the
+/// boundary it appears toward the magnetic equator.
 pub fn aurora_view(
     geographic_lat_deg: f64,
     geographic_lon_deg: f64,
@@ -212,15 +225,31 @@ pub fn aurora_view(
     let intensity = aurora_intensity(kp, season);
     let (equatorward, _poleward) = auroral_oval_boundary(kp, season);
     let geomag_lat = geomagnetic_latitude_deg(geographic_lat_deg, geographic_lon_deg);
-    let pole_bearing = bearing_to_geomagnetic_pole_rad(geographic_lat_deg, geographic_lon_deg);
-
-    // Signed ground angle (poleward positive) from the observer to the discrete
-    // equatorward arc, along the geomagnetic meridian.
-    let gamma_deg = equatorward - geomag_lat;
-    let (azimuth, central_deg) = if gamma_deg >= 0.0 {
-        (pole_bearing, gamma_deg)
+    let northern = geomag_lat >= 0.0;
+    let pole_bearing = if northern {
+        bearing_to_geomagnetic_pole_rad(geographic_lat_deg, geographic_lon_deg)
     } else {
-        ((pole_bearing + PI).rem_euclid(2.0 * PI), -gamma_deg)
+        // The centered-dipole south pole is exactly antipodal to the north
+        // pole: negate latitude and rotate longitude by 180 degrees.
+        bearing_to_geographic_point_rad(
+            geographic_lat_deg,
+            geographic_lon_deg,
+            -GEOMAGNETIC_NORTH_POLE_LAT_DEG,
+            GEOMAGNETIC_NORTH_POLE_LON_DEG + 180.0,
+        )
+    };
+
+    // Along either magnetic meridian, increasing absolute magnetic latitude is
+    // poleward. This avoids incorrectly measuring a southern observer all the
+    // way to the northern oval.
+    let poleward_distance_deg = equatorward - geomag_lat.abs();
+    let (azimuth, central_deg) = if poleward_distance_deg >= 0.0 {
+        (pole_bearing, poleward_distance_deg)
+    } else {
+        (
+            (pole_bearing + PI).rem_euclid(2.0 * PI),
+            -poleward_distance_deg,
+        )
     };
     let central = central_deg * DEG_TO_RAD;
 
@@ -288,6 +317,12 @@ mod tests {
     }
 
     #[test]
+    fn antipodal_emission_is_at_nadir() {
+        let el = emission_apparent_altitude_rad(PI, AURORA_GREEN_HEIGHT_KM);
+        assert!((el + PI / 2.0).abs() < 1e-12, "γ=π must be the nadir");
+    }
+
+    #[test]
     fn emission_drops_below_horizon_with_distance() {
         // Beyond the geometric horizon distance the elevation goes negative.
         let near = emission_apparent_altitude_rad(2.0 * DEG_TO_RAD, AURORA_GREEN_HEIGHT_KM);
@@ -334,6 +369,18 @@ mod tests {
             view.center_altitude_rad / DEG_TO_RAD
         );
         assert!(view.intensity > 0.0);
+    }
+
+    #[test]
+    fn antipodal_observers_have_symmetric_auroral_geometry() {
+        let north = aurora_view(60.0, 10.0, 5.0, AuroraSeason::Equinox);
+        let south = aurora_view(-60.0, -170.0, 5.0, AuroraSeason::Equinox);
+        assert_eq!(north.visible, south.visible);
+        assert!((north.center_altitude_rad - south.center_altitude_rad).abs() < 1.0e-12);
+        assert!((north.vertical_extent_rad - south.vertical_extent_rad).abs() < 1.0e-12);
+        assert!((north.intensity - south.intensity).abs() < 1.0e-12);
+        assert!(geomagnetic_latitude_deg(60.0, 10.0) > 0.0);
+        assert!(geomagnetic_latitude_deg(-60.0, -170.0) < 0.0);
     }
 
     #[test]

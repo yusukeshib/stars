@@ -54,7 +54,9 @@ The current engine already includes:
 - telescope eyepiece simulation that derives magnification, plate scale, exit
   pupil, and true field of view from an OTA + eyepiece pair;
 - shareable schema-versioned JSON sessions across CLI, desktop, and web, plus
-  compact web session URLs;
+  web session URLs that preserve meteor, scintillation, and output-colour
+  settings (browser preview is intentionally sRGB until a wide-gamut canvas
+  path is available);
 - bilingual web UI (English and Japanese) with browser-language detection,
   a `?lang=en|ja` URL override for sharing, and an in-app language switcher;
 - object search, GoTo, and info panel across all three hosts (V-56): the

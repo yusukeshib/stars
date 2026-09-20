@@ -26,6 +26,7 @@ import {
   isAuroraSeason,
   isOverlayLayer,
   isOverlayPalette,
+  isOutputColourspace,
   isSkyProjection,
   isSkyViewpoint,
   type AtmosphereConfig,
@@ -105,8 +106,10 @@ const vec3Param = (
   min: number,
   max: number,
 ): { x: number; y: number; z: number } => {
-  const parts = (params.get(key) ?? "").split(",").map((part) => Number(part));
-  if (parts.length !== 3 || parts.some((value) => !Number.isFinite(value))) return fallback;
+  const rawParts = (params.get(key) ?? "").split(",");
+  if (rawParts.length !== 3 || rawParts.some((part) => part.trim() === "")) return fallback;
+  const parts = rawParts.map((part) => Number(part));
+  if (parts.some((value) => !Number.isFinite(value))) return fallback;
   const clamp = (value: number) => Math.max(min, Math.min(max, value));
   return { x: clamp(parts[0]), y: clamp(parts[1]), z: clamp(parts[2]) };
 };
@@ -167,9 +170,9 @@ function loadAtmosphereFromUrl(params?: URLSearchParams): AtmosphereConfig | nul
   };
 }
 
-function loadSessionFromUrl(): UrlSession | null {
-  if (typeof window === "undefined") return null;
-  const params = new URLSearchParams(window.location.search);
+function loadSessionFromUrl(params?: URLSearchParams): UrlSession | null {
+  if (params === undefined && typeof window === "undefined") return null;
+  params ??= new URLSearchParams(window.location.search);
   const sessionKeys = [
     "lat",
     "lng",
@@ -181,6 +184,7 @@ function loadSessionFromUrl(): UrlSession | null {
     "grid",
     "overlayOpacity",
     "deepSkyMag",
+    "overlayPalette",
     "planets",
     "satellites",
     "satExposure",
@@ -202,12 +206,23 @@ function loadSessionFromUrl(): UrlSession | null {
     "pressureHpa",
     "temperatureC",
     "surfaceAlbedo",
+    "scintillation",
+    "scintillationCn2",
+    "scintillationSeed",
+    "meteors",
+    "meteorSeed",
+    "meteorRate",
+    "meteorWindow",
+    "outputColourspace",
     "eyepiece",
     "otaApertureMm",
     "otaFocalMm",
     "eyepieceFocalMm",
     "eyepieceAfovDeg",
     "eyepieceFieldStopMm",
+    "telescopeDesign",
+    "spiderVanes",
+    "otaRotationDeg",
   ];
   if (!sessionKeys.some((key) => params.has(key))) return null;
   const observer: Observer = {
@@ -246,7 +261,10 @@ function loadSessionFromUrl(): UrlSession | null {
     params.has("otaFocalMm") ||
     params.has("eyepieceFocalMm") ||
     params.has("eyepieceAfovDeg") ||
-    params.has("eyepieceFieldStopMm");
+    params.has("eyepieceFieldStopMm") ||
+    params.has("telescopeDesign") ||
+    params.has("spiderVanes") ||
+    params.has("otaRotationDeg");
   const projectionParam = params.get("projection");
   const viewpointParam = params.get("viewpoint");
   const hasExternalViewpointParam = params.has("originPc") || params.has("targetPc") || params.has("up");
@@ -260,6 +278,20 @@ function loadSessionFromUrl(): UrlSession | null {
     view,
     overlays,
     atmosphere: loadAtmosphereFromUrl(params) ?? undefined,
+    scintillation: {
+      enabled: params.get("scintillation") !== "off",
+      cN2Scale: numberParam(params, "scintillationCn2", DEFAULT_SCINTILLATION_CONFIG.cN2Scale, 0, 5),
+      seed: Math.round(numberParam(params, "scintillationSeed", DEFAULT_SCINTILLATION_CONFIG.seed, 0, 0xffffffff)),
+    },
+    meteors: {
+      enabled: params.get("meteors") !== "off",
+      seed: Math.round(numberParam(params, "meteorSeed", DEFAULT_METEORS_CONFIG.seed, 0, 0xffffffff)),
+      rateScale: numberParam(params, "meteorRate", DEFAULT_METEORS_CONFIG.rateScale, 0, 10),
+      windowSeconds: numberParam(params, "meteorWindow", DEFAULT_METEORS_CONFIG.windowSeconds, 1, 60),
+    },
+    outputColourspace: isOutputColourspace(params.get("outputColourspace"))
+      ? (params.get("outputColourspace") as OutputColourspace)
+      : DEFAULT_OUTPUT_COLOURSPACE,
     planets: { enabled: params.get("planets") !== "off" },
     satellites: {
       enabled: params.get("satellites") === "on",
@@ -304,11 +336,14 @@ function loadSessionFromUrl(): UrlSession | null {
   };
 }
 
-function sessionUrl({ observer, view, overlays, atmosphere, planets, satellites, aurora, comets, projection, eyepiece, timeMs }: {
+function sessionUrl({ observer, view, overlays, atmosphere, scintillation, meteors, outputColourspace, planets, satellites, aurora, comets, projection, eyepiece, timeMs }: {
   observer: Observer;
   view: View;
   overlays: OverlayConfig;
   atmosphere: AtmosphereConfig;
+  scintillation: ScintillationConfig;
+  meteors: MeteorsConfig;
+  outputColourspace: OutputColourspace;
   planets: PlanetsConfig;
   satellites: SatellitesConfig;
   aurora: AuroraConfig;
@@ -353,6 +388,14 @@ function sessionUrl({ observer, view, overlays, atmosphere, planets, satellites,
   url.searchParams.set("pressureHpa", String(Math.round(atmosphere.pressureHpa)));
   url.searchParams.set("temperatureC", atmosphere.temperatureC.toFixed(0));
   url.searchParams.set("surfaceAlbedo", atmosphere.surfaceAlbedo.toFixed(2));
+  url.searchParams.set("scintillation", scintillation.enabled ? "on" : "off");
+  url.searchParams.set("scintillationCn2", scintillation.cN2Scale.toFixed(2));
+  url.searchParams.set("scintillationSeed", String(scintillation.seed));
+  url.searchParams.set("meteors", meteors.enabled ? "on" : "off");
+  url.searchParams.set("meteorSeed", String(meteors.seed));
+  url.searchParams.set("meteorRate", meteors.rateScale.toFixed(2));
+  url.searchParams.set("meteorWindow", meteors.windowSeconds.toFixed(1));
+  url.searchParams.set("outputColourspace", outputColourspace);
   url.searchParams.set("eyepiece", eyepiece.enabled ? "on" : "off");
   url.searchParams.set("otaApertureMm", eyepiece.apertureMm.toFixed(0));
   url.searchParams.set("otaFocalMm", eyepiece.focalLengthMm.toFixed(0));
@@ -502,12 +545,12 @@ export function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handle = setTimeout(() => {
-      const url = sessionUrl({ observer, view, overlays, atmosphere, planets, satellites, aurora, comets, projection, eyepiece, timeMs });
+      const url = sessionUrl({ observer, view, overlays, atmosphere, scintillation, meteors, outputColourspace, planets, satellites, aurora, comets, projection, eyepiece, timeMs });
       window.history.replaceState(null, "", url);
     }, 250);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- timeMs deliberately excluded; see comment above.
-  }, [observer, view, overlays, atmosphere, scintillation, planets, satellites, aurora, comets, projection, eyepiece]);
+  }, [observer, view, overlays, atmosphere, scintillation, meteors, outputColourspace, planets, satellites, aurora, comets, projection, eyepiece]);
 
   // Clock always ticks. When the user picks a custom moment via the quick time
   // popup we simply rebase `timeMs`; the same loop keeps advancing from there.

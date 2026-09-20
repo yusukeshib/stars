@@ -130,6 +130,10 @@ const DUST_H_R_PC: f64 = 3000.0;
 /// Dust vertical scale height (pc) — dust hugs the plane more tightly than
 /// stars (Drimmel & Spergel 2001).
 const DUST_H_Z_PC: f64 = 120.0;
+/// Finite support used for the numerical dust column. At 100 kpc the
+/// exponential disk contribution is negligible, while this bound prevents an
+/// untrusted distance from turning into an effectively unbounded loop.
+const MAX_DUST_INTEGRATION_DISTANCE_PC: f64 = 100_000.0;
 
 fn sech2(x: f64) -> f64 {
     let c = x.cosh();
@@ -202,28 +206,40 @@ pub fn spiral_arm_enhancement(x_pc: f64, y_pc: f64) -> f64 {
 /// double-exponential dust disk. `A` grows with distance, is largest in the
 /// plane (`b = 0`), and is zero at zero distance.
 pub fn dust_extinction_az(distance_pc: f64, l_rad: f64, b_rad: f64) -> f64 {
-    if distance_pc <= 0.0 {
+    if !distance_pc.is_finite() || !l_rad.is_finite() || !b_rad.is_finite() || distance_pc <= 0.0 {
         return 0.0;
     }
     let (sb, cb) = b_rad.sin_cos();
     let (sl, cl) = l_rad.sin_cos();
-    // Step along the line of sight, accumulating local dust density.
-    let n = 64usize;
-    let step = distance_pc / n as f64;
-    let mut a = 0.0;
-    for i in 0..n {
-        let s = (i as f64 + 0.5) * step;
+    // Integrate on a fixed heliocentric grid.  A distance-dependent bin width
+    // would move every quadrature sample whenever `distance_pc` changed and
+    // could make the numerical result decrease even though density is positive.
+    // Fixed cells make every longer sightline retain the exact prefix sum.
+    const STEP_PC: f64 = 10.0;
+    let density_at = |s: f64| {
         // Heliocentric -> galactocentric Cartesian. Sun at (R_SUN, 0, Z_SUN);
-        // +x toward GC means the GC is at -l direction, so x decreases toward
-        // l = 0. We only need R and z for the axisymmetric dust disk.
+        // x decreases toward l = 0. Only R and z enter the axisymmetric disk.
         let x = R_SUN_PC - s * cb * cl;
         let y = -s * cb * sl;
         let z = Z_SUN_PC + s * sb;
         let r = (x * x + y * y).sqrt();
-        let dens = (-(r - R_SUN_PC) / DUST_H_R_PC).exp() * (-(z.abs()) / DUST_H_Z_PC).exp();
-        a += DUST_K0_MAG_PER_PC * dens * step;
+        (-(r - R_SUN_PC) / DUST_H_R_PC).exp() * (-z.abs() / DUST_H_Z_PC).exp()
+    };
+
+    let bounded_distance_pc = distance_pc.min(MAX_DUST_INTEGRATION_DISTANCE_PC);
+    let full_cells = (bounded_distance_pc / STEP_PC).floor() as usize;
+    let mut column_pc = 0.0;
+    for i in 0..full_cells {
+        column_pc += density_at((i as f64 + 0.5) * STEP_PC) * STEP_PC;
     }
-    a
+    let remainder_pc = bounded_distance_pc - full_cells as f64 * STEP_PC;
+    if remainder_pc > 0.0 {
+        // Use the same fixed-cell midpoint as the eventual full cell. Scaling
+        // its positive contribution by the covered fraction preserves strict
+        // monotonicity inside the cell as well as across cell boundaries.
+        column_pc += density_at((full_cells as f64 + 0.5) * STEP_PC) * remainder_pc;
+    }
+    DUST_K0_MAG_PER_PC * column_pc
 }
 
 #[cfg(test)]
@@ -281,21 +297,52 @@ mod tests {
 
     #[test]
     fn dust_extinction_monotonic_and_plane_concentrated() {
-        // Zero distance -> zero extinction.
         assert_eq!(dust_extinction_az(0.0, 0.0, 0.0), 0.0);
-        // Monotone increasing with distance in the plane toward the GC.
-        let near = dust_extinction_az(500.0, 0.0, 0.0);
-        let far = dust_extinction_az(3000.0, 0.0, 0.0);
-        assert!(far > near && near > 0.0, "dust must grow: {near} -> {far}");
-        // In-plane extinction exceeds a steep out-of-plane sightline.
+
+        // Positive density must produce a nondecreasing column for every
+        // direction, including across fixed-grid cell boundaries.
+        for &(l_deg, b_deg) in &[(0.0_f64, 0.0_f64), (90.0, 0.0), (180.0, 5.0), (45.0, 60.0)] {
+            let mut previous = 0.0;
+            for distance_pc in (1..=4000).step_by(7) {
+                let extinction =
+                    dust_extinction_az(distance_pc as f64, l_deg.to_radians(), b_deg.to_radians());
+                assert!(
+                    extinction >= previous,
+                    "dust decreased toward ({l_deg}°, {b_deg}°) at {distance_pc} pc: {previous} -> {extinction}"
+                );
+                previous = extinction;
+            }
+        }
+
         let plane = dust_extinction_az(2000.0, 0.0, 0.0);
         let pole = dust_extinction_az(2000.0, 0.0, 60_f64.to_radians());
         assert!(plane > pole, "in-plane {plane} > out-of-plane {pole}");
-        // Local in-plane gradient is order ~1 mag/kpc.
-        let one_kpc = dust_extinction_az(1000.0, 90_f64.to_radians(), 0.0);
+    }
+
+    #[test]
+    fn dust_extinction_bounds_untrusted_distances() {
+        let at_model_edge = dust_extinction_az(MAX_DUST_INTEGRATION_DISTANCE_PC, 0.0, 0.0);
+        let enormous = dust_extinction_az(f64::MAX, 0.0, 0.0);
+        assert!(at_model_edge.is_finite());
+        assert_eq!(enormous, at_model_edge);
+    }
+
+    #[test]
+    fn dust_extinction_numeric_sightlines_are_pinned() {
+        let anticentre_1_kpc = dust_extinction_az(1000.0, std::f64::consts::PI, 0.0);
+        let gc_3_kpc = dust_extinction_az(3000.0, 0.0, 0.0);
+        let high_latitude = dust_extinction_az(2000.0, 45_f64.to_radians(), 60_f64.to_radians());
         assert!(
-            (0.3..=3.0).contains(&one_kpc),
-            "local 1 kpc extinction {one_kpc} mag out of expected range"
+            (anticentre_1_kpc - 0.786_576_784_870_846_9).abs() < 1e-12,
+            "anticentre pin: {anticentre_1_kpc}"
+        );
+        assert!(
+            (gc_3_kpc - 4.767_936_095_048_469).abs() < 1e-12,
+            "Galactic-centre pin: {gc_3_kpc}"
+        );
+        assert!(
+            (high_latitude - 0.130_250_564_483_208_24).abs() < 1e-12,
+            "high-latitude pin: {high_latitude}"
         );
     }
 }

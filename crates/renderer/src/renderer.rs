@@ -4,19 +4,16 @@ use bytemuck::Zeroable;
 use wgpu::util::DeviceExt;
 
 use crate::camera::{Camera, CameraUniform, PlanetUniforms};
-use crate::overlay::{OverlayConfig, OverlayRenderer};
+use crate::overlay::{DeepSkyMarker, OverlayConfig, OverlayRenderer};
 use crate::pipeline;
 use crate::skyglow::Skyglow;
 use crate::text::TextRenderer;
 use crate::tonemap::{Tonemap, HDR_FORMAT};
 use crate::vertex::{QuadVertex, StarInstance};
 
-/// Planet positions move slowly on naked-eye render scales, while VSOP87
-/// evaluation is expensive enough to dominate per-frame CPU time. Refresh the
-/// renderer-facing planet uniforms once per simulated hour (or immediately
-/// when observer/refraction/enable state changes) and reuse them while the
-/// camera is dragged or the realtime clock advances within that bucket.
-const PLANET_CACHE_STEP_DAYS: f64 = 1.0 / 24.0;
+/// Cache the combined planet/moon block for one simulated minute. The major
+/// planets move slowly, but the rendered moons visibly move within an hour.
+const PLANET_CACHE_STEP_DAYS: f64 = 1.0 / (24.0 * 60.0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PlanetCacheKey {
@@ -180,6 +177,12 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX,
         });
         self.num_stars = stars.len() as u32;
+    }
+
+    /// Replace host-provided deep-sky marker inputs. Call before
+    /// [`Self::set_overlays`] so a deep-sky layer rebuild uses the new data.
+    pub fn set_deep_sky_markers(&mut self, markers: &[DeepSkyMarker]) {
+        self.overlay.set_deep_sky_markers(markers);
     }
 
     /// Rebuild the overlay layers from `config`. Pass `OverlayConfig { layers: vec![], ..}`

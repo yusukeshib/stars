@@ -18,9 +18,9 @@ use catalog::search::{
 };
 use renderer::{
     build_star_instance, pick_nearest, Atmosphere, AtmospherePreset, AuroraLayer, Camera,
-    CometLayer, ExternalViewpoint, EyepieceSimulation, LightPollution, LocalView, MeteorLayer,
-    OpticalDesign, OutputColourSpace, OverlayConfig, OverlayKind, OverlayPalette, Renderer,
-    SatelliteLayer,
+    CometLayer, DeepSkyMarker, DeepSkyMarkerShape, ExternalViewpoint, EyepieceSimulation,
+    LightPollution, LocalView, MeteorLayer, OpticalDesign, OutputColourSpace, OverlayConfig,
+    OverlayKind, OverlayPalette, Renderer, SatelliteLayer,
     Scintillation, SkyProjection, SkyViewpoint, StarInstance, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 
@@ -44,6 +44,30 @@ use wasm_bindgen::JsCast;
 /// conditions (the on-screen dynamic range is much smaller than a dark-adapted
 /// observer's). See `renderer::magnitude_to_render_params` for the model.
 const LIMITING_MAGNITUDE: f32 = DEFAULT_SCREEN_LIMITING_MAGNITUDE;
+
+fn deep_sky_markers() -> Vec<DeepSkyMarker> {
+    let ngc = NgcBrightCatalog;
+    let messier = MessierCatalog;
+    ngc.objects(f32::INFINITY)
+        .into_iter()
+        .filter(|object| !ngc.resolve_as_member_field(object.id))
+        .chain(
+            messier
+                .objects(f32::INFINITY)
+                .into_iter()
+                .filter(|object| !messier.resolve_as_member_field(object.id)),
+        )
+        .map(|object| DeepSkyMarker {
+            position: object.position,
+            magnitude: object.magnitude,
+            size_arcmin: object.size_arcmin,
+            shape: match object.id {
+                DeepSkyId::Messier(_) => DeepSkyMarkerShape::Diamond,
+                DeepSkyId::Ngc(_) | DeepSkyId::Ic(_) => DeepSkyMarkerShape::Ring,
+            },
+        })
+        .collect()
+}
 
 #[wasm_bindgen(start)]
 pub fn main() {
@@ -626,7 +650,8 @@ impl StarView {
             })
             .collect();
 
-        let renderer = Renderer::new(&device, format, width, height, &instances);
+        let mut renderer = Renderer::new(&device, format, width, height, &instances);
+        renderer.set_deep_sky_markers(&deep_sky_markers());
         let mut camera = Camera::new(
             // Defaults; JS will overwrite immediately.
             Observer::from_degrees(0.0, 0.0, 2_451_545.0),
@@ -1214,15 +1239,16 @@ impl StarView {
         };
     }
 
-    /// V-50 output colour management. `space` is one of `"srgb"`,
-    /// `"display-p3"`, or `"rec2020"`. Unrecognised values fall back to sRGB.
-    /// The renderer applies the gamut transform in the tonemap step; the
-    /// canvas swap-chain itself stays sRGB-tagged, so wide-gamut primaries are
-    /// reproduced on browsers/screens that honour the sRGB-encoded values,
-    /// with sRGB as the documented fallback elsewhere.
+    /// The browser canvas is sRGB-tagged. Accept portable session values, but
+    /// render previews in sRGB until a matching wide-gamut canvas path exists.
     pub fn set_output_colourspace(&self, space: String) {
-        let cs = OutputColourSpace::from_str_opt(&space).unwrap_or(OutputColourSpace::Srgb);
-        self.state.borrow_mut().camera.output_colourspace = cs;
+        let requested = OutputColourSpace::from_str_opt(&space).unwrap_or(OutputColourSpace::Srgb);
+        if requested != OutputColourSpace::Srgb {
+            web_sys::console::warn_1(&JsValue::from_str(
+                "wide-gamut preview is unavailable; rendering in sRGB",
+            ));
+        }
+        self.state.borrow_mut().camera.output_colourspace = OutputColourSpace::Srgb;
     }
 
     pub fn resize(&self, width: u32, height: u32) {

@@ -651,15 +651,15 @@ pub fn apparent_moon_topocentric(observer: Observer) -> MoonApparent {
 //
 // The pipeline mirrors the analytic path: a light-time (planetary-aberration)
 // iteration on the geocentric vector, first-order annual aberration, and an
-// IAU 2006/2000B precession-nutation rotation into the mean-equator-of-date
-// frame the rest of the renderer consumes, so DE440 bodies land in the same
+// IAU 2006 precession rotation into the mean-equator-of-date frame consumed
+// by the LMST observer reduction, so DE440 bodies land in the same
 // frame as the analytic Sun/Moon/planets and the precessed star catalogue.
 // ---------------------------------------------------------------------------
 #[cfg(feature = "de440")]
 mod de440 {
     use super::*;
     use crate::corrections::{
-        annual_aberration, earth_velocity_over_c_j2000, mat_mul_vec, precession_nutation_matrix,
+        annual_aberration, earth_velocity_over_c_j2000, mat_mul_vec, precession_matrix_iau2006,
     };
     use crate::spk::{naif, SpkError, SpkKernel};
 
@@ -716,7 +716,9 @@ mod de440 {
 
     /// Rotate an astrometric J2000 geocentric vector into the apparent
     /// mean-equator-of-date frame: annual aberration in J2000, then the
-    /// IAU 2006 precession + IAU 2000B nutation matrix. Returns the unit
+    /// IAU 2006 precession matrix. LMST is a mean-sidereal angle, so adding
+    /// nutation here would mix a true-of-date vector with a mean local frame.
+    /// Returns the unit
     /// of-date direction and the (frame-invariant) distance in km. `jd_tt`
     /// and `jd_tdb` differ by < 2 ms, negligible for the precession matrix.
     fn apparent_of_date(geo_j2000_km: [f64; 3], jd_tdb: f64, jd_tt: f64) -> ([f64; 3], f64) {
@@ -729,7 +731,7 @@ mod de440 {
         ];
         let beta = earth_velocity_over_c_j2000(jd_tdb);
         let aberrated = annual_aberration(dir, beta);
-        let of_date = mat_mul_vec(precession_nutation_matrix(jd_tt), aberrated);
+        let of_date = mat_mul_vec(precession_matrix_iau2006(jd_tt), aberrated);
         (of_date, distance_km)
     }
 
@@ -943,6 +945,29 @@ mod de440 {
             *slot = Some(apparent_planet_de440_topocentric(kernel, observer, planet)?);
         }
         Ok(out.map(|p| p.expect("every planet filled")))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::corrections::precession_nutation_matrix;
+
+        #[test]
+        fn de440_reduction_uses_mean_not_true_equator_of_date() {
+            let jd = 2_460_676.5;
+            let geo = [1.0e8, 2.0e8, 3.0e7];
+            let (actual, _) = apparent_of_date(geo, jd, jd);
+            let inv = 1.0 / norm(geo);
+            let unit = [geo[0] * inv, geo[1] * inv, geo[2] * inv];
+            let aberrated = annual_aberration(unit, earth_velocity_over_c_j2000(jd));
+            let mean = mat_mul_vec(precession_matrix_iau2006(jd), aberrated);
+            let true_of_date = mat_mul_vec(precession_nutation_matrix(jd), aberrated);
+            let distance = |a: [f64; 3], b: [f64; 3]| {
+                ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+            };
+            assert!(distance(actual, mean) < 1.0e-14);
+            assert!(distance(actual, true_of_date) > 1.0e-7);
+        }
     }
 }
 

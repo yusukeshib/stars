@@ -90,20 +90,22 @@ pub struct CometElements {
 ///
 /// The expected header is
 /// `name,q_au,e,i_deg,arg_peri_deg,long_node_deg,tp_jd_tt,m1,k1`. Blank lines
-/// and `#` comment lines are ignored. Malformed rows are skipped so a single
-/// bad line never takes down the whole layer.
+/// and `#` comment lines are ignored. Malformed rows, non-finite numbers, and
+/// invalid orbital domains are skipped so a single bad line never takes down
+/// the whole layer. Periodic orientation angles are deliberately not range
+/// restricted: values outside `[0, 360)` remain valid equivalent encodings.
 pub fn parse_comet_elements(text: &str) -> Vec<CometElements> {
     let mut out = Vec::new();
     for raw in text.lines() {
-        let line = raw.trim();
+        // A UTF-8 BOM is common in hand-edited CSV exports. Remove it here so
+        // it cannot silently become part of the first comet's display name.
+        let line = raw.trim().trim_start_matches('\u{feff}');
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if line.starts_with("name,") {
-            continue; // header
-        }
+
         let cols: Vec<&str> = line.split(',').map(str::trim).collect();
-        if cols.len() != 9 {
+        if cols.len() != 9 || cols[0].is_empty() {
             continue;
         }
         let parse = |idx: usize| cols[idx].parse::<f64>().ok();
@@ -127,8 +129,24 @@ pub fn parse_comet_elements(text: &str) -> Vec<CometElements> {
             parse(8),
         )
         else {
+            // This also skips the textual header without special-casing a
+            // particular name, so a real comet named "name" remains valid.
             continue;
         };
+
+        let numeric_fields = [q, e, i_deg, w_deg, node_deg, tp, m1, k1];
+        if numeric_fields.iter().any(|value| !value.is_finite()) {
+            continue;
+        }
+        // q must be strictly positive, eccentricity cannot be negative, and
+        // the standard orbital-element inclination is in the closed interval
+        // [0°, 180°]. Other numeric fields need only be finite: M1 and K1 are
+        // empirical, Tp may represent historical dates, and angular arguments
+        // are periodic.
+        if q <= 0.0 || e < 0.0 || !(0.0..=180.0).contains(&i_deg) {
+            continue;
+        }
+
         out.push(CometElements {
             name: cols[0].to_string(),
             perihelion_distance_au: q,
@@ -560,6 +578,82 @@ bad,row,only,three\n";
         assert_eq!(parsed[0].name, "1P/Halley");
         assert!((parsed[0].perihelion_distance_au - 0.587104).abs() < 1e-9);
         assert!((parsed[0].inclination_rad - 162.2422_f64.to_radians()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parser_rejects_empty_names_and_bad_record_shapes() {
+        let csv = "\
+,0.5,0.9,45,10,20,2451545,5,10\n\
+   ,0.5,0.9,45,10,20,2451545,5,10\n\
+too,few,columns\n\
+too,many,0.5,0.9,45,10,20,2451545,5,10\n\
+Valid,0.5,0.9,45,10,20,2451545,5,10\n";
+
+        let parsed = parse_comet_elements(csv);
+        assert_eq!(parsed.len(), 1, "only the well-shaped named row is valid");
+        assert_eq!(parsed[0].name, "Valid");
+    }
+
+    #[test]
+    fn parser_rejects_every_non_finite_numeric_field() {
+        let valid_fields = ["0.5", "0.9", "45", "10", "20", "2451545", "5", "10"];
+        let mut csv = String::new();
+        for field_index in 0..valid_fields.len() {
+            for non_finite in ["NaN", "inf", "-inf"] {
+                let mut fields = valid_fields;
+                fields[field_index] = non_finite;
+                csv.push_str(&format!(
+                    "bad-{field_index}-{non_finite},{}\n",
+                    fields.join(",")
+                ));
+            }
+        }
+        csv.push_str("Valid,0.5,0.9,45,10,20,2451545,5,10\n");
+
+        let parsed = parse_comet_elements(&csv);
+        assert_eq!(
+            parsed.len(),
+            1,
+            "all eight numeric columns must reject every non-finite spelling"
+        );
+        assert_eq!(parsed[0].name, "Valid");
+    }
+
+    #[test]
+    fn parser_rejects_invalid_orbital_domains_but_keeps_valid_boundaries() {
+        let csv = "\
+zero-q,0,0.9,45,10,20,2451545,5,10\n\
+negative-q,-0.1,0.9,45,10,20,2451545,5,10\n\
+negative-e,0.5,-0.1,45,10,20,2451545,5,10\n\
+negative-i,0.5,0.9,-0.1,10,20,2451545,5,10\n\
+overlarge-i,0.5,0.9,180.1,10,20,2451545,5,10\n\
+Circular prograde,0.5,0,0,-30,720,2451545,-1,-2\n\
+Parabolic retrograde,0.5,1,180,390,-360,2451545,5,10\n\
+Hyperbolic,0.5,1.5,45,10,20,2451545,5,10\n";
+
+        let parsed = parse_comet_elements(csv);
+        let names: Vec<&str> = parsed
+            .iter()
+            .map(|elements| elements.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            ["Circular prograde", "Parabolic retrograde", "Hyperbolic"],
+            "q > 0, e >= 0, and 0° <= i <= 180° define the accepted orbital domains"
+        );
+        assert_eq!(parsed[0].arg_perihelion_rad, (-30.0_f64).to_radians());
+        assert_eq!(parsed[0].long_asc_node_rad, 720.0_f64.to_radians());
+    }
+
+    #[test]
+    fn parser_accepts_bom_and_a_comet_literally_named_name() {
+        let csv = "\u{feff}name,5e-1,9e-1,45,10,20,2.451545e6,5,10\n";
+
+        let parsed = parse_comet_elements(csv);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].name, "name");
+        assert_eq!(parsed[0].perihelion_distance_au, 0.5);
+        assert_eq!(parsed[0].perihelion_time_jd_tt, 2_451_545.0);
     }
 
     #[test]

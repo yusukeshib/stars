@@ -17,8 +17,6 @@ use bytemuck::{Pod, Zeroable};
 use std::f64::consts::{PI, TAU};
 use wgpu::util::DeviceExt;
 
-use catalog::{DeepSkyCatalog, DeepSkyId, DeepSkyObject, MessierCatalog, NgcBrightCatalog};
-
 use crate::camera::Camera;
 use crate::constellations::{constellation_boundaries, constellation_lines, ConstellationSegment};
 
@@ -72,6 +70,22 @@ pub const DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT: f32 = 7.0;
 const DEEP_SKY_MARKER_MIN_ARCMIN: f32 = 12.0;
 const DEEP_SKY_MARKER_MAX_ARCMIN: f32 = 60.0;
 
+/// Renderer-neutral marker shape supplied by a host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeepSkyMarkerShape {
+    Diamond,
+    Ring,
+}
+
+/// Minimal deep-sky marker input, independent of catalogue storage and IDs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DeepSkyMarker {
+    pub position: [f32; 3],
+    pub magnitude: f32,
+    pub size_arcmin: f32,
+    pub shape: DeepSkyMarkerShape,
+}
+
 /// Which overlay layers to draw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OverlayKind {
@@ -97,8 +111,8 @@ pub enum OverlayKind {
     ConstellationLines,
     /// IAU/Delporte constellation boundaries embedded by the renderer crate.
     ConstellationBoundaries,
-    /// Diamond markers for Messier deep-sky objects whose V magnitude is
-    /// brighter than [`OverlayConfig::deep_sky_magnitude_limit`].
+    /// Host-supplied diamond/ring markers for deep-sky objects whose V
+    /// magnitude is brighter than [`OverlayConfig::deep_sky_magnitude_limit`].
     DeepSkyObjects,
     /// Text labels (`M1`, `M31`, …) for Messier deep-sky objects whose V
     /// magnitude is brighter than [`OverlayConfig::deep_sky_magnitude_limit`].
@@ -228,9 +242,9 @@ pub struct OverlayConfig {
     pub grid_step_deg: f64,
     /// Global multiplier on line-overlay alpha. Text labels remain fully opaque for legibility.
     pub opacity: f32,
-    /// V magnitude cutoff for [`OverlayKind::DeepSkyObjects`] and
-    /// [`OverlayKind::DeepSkyLabels`]: only Messier objects with `mag <= limit`
-    /// are drawn. Defaults to [`DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT`]; clamped
+    /// V magnitude cutoff for host-supplied [`OverlayKind::DeepSkyObjects`]
+    /// markers and embedded [`OverlayKind::DeepSkyLabels`]: only entries with
+    /// `mag <= limit` are drawn. Defaults to [`DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT`]; clamped
     /// to `[-5.0, 99.0]` at apply time so a tampered WASM caller cannot
     /// disable the layer with NaN or crash the builder.
     pub deep_sky_magnitude_limit: f32,
@@ -298,6 +312,7 @@ pub(crate) struct OverlayRenderer {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     layers: Vec<OverlayLayer>,
+    deep_sky_markers: Vec<DeepSkyMarker>,
 }
 
 impl OverlayRenderer {
@@ -394,7 +409,13 @@ impl OverlayRenderer {
             pipeline,
             bind_group_layout,
             layers: Vec::new(),
+            deep_sky_markers: Vec::new(),
         }
+    }
+
+    pub fn set_deep_sky_markers(&mut self, markers: &[DeepSkyMarker]) {
+        self.deep_sky_markers.clear();
+        self.deep_sky_markers.extend_from_slice(markers);
     }
 
     /// Rebuild every layer from `config`. Cheap to call (geometry generation is
@@ -420,7 +441,13 @@ impl OverlayRenderer {
                 continue;
             }
             seen.push(*kind);
-            let (frame, verts, rgb) = build_layer(*kind, step_deg, deep_sky_limit, config.palette);
+            let (frame, verts, rgb) = build_layer(
+                *kind,
+                step_deg,
+                deep_sky_limit,
+                config.palette,
+                &self.deep_sky_markers,
+            );
             if verts.is_empty() {
                 continue;
             }
@@ -519,6 +546,7 @@ fn build_layer(
     grid_step_deg: f64,
     deep_sky_magnitude_limit: f32,
     palette: OverlayPalette,
+    deep_sky: &[DeepSkyMarker],
 ) -> (OverlayFrame, Vec<OverlayVertex>, [f32; 3]) {
     let (frame, verts) = match kind {
         OverlayKind::Horizon => (
@@ -544,7 +572,7 @@ fn build_layer(
         ),
         OverlayKind::DeepSkyObjects => (
             OverlayFrame::Equatorial,
-            deep_sky_markers(deep_sky_magnitude_limit),
+            deep_sky_marker_vertices(deep_sky, deep_sky_magnitude_limit),
         ),
         OverlayKind::DeepSkyLabels
         | OverlayKind::StarLabels
@@ -651,61 +679,26 @@ const NGC_RING_SEGMENTS: usize = 8;
 /// to `[DEEP_SKY_MARKER_MIN_ARCMIN, DEEP_SKY_MARKER_MAX_ARCMIN]` so a fully
 /// resolved M31 does not paint a sky-spanning diamond that obscures the
 /// galaxy itself, and so a tiny planetary nebula remains clickably big.
-fn deep_sky_markers(magnitude_limit: f32) -> Vec<OverlayVertex> {
-    // Pull Messier + NGC together so the marker pass is a single source of
-    // truth for the line-overlay output. Order does not change the visible
-    // result (the overlay pipeline blends additively, see `pipeline.rs`),
-    // but Messier is appended last to keep the vertex layout stable across
-    // catalogue regenerations.
-    let ngc = NgcBrightCatalog;
-    let messier = MessierCatalog;
-    let ngc_objs = ngc.objects(magnitude_limit);
-    let messier_objs = messier.objects(magnitude_limit);
-
-    // Worst case: every retained object is a 16-vertex NGC ring; in the
-    // common case Messier diamonds (8 verts) dilute this, so the buffer
-    // may over-allocate by up to ~50% on a Messier-only slider position.
-    // The cost is negligible (a few KB) and only paid on config change.
-    let mut verts = Vec::with_capacity((ngc_objs.len() + messier_objs.len()) * 16);
-    for (obj, is_messier) in ngc_objs
-        .into_iter()
-        .map(|o| (o, false))
-        .chain(messier_objs.into_iter().map(|o| (o, true)))
-    {
-        // Re-check magnitude here even though `objects()` already filters:
-        // the catalog filter uses a direct `<=` (drops NaN-valued rows),
-        // and the renderer asserts the same contract via `partial_cmp` so
-        // a future catalog impl that forwards NaN magnitudes cannot leak
-        // an unrenderable marker into the overlay buffer.
+fn deep_sky_marker_vertices(markers: &[DeepSkyMarker], magnitude_limit: f32) -> Vec<OverlayVertex> {
+    let mut verts = Vec::with_capacity(markers.len() * 16);
+    for marker in markers {
         if !matches!(
-            obj.magnitude.partial_cmp(&magnitude_limit),
+            marker.magnitude.partial_cmp(&magnitude_limit),
             Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal),
         ) {
             continue;
         }
-        // V-53: clusters tagged for member-field resolution (Pleiades, Beehive,
-        // Double Cluster) drop their disk marker. The HYG star sprites carry
-        // the visible and the label pass still draws "M45" / "M44" / "NGC869"
-        // over the resolved field, matching what a naked-eye observer sees.
-        let resolve = if is_messier {
-            messier.resolve_as_member_field(obj.id)
-        } else {
-            ngc.resolve_as_member_field(obj.id)
-        };
-        if resolve {
-            continue;
-        }
-        match obj.id {
-            DeepSkyId::Messier(_) => append_diamond_marker(&mut verts, &obj),
-            DeepSkyId::Ngc(_) | DeepSkyId::Ic(_) => append_ring_marker(&mut verts, &obj),
+        match marker.shape {
+            DeepSkyMarkerShape::Diamond => append_diamond_marker(&mut verts, marker),
+            DeepSkyMarkerShape::Ring => append_ring_marker(&mut verts, marker),
         }
     }
     attach_segment_partners(verts)
 }
 
-fn marker_half_radius_rad(obj: &DeepSkyObject) -> f32 {
+fn marker_half_radius_rad(marker: &DeepSkyMarker) -> f32 {
     let half_arcmin =
-        (obj.size_arcmin * 0.5).clamp(DEEP_SKY_MARKER_MIN_ARCMIN, DEEP_SKY_MARKER_MAX_ARCMIN);
+        (marker.size_arcmin * 0.5).clamp(DEEP_SKY_MARKER_MIN_ARCMIN, DEEP_SKY_MARKER_MAX_ARCMIN);
     half_arcmin * std::f32::consts::PI / (180.0 * 60.0)
 }
 
@@ -730,9 +723,9 @@ fn marker_offset(
 }
 
 /// Emit the 4-segment Messier diamond (8 vertices).
-fn append_diamond_marker(verts: &mut Vec<OverlayVertex>, obj: &DeepSkyObject) {
-    let half_rad = marker_half_radius_rad(obj);
-    let p = obj.position;
+fn append_diamond_marker(verts: &mut Vec<OverlayVertex>, marker: &DeepSkyMarker) {
+    let half_rad = marker_half_radius_rad(marker);
+    let p = marker.position;
     let (u, v) = tangent_basis(p);
     let top = marker_offset(p, u, v, half_rad, 0.0, 1.0);
     let right = marker_offset(p, u, v, half_rad, 1.0, 0.0);
@@ -747,9 +740,9 @@ fn append_diamond_marker(verts: &mut Vec<OverlayVertex>, obj: &DeepSkyObject) {
 /// Emit the 8-segment NGC / IC ring (16 vertices). The ring is inscribed
 /// in the same half-radius the Messier diamond uses, so the two markers
 /// stay visually comparable in size at the same catalogue dimensions.
-fn append_ring_marker(verts: &mut Vec<OverlayVertex>, obj: &DeepSkyObject) {
-    let half_rad = marker_half_radius_rad(obj);
-    let p = obj.position;
+fn append_ring_marker(verts: &mut Vec<OverlayVertex>, marker: &DeepSkyMarker) {
+    let half_rad = marker_half_radius_rad(marker);
+    let p = marker.position;
     let (u, v) = tangent_basis(p);
     let mut points: [[f32; 3]; NGC_RING_SEGMENTS] = [[0.0; 3]; NGC_RING_SEGMENTS];
     for (idx, point) in points.iter_mut().enumerate() {
@@ -804,7 +797,7 @@ fn overlay_vertex(position: [f32; 3]) -> OverlayVertex {
 }
 
 fn attach_segment_partners(mut verts: Vec<OverlayVertex>) -> Vec<OverlayVertex> {
-    for pair in verts.chunks_exact_mut(2) {
+    for pair in verts.as_chunks_mut::<2>().0 {
         let a = pair[0].position;
         let b = pair[1].position;
         pair[0].other_position = b;
@@ -1262,92 +1255,36 @@ mod tests {
         }
     }
 
-    #[test]
-    fn deep_sky_markers_at_show_all_limit_have_expected_segment_count() {
-        // Each Messier object contributes a 4-segment diamond (8 vertices);
-        // each NGC / IC object contributes an 8-segment ring (16 vertices).
-        // The exact NGC count drifts with each OpenNGC snapshot, so we only
-        // check the Messier contribution is present and the total is a
-        // multiple of two (every vertex must have a partner for the
-        // LineList topology). V-53 suppresses Messier diamonds and NGC rings
-        // for clusters tagged as resolve-into-member-field (Pleiades M45,
-        // Praesepe M44, Double Cluster NGC 869 / NGC 884) so the rendered
-        // Messier diamond count is exactly `110 - 2`.
-        let v = deep_sky_markers(99.0);
-        let messier_verts = (110 - 2) * 8;
-        assert!(v.len() >= messier_verts + 16); // at least one NGC ring.
-        assert_eq!(v.len() % 2, 0);
-        // Rings contribute multiples of 16; subtracting the Messier diamond
-        // contribution must leave a multiple of 16.
-        assert_eq!((v.len() - messier_verts) % 16, 0);
-        assert_unit_length(&v, "deep_sky_markers(99.0)");
+    fn marker(shape: DeepSkyMarkerShape, magnitude: f32) -> DeepSkyMarker {
+        DeepSkyMarker {
+            position: [1.0, 0.0, 0.0],
+            magnitude,
+            size_arcmin: 30.0,
+            shape,
+        }
     }
 
     #[test]
-    fn deep_sky_markers_respect_magnitude_limit() {
-        // At limit -10, no object qualifies (brightest Messier is M45 at
-        // ~1.6; brightest NGC entry sits above the same threshold).
-        let none = deep_sky_markers(-10.0);
-        assert!(none.is_empty());
-        // At limit 2.0 the only Messier object brighter than mag 2 is M45,
-        // but V-53 suppresses M45's diamond and the brightest NGC entry is
-        // above mag 2, so this slider position must produce no marker
-        // geometry at all. The empty result also exercises the
-        // suppression-when-no-other-rows-pass branch.
-        let only_brightest = deep_sky_markers(2.0);
-        assert!(only_brightest.is_empty());
-        // At the default cutoff (7.0) the slider should expose strictly
-        // more markers than the brightest-only filter and strictly fewer
-        // than the show-all filter.
-        let default = deep_sky_markers(DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT);
-        let show_all = deep_sky_markers(99.0);
-        assert!(default.len() > only_brightest.len());
-        assert!(default.len() < show_all.len());
+    fn deep_sky_marker_shapes_have_expected_segment_counts() {
+        let markers = [
+            marker(DeepSkyMarkerShape::Diamond, 1.0),
+            marker(DeepSkyMarkerShape::Ring, 8.0),
+        ];
+        let vertices = deep_sky_marker_vertices(&markers, 99.0);
+        assert_eq!(vertices.len(), 24);
+        assert_unit_length(&vertices, "deep-sky marker DTOs");
     }
 
     #[test]
-    fn deep_sky_markers_suppress_v53_resolved_clusters() {
-        // The renderer must not paint a marker over a cluster that V-53
-        // tags as a resolved field of stars: Pleiades (M45), Praesepe (M44),
-        // and the Double Cluster (NGC 869 / NGC 884). The HYG sprites and
-        // the label pass cover the visible; a phantom disk on top of them
-        // would obscure the very stars the user is meant to see.
-        let with_suppression = deep_sky_markers(99.0);
-        // Without suppression the full Messier slate would contribute
-        // 110 * 8 = 880 diamond vertices. Two are suppressed (M44 and M45),
-        // so the diamond contribution drops by 16. Two NGC rings are also
-        // suppressed (NGC 869 / 884) — 32 fewer ring vertices.
-        let messier_diamond_verts: usize = with_suppression
-            .iter()
-            .step_by(2)
-            // every diamond marker is unit-length on the Messier band at the
-            // current `marker_half_radius_rad` and the test below only needs
-            // the *count* of suppressed markers, so we re-derive the expected
-            // total from the catalog instead of touching pixels.
-            .count();
-        // Sanity: a non-zero number of markers survives at show-all limit.
-        assert!(messier_diamond_verts > 0);
-
-        // Direct catalog-level assertion: the suppression predicate must
-        // fire for every V-53 cluster id and no other id encountered in the
-        // overlay's input.
-        let messier = MessierCatalog;
-        let ngc = NgcBrightCatalog;
-        assert!(messier.resolve_as_member_field(DeepSkyId::Messier(45)));
-        assert!(messier.resolve_as_member_field(DeepSkyId::Messier(44)));
-        assert!(ngc.resolve_as_member_field(DeepSkyId::Ngc(869)));
-        assert!(ngc.resolve_as_member_field(DeepSkyId::Ngc(884)));
-        // Random unrelated DSO must remain a marker so the suppression
-        // policy does not accidentally hide every Messier object.
-        assert!(!messier.resolve_as_member_field(DeepSkyId::Messier(31)));
-        assert!(!ngc.resolve_as_member_field(DeepSkyId::Ngc(7000)));
-    }
-
-    #[test]
-    fn deep_sky_markers_skip_nan_and_inf() {
-        // NaN must not pass the threshold check (the `!(a <= b)` invariant).
-        let v = deep_sky_markers(f32::NAN);
-        assert!(v.is_empty());
+    fn deep_sky_markers_respect_limit_and_non_finite_values() {
+        let markers = [
+            marker(DeepSkyMarkerShape::Diamond, 1.0),
+            marker(DeepSkyMarkerShape::Ring, 8.0),
+            marker(DeepSkyMarkerShape::Ring, f32::NAN),
+        ];
+        assert!(deep_sky_marker_vertices(&markers, 0.0).is_empty());
+        assert_eq!(deep_sky_marker_vertices(&markers, 2.0).len(), 8);
+        assert_eq!(deep_sky_marker_vertices(&markers, 99.0).len(), 24);
     }
 
     #[test]

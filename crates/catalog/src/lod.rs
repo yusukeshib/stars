@@ -33,8 +33,14 @@ use std::collections::HashMap;
 
 use glam::Vec3;
 
-use crate::ingest::parse_gaia_dr3_csv;
+use crate::ingest::parse_gaia_dr3_csv_report_bounded;
 use crate::Star;
+
+/// Per-tile safety ceilings for index metadata, raw cache payloads, and CSV
+/// decoding. Tiles are generated well below these limits; exceeding either
+/// bound indicates corrupt or untrusted cache metadata.
+const MAX_TILE_ROWS: u32 = 100_000;
+const MAX_TILE_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
 
 /// Number of latitude (declination) bands in the equirectangular tile grid.
 /// 18 bands → 10° each. Kept small so the bright base tier stays a handful of
@@ -65,6 +71,11 @@ pub struct TileId {
 }
 
 impl TileId {
+    /// Whether every component names a cell in the fixed LOD grid.
+    pub fn is_valid(self) -> bool {
+        usize::from(self.tier) < TIER_BOUNDS.len() && self.lat < LAT_BANDS && self.lon < LON_BANDS
+    }
+
     /// The tier a given apparent magnitude belongs to, or `None` if it is
     /// fainter than the deepest tier and is therefore not tiled.
     pub fn tier_for_magnitude(magnitude: f32) -> Option<u8> {
@@ -194,8 +205,14 @@ impl MemoryBlobStore {
 }
 
 impl BlobStore for MemoryBlobStore {
-    fn get(&self, content_hash: &str) -> Option<Vec<u8>> {
-        self.blobs.get(content_hash).cloned()
+    fn get(&self, requested_hash: &str) -> Option<Vec<u8>> {
+        if !is_valid_content_hash(requested_hash) {
+            return None;
+        }
+        self.blobs
+            .get(requested_hash)
+            .filter(|bytes| content_hash(bytes) == requested_hash)
+            .cloned()
     }
 }
 
@@ -235,8 +252,12 @@ impl FsCasBlobStore {
 
 #[cfg(feature = "filesystem")]
 impl BlobStore for FsCasBlobStore {
-    fn get(&self, content_hash: &str) -> Option<Vec<u8>> {
-        std::fs::read(self.blob_path(content_hash)).ok()
+    fn get(&self, requested_hash: &str) -> Option<Vec<u8>> {
+        if !is_valid_content_hash(requested_hash) {
+            return None;
+        }
+        let bytes = std::fs::read(self.blob_path(requested_hash)).ok()?;
+        (content_hash(&bytes) == requested_hash).then_some(bytes)
     }
 }
 
@@ -328,9 +349,22 @@ impl<S: BlobStore> LodCatalog<S> {
     /// Stream the tiles needed for `query`, decode their payloads, and return
     /// the stars in stable tier-then-row order.
     pub fn stream(&self, query: &LodQuery) -> LodStream {
+        if query.max_rows == Some(0) {
+            return LodStream {
+                stars: Vec::new(),
+                tiles_examined: 0,
+                tiles_loaded: 0,
+            };
+        }
+
         let mut selected: Vec<&LodTileEntry> = Vec::new();
         let mut tiles_examined = 0usize;
         for entry in self.index.entries() {
+            // Index files are external inputs. Ignore impossible IDs before
+            // indexing tier bounds or evaluating their cell geometry.
+            if !entry.tile.is_valid() || !(1..=MAX_TILE_ROWS).contains(&entry.rows) {
+                continue;
+            }
             // A tier can be skipped without geometry work only when even its
             // *brightest* possible star is fainter than the limit. A tier holds
             // stars in `(TIER_BOUNDS[tier-1], TIER_BOUNDS[tier]]`, so its
@@ -357,19 +391,36 @@ impl<S: BlobStore> LodCatalog<S> {
         let mut stars = Vec::new();
         let mut tiles_loaded = 0usize;
         for entry in selected {
+            let remaining = query
+                .max_rows
+                .map_or(usize::MAX, |limit| limit.saturating_sub(stars.len()));
+            if remaining == 0 {
+                break;
+            }
+
             let Some(bytes) = self.store.get(&entry.content_hash) else {
                 continue; // missing blob: skip rather than fail the whole frame
             };
-            tiles_loaded += 1;
-            let text = String::from_utf8_lossy(&bytes);
-            for star in parse_gaia_dr3_csv(&text) {
-                if star.magnitude <= query.faint_limit_mag {
-                    stars.push(star);
-                }
+            if bytes.len() > MAX_TILE_PAYLOAD_BYTES {
+                continue;
             }
-        }
-        if let Some(max_rows) = query.max_rows {
-            stars.truncate(max_rows);
+            let Ok(text) = std::str::from_utf8(&bytes) else {
+                continue;
+            };
+            let expected_rows = entry.rows as usize;
+            let report = parse_gaia_dr3_csv_report_bounded(text, Some(expected_rows));
+            if !report.warnings.is_empty() || report.stars.len() != expected_rows {
+                continue;
+            }
+
+            tiles_loaded += 1;
+            stars.extend(
+                report
+                    .stars
+                    .into_iter()
+                    .filter(|star| star.magnitude <= query.faint_limit_mag)
+                    .take(remaining),
+            );
         }
         LodStream {
             stars,
@@ -380,9 +431,14 @@ impl<S: BlobStore> LodCatalog<S> {
 }
 
 /// Fast, non-cryptographic content hash (FNV-1a, 64-bit, hex) used as the CAS
-/// key inside the engine. Provenance-grade hashing of committed fixtures stays
-/// SHA-256 via `data/manifest.toml`; this only needs to be deterministic and
-/// collision-resistant enough to dedupe identical tile payloads.
+/// key inside the engine. It is only an integrity check for a trusted cache,
+/// not proof of cryptographic authenticity against malicious content. The
+/// provenance-grade hash for committed fixtures remains SHA-256 via
+/// `data/manifest.toml`.
+fn is_valid_content_hash(value: &str) -> bool {
+    value.len() == 16 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 pub fn content_hash(bytes: &[u8]) -> String {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -583,7 +639,123 @@ mod tests {
     }
 
     #[test]
-    fn content_hash_dedupes_identical_payloads() {
+    fn invalid_tile_ids_are_ignored_without_panicking() {
+        let mut store = MemoryBlobStore::new();
+        let hash = store.put(gaia_tile(1, 0.0, 0.0, 4.0).into_bytes());
+        let mut index = LodIndex::new();
+        for tile in [
+            TileId {
+                tier: TIER_BOUNDS.len() as u8,
+                lat: 0,
+                lon: 0,
+            },
+            TileId {
+                tier: 0,
+                lat: LAT_BANDS,
+                lon: 0,
+            },
+            TileId {
+                tier: 0,
+                lat: 0,
+                lon: LON_BANDS,
+            },
+        ] {
+            index.insert(tile, hash.clone(), 1);
+        }
+        let stream = LodCatalog::new(index, store).stream(&LodQuery::all_sky(12.0));
+        assert_eq!(stream.tiles_examined, 0);
+        assert_eq!(stream.tiles_loaded, 0);
+        assert!(stream.stars.is_empty());
+    }
+
+    #[test]
+    fn max_rows_stops_before_loading_later_tiles() {
+        let mut store = MemoryBlobStore::new();
+        let mut index = LodIndex::new();
+        for (lon, source_id) in [(0, 1), (1, 2)] {
+            let hash = store.put(gaia_tile(source_id, lon as f64 * 10.0, 0.0, 4.0));
+            index.insert(
+                TileId {
+                    tier: BASE_TIER,
+                    lat: 9,
+                    lon,
+                },
+                hash,
+                1,
+            );
+        }
+        let mut query = LodQuery::all_sky(6.0);
+        query.max_rows = Some(1);
+        let stream = LodCatalog::new(index, store).stream(&query);
+        assert_eq!(stream.stars.len(), 1);
+        assert_eq!(stream.tiles_loaded, 1);
+    }
+
+    #[test]
+    fn corrupt_or_mismatched_tile_payloads_are_rejected_atomically() {
+        let cases = [
+            (gaia_tile(1, 0.0, 0.0, 4.0), 2),
+            (
+                "source_id,ra,dec,phot_g_mean_mag\n\"unterminated,0,0,4\n".to_owned(),
+                1,
+            ),
+            (
+                "source_id,ra,dec,phot_g_mean_mag\nNaN,0,0,4\n".to_owned(),
+                1,
+            ),
+        ];
+
+        for (payload, rows) in cases {
+            let mut store = MemoryBlobStore::new();
+            let hash = store.put(payload);
+            let mut index = LodIndex::new();
+            index.insert(
+                TileId {
+                    tier: BASE_TIER,
+                    lat: 9,
+                    lon: 0,
+                },
+                hash,
+                rows,
+            );
+            let stream = LodCatalog::new(index, store).stream(&LodQuery::all_sky(6.0));
+            assert!(stream.stars.is_empty());
+            assert_eq!(stream.tiles_loaded, 0);
+        }
+    }
+
+    #[test]
+    fn tile_metadata_and_payload_bounds_are_enforced() {
+        let mut store = MemoryBlobStore::new();
+        let oversized_hash = store.put(vec![b'x'; MAX_TILE_PAYLOAD_BYTES + 1]);
+        let valid_hash = store.put(gaia_tile(1, 0.0, 0.0, 4.0));
+        let mut index = LodIndex::new();
+        index.insert(
+            TileId {
+                tier: BASE_TIER,
+                lat: 9,
+                lon: 0,
+            },
+            oversized_hash,
+            1,
+        );
+        index.insert(
+            TileId {
+                tier: BASE_TIER,
+                lat: 9,
+                lon: 1,
+            },
+            valid_hash,
+            MAX_TILE_ROWS + 1,
+        );
+
+        let stream = LodCatalog::new(index, store).stream(&LodQuery::all_sky(6.0));
+        assert!(stream.stars.is_empty());
+        assert_eq!(stream.tiles_loaded, 0);
+    }
+
+    #[test]
+    fn content_hash_dedupes_identical_payloads_and_rejects_mismatches() {
         let mut store = MemoryBlobStore::new();
         let h1 = store.put(b"abc".to_vec());
         let h2 = store.put(b"abc".to_vec());
@@ -591,6 +763,10 @@ mod tests {
         assert_eq!(h1, h2);
         assert_ne!(h1, h3);
         assert_eq!(store.get(&h1).as_deref(), Some(b"abc".as_slice()));
+
+        store.blobs.insert(h1.clone(), b"corrupted".to_vec());
+        assert_eq!(store.get(&h1), None);
+        assert_eq!(store.get("../../outside-cas"), None);
     }
 
     #[cfg(feature = "filesystem")]
@@ -613,16 +789,21 @@ mod tests {
             BASE_TIER,
             crate::coords::radec_hours_deg_to_cartesian(101.287 / 15.0, -16.716),
         );
-        index.insert(tile, hash, 1);
+        index.insert(tile, hash.clone(), 1);
         let cat = LodCatalog::new(index, store);
 
         let stream = cat.stream(&LodQuery::all_sky(6.0));
-        std::fs::remove_dir_all(&root).ok();
         assert_eq!(stream.tiles_loaded, 1);
         assert_eq!(stream.stars.len(), 1);
         assert_eq!(
             stream.stars[0].identifiers.primary,
             Some(CatalogObjectId::GaiaDr3(2947050466531873024))
         );
+
+        std::fs::write(cat.store.blob_path(&hash), b"corrupted").unwrap();
+        let corrupted = cat.stream(&LodQuery::all_sky(6.0));
+        assert_eq!(corrupted.tiles_loaded, 0);
+        assert!(corrupted.stars.is_empty());
+        std::fs::remove_dir_all(&root).ok();
     }
 }

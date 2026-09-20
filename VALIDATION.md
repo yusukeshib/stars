@@ -28,6 +28,29 @@ a higher-precision model lands.
    be tied to schema-versioned sessions or scene presets so screenshots can be
    regenerated instead of manually recreated.
 
+## Critical-review regression coverage
+
+The 2026 repository audit added focused guards for failure modes that broad
+render snapshots do not isolate:
+
+- Galactic dust extinction is pinned at representative distances and must be
+  non-decreasing along one sightline; lunar illuminance pins the phase law once,
+  without a second illuminated-fraction factor.
+- Meteor tests cover deterministic high-λ sampling (without truncating λ to 50)
+  and radiant epoch conversion; aurora tests cover both geomagnetic hemispheres.
+- Rise/set/transit roots are refined inside the coarse search interval, SPK
+  observer reduction uses a frame consistent with LMST, and Galilean shadow
+  tests distinguish umbra, penumbra, and partial limb contact.
+- Malformed atlas/catalogue/CAS payloads, invalid LOD IDs, impossible render
+  dimensions, and occupied server GPU capacity are explicit error cases.
+- Renderer model tests keep Sun/Moon disks and occultations active under
+  `Atmosphere::OFF`; point-source extinction and the one-minute fast-moon cache
+  are separately constrained.
+
+The browser swapchain remains sRGB-tagged, so Display-P3/Rec.2020 session values
+are portable metadata but browser preview pixels intentionally use sRGB. Native
+and headless outputs retain their selected output colour-space transforms.
+
 ## What must be tested
 
 Add or update tests when changing any of these areas:
