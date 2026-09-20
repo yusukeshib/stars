@@ -32,7 +32,7 @@
 //! - Rendtel, J. et al. (annual), *IMO Meteor Shower Calendar*.
 //! - McKinley, D. W. R. 1961, *Meteor Science and Engineering*.
 
-use crate::corrections::{mat_mul_vec, precession_matrix_iau2006};
+use crate::corrections::{mat_mul_vec, mat_transpose, precession_matrix_iau2006};
 use crate::ephemeris::apparent_sun;
 use crate::horizontal::equatorial_to_horizontal;
 use crate::observer::Observer;
@@ -168,10 +168,17 @@ pub const IMO_WORKING_LIST: &[MeteorShower] = &[
 /// Geocentric apparent solar longitude (degrees, J2000 ecliptic) at `jd_tt`.
 /// The solar-longitude clock is what indexes meteor-shower activity.
 pub fn solar_longitude_deg(jd_tt: f64) -> f64 {
-    apparent_sun(jd_tt)
-        .ecliptic_longitude_rad
-        .to_degrees()
-        .rem_euclid(360.0)
+    if !jd_tt.is_finite() {
+        return 0.0;
+    }
+    let sun = apparent_sun(jd_tt);
+    let of_date = unit_vector_ra_dec(sun.right_ascension_rad, sun.declination_rad);
+    let j2000 = mat_mul_vec(mat_transpose(precession_matrix_iau2006(jd_tt)), of_date);
+    // Rotate J2000 equatorial into the fixed J2000 ecliptic frame.
+    const J2000_OBLIQUITY_RAD: f64 = 0.409_092_600_600_582_9;
+    let (sin_e, cos_e) = J2000_OBLIQUITY_RAD.sin_cos();
+    let y_ecliptic = j2000[1] * cos_e + j2000[2] * sin_e;
+    y_ecliptic.atan2(j2000[0]).to_degrees().rem_euclid(360.0)
 }
 
 /// Smallest absolute difference between two angles on the 360° circle.
@@ -184,8 +191,20 @@ fn angular_diff_deg(a: f64, b: f64) -> f64 {
 /// Jenniskens 1994 double-exponential activity profile
 /// `ZHR(λ) = ZHR_max · 10^(−B·|Δλ|)`.
 pub fn zhr_at_solar_longitude(shower: &MeteorShower, lambda_deg: f64) -> f64 {
+    if !lambda_deg.is_finite()
+        || !shower.peak_solar_longitude_deg.is_finite()
+        || !shower.zhr_max.is_finite()
+        || !shower.activity_slope_b.is_finite()
+    {
+        return 0.0;
+    }
     let delta = angular_diff_deg(lambda_deg, shower.peak_solar_longitude_deg);
-    shower.zhr_max * 10f64.powf(-shower.activity_slope_b * delta)
+    let zhr = shower.zhr_max * 10f64.powf(-shower.activity_slope_b * delta);
+    if zhr.is_finite() && zhr > 0.0 {
+        zhr
+    } else {
+        0.0
+    }
 }
 
 /// Observed meteor rate (meteors/hour) for a shower of zenithal hourly rate
@@ -208,6 +227,15 @@ pub fn observed_rate_per_hour(
     limiting_magnitude: f64,
     obstruction_f: f64,
 ) -> f64 {
+    if !zhr.is_finite()
+        || !radiant_altitude_rad.is_finite()
+        || !pop_index.is_finite()
+        || !limiting_magnitude.is_finite()
+        || !obstruction_f.is_finite()
+        || pop_index <= 0.0
+    {
+        return 0.0;
+    }
     let sin_h = radiant_altitude_rad.sin();
     if sin_h <= 0.0 || zhr <= 0.0 {
         return 0.0;
@@ -257,6 +285,9 @@ pub fn active_showers(
     limiting_magnitude: f64,
     min_rate: f64,
 ) -> Vec<ActiveShower> {
+    if !limiting_magnitude.is_finite() || !min_rate.is_finite() {
+        return Vec::new();
+    }
     let lambda = solar_longitude_deg(observer.time.jd_tt);
     IMO_WORKING_LIST
         .iter()
@@ -286,13 +317,13 @@ pub fn active_showers(
         .collect()
 }
 
-/// A single rendered meteor: a great-circle streak in J2000-equatorial unit
-/// vectors with a peak visual magnitude.
+/// A single rendered meteor: a great-circle streak in mean equatorial-of-date
+/// unit vectors with a peak visual magnitude.
 #[derive(Debug, Clone, Copy)]
 pub struct Meteor {
-    /// Streak head (apparent start) as a J2000-equatorial unit vector.
+    /// Streak head (apparent start) as a mean equatorial-of-date unit vector.
     pub start_eq: [f64; 3],
-    /// Streak tail (apparent end) as a J2000-equatorial unit vector.
+    /// Streak tail (apparent end) as a mean equatorial-of-date unit vector.
     pub end_eq: [f64; 3],
     /// Peak apparent visual magnitude.
     pub magnitude: f64,
@@ -498,7 +529,18 @@ pub fn meteor_stream(
     rate_scale: f64,
     max_meteors: usize,
 ) -> Vec<Meteor> {
-    if window_seconds <= 0.0 || max_meteors == 0 || rate_scale <= 0.0 {
+    if !limiting_magnitude.is_finite()
+        || !window_seconds.is_finite()
+        || !rate_scale.is_finite()
+        || !observer.latitude_rad.is_finite()
+        || !observer.longitude_rad.is_finite()
+        || !observer.time.jd_utc.is_finite()
+        || !observer.time.jd_ut1.is_finite()
+        || !observer.time.jd_tt.is_finite()
+        || window_seconds <= 0.0
+        || max_meteors == 0
+        || rate_scale <= 0.0
+    {
         return Vec::new();
     }
     let showers = active_showers(observer, limiting_magnitude, 1.0e-3);
@@ -521,7 +563,8 @@ pub fn meteor_stream(
     let bin = (observer.time.jd_utc / window_days).floor() as i64;
     let mut state = seed ^ (bin as u64).wrapping_mul(0xD1B5_4A32_D192_ED03) ^ 0x5DEE_CE66_2D2F_AC0B;
 
-    let count = poisson(expected, &mut state).min(max_meteors as u32);
+    let max_count = u32::try_from(max_meteors).unwrap_or(u32::MAX);
+    let count = poisson(expected, &mut state).min(max_count);
     if count == 0 {
         return Vec::new();
     }
@@ -599,6 +642,17 @@ mod tests {
             1.0,
         );
         assert!((n - 120.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn nonfinite_public_inputs_are_rejected() {
+        assert_eq!(solar_longitude_deg(f64::NAN), 0.0);
+        assert_eq!(zhr_at_solar_longitude(perseids(), f64::NAN), 0.0);
+        assert_eq!(observed_rate_per_hour(f64::NAN, 1.0, 2.2, 6.5, 1.0), 0.0);
+        let obs = observer_at(2_460_536.9);
+        assert!(active_showers(obs, f64::NAN, 0.0).is_empty());
+        assert!(meteor_stream(obs, 6.5, f64::INFINITY, 1, 1.0, 32).is_empty());
+        assert!(meteor_stream(obs, 6.5, 60.0, 1, f64::NAN, 32).is_empty());
     }
 
     #[test]
@@ -709,6 +763,15 @@ mod tests {
             (precessed_altitude - unprecessed_altitude).abs() > 0.002,
             "precession should measurably move the 2100 radiant"
         );
+    }
+
+    #[test]
+    fn max_meteors_above_u32_does_not_wrap_to_zero() {
+        if usize::BITS > 32 {
+            let obs = observer_at(2_460_536.9);
+            let cap = (u32::MAX as usize).saturating_add(1);
+            assert!(!meteor_stream(obs, 6.5, 3600.0, 7, 1.0, cap).is_empty());
+        }
     }
 
     #[test]

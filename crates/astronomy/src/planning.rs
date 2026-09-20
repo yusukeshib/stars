@@ -16,7 +16,9 @@ use glam::Vec3;
 
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 const SEARCH_STEP_DAYS: f64 = 10.0 / (24.0 * 60.0); // 10 minutes
-const REFINE_ITERS: usize = 28;
+const REFINE_TOLERANCE_DAYS: f64 = 0.1 / SECONDS_PER_DAY;
+const MAX_TRANSIT_REFINE_ITERS: usize = 8;
+const MAX_BISECTION_REFINE_ITERS: usize = 28;
 const SIDEREAL_RATE: f64 = 1.002_737_909_35;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,9 +204,13 @@ fn refine_transit(observer: Observer, body: PlanningBody, mut jd_utc: f64) -> f6
     // The analytic estimate neglects the body's motion. Iteratively remove the
     // measured hour angle; the sidereal rate is an excellent local derivative,
     // and re-evaluating the ephemeris makes the result unquantized.
-    for _ in 0..8 {
+    for _ in 0..MAX_TRANSIT_REFINE_ITERS {
         let hour_angle = signed_hour_angle(observer, body, jd_utc);
-        jd_utc -= hour_angle / (std::f64::consts::TAU * SIDEREAL_RATE);
+        let correction_days = hour_angle / (std::f64::consts::TAU * SIDEREAL_RATE);
+        jd_utc -= correction_days;
+        if correction_days.abs() <= REFINE_TOLERANCE_DAYS {
+            break;
+        }
     }
     jd_utc
 }
@@ -238,7 +244,10 @@ fn refine_altitude_crossing(
         half_width *= 2.0;
     };
 
-    for _ in 0..REFINE_ITERS {
+    for _ in 0..MAX_BISECTION_REFINE_ITERS {
+        if hi - lo <= REFINE_TOLERANCE_DAYS {
+            break;
+        }
         let mid = 0.5 * (lo + hi);
         let above = value(mid) >= 0.0;
         if above == rising {
@@ -360,7 +369,10 @@ fn bisect_twilight_boundary(
     lo_band: TwilightBand,
     hi_band: TwilightBand,
 ) -> f64 {
-    for _ in 0..REFINE_ITERS {
+    for _ in 0..MAX_BISECTION_REFINE_ITERS {
+        if hi - lo <= REFINE_TOLERANCE_DAYS {
+            break;
+        }
         let mid = 0.5 * (lo + hi);
         let band = twilight_band(body_altitude_rad(
             observer_at(observer, mid),
@@ -532,13 +544,13 @@ pub fn solar_eclipse_state(observer: Observer) -> SolarEclipseState {
 ///   shader path subtracts the front disk from the back planet's disk.
 /// * **V-52d** — Galilean shadow transit on Jupiter
 ///   ([`OccluderTarget::Planet`]`(3)` = Jupiter). For each of Io /
-///   Europa / Ganymede / Callisto, if the moon's Sun-projected
-///   position falls inside Jupiter's apparent disk the producer
-///   pushes one front-disk entry whose radius equals the moon's
-///   physical radius divided by the Earth-Jupiter distance (the
-///   silhouette extent). Off-event frames emit zero V-52d entries
-///   and the analytic-mask shader path stays bit-identical to the
-///   pre-V-52d render.
+///   Europa / Ganymede / Callisto, finite-Sun cone geometry admits
+///   umbral or partial penumbral contact with Jupiter. The emitted
+///   opaque front disk uses the umbral radius; the wider penumbra is
+///   used only to retain partial-limb contacts because the renderer
+///   does not yet draw its intensity gradient. Off-event frames emit
+///   zero V-52d entries and the analytic-mask shader path stays
+///   bit-identical to the pre-V-52d render.
 ///
 /// The list is bounded by [`crate::occultation::MAX_OCCLUDERS`]; pushes
 /// past capacity are silently dropped rather than allocated.
@@ -650,10 +662,10 @@ pub fn active_occluders(observer: Observer) -> ActiveOccluders {
     // / observer distance the renderer's planet-disk path uses so the
     // analytic mask sits exactly on the Jovian sky-plane pixels. Each
     // active shadow becomes one front disk targeting the Planet(3) =
-    // Jupiter back disk. The producer returns `None` for moons whose
-    // Sun-line projection misses Jupiter's disk, so off-event frames
-    // emit zero entries and the V-51b shader short-circuits as
-    // before.
+    // Jupiter back disk. The producer retains finite-Sun penumbral limb
+    // contacts but emits the opaque umbral disk; it returns `None` only
+    // when the penumbra misses Jupiter, so off-event frames emit zero
+    // entries and the V-51b shader short-circuits as before.
     let jupiter_idx = JUPITER_OCCLUDER_TARGET;
     debug_assert!(matches!(jupiter_idx, OccluderTarget::Planet(3)));
     {
@@ -669,8 +681,11 @@ pub fn active_occluders(observer: Observer) -> ActiveOccluders {
             galilean_shadow_disks_at(observer.time.jd_tdb, jupiter_dir_f64, jupiter_distance_km);
         for slot in shadows.iter().flatten() {
             // The opaque disk uses the finite-Sun umbral radius at Jupiter's
-            // centre plane. Approximate obscuration is its area ratio against
-            // Jupiter — the same closed form as V-51e Planet-on-Sun.
+            // centre plane. Partial contacts may therefore have an umbral disk
+            // just outside the limb: the wider penumbra is the contact gate,
+            // while its gradient is not rendered. Approximate obscuration is
+            // the umbral area ratio against Jupiter — the same closed form as
+            // V-51e Planet-on-Sun.
             let r_front = slot.angular_radius_rad;
             let r_back = jupiter.angular_radius_rad.max(1.0e-12);
             let area_ratio = ((r_front / r_back).powi(2) as f64).clamp(0.0, 1.0);
@@ -1611,6 +1626,51 @@ mod tests {
     }
 
     #[test]
+    fn rise_transit_set_tokyo_sun_matches_pinned_values() {
+        let start = jd_utc_from_iso_hours(2025, 1, 14, 15.0);
+        let end = jd_utc_from_iso_hours(2025, 1, 15, 15.0);
+        let observer = Observer::from_degrees(35.68, 139.69, 0.5 * (start + end));
+        let events = rise_transit_set(observer, PlanningBody::Sun, start, end);
+
+        const ONE_SECOND_DAYS: f64 = 1.0 / 86_400.0;
+        let rise = events.rise_jd_utc.expect("Tokyo Sun rise");
+        let transit = events.transit_jd_utc.expect("Tokyo Sun transit");
+        let set = events.set_jd_utc.expect("Tokyo Sun set");
+        assert!((rise - 2_460_690.410_020_37).abs() < ONE_SECOND_DAYS);
+        assert!((transit - 2_460_690.618_480_708).abs() < ONE_SECOND_DAYS);
+        assert!((set - 2_460_690.827_121_608).abs() < ONE_SECOND_DAYS);
+    }
+
+    #[test]
+    fn rise_transit_set_handles_polar_no_crossing_cases() {
+        let summer_start = jd_utc_from_iso_hours(2025, 6, 21, 0.0);
+        let summer_end = summer_start + 1.0;
+        let summer_observer = Observer::from_degrees(80.0, 0.0, summer_start + 0.5);
+        let summer = rise_transit_set(summer_observer, PlanningBody::Sun, summer_start, summer_end);
+        assert!(summer.transit_jd_utc.is_some());
+        assert!(summer.rise_jd_utc.is_none());
+        assert!(summer.set_jd_utc.is_none());
+        assert!(summer.transit_altitude_rad.unwrap() > 0.0);
+
+        let winter_start = jd_utc_from_iso_hours(2025, 12, 21, 0.0);
+        let winter_end = winter_start + 1.0;
+        let winter_observer = Observer::from_degrees(80.0, 0.0, winter_start + 0.5);
+        let winter = rise_transit_set(winter_observer, PlanningBody::Sun, winter_start, winter_end);
+        assert!(winter.transit_jd_utc.is_some());
+        assert!(winter.rise_jd_utc.is_none());
+        assert!(winter.set_jd_utc.is_none());
+        assert!(winter.transit_altitude_rad.unwrap() < 0.0);
+    }
+
+    #[test]
+    fn event_window_is_start_inclusive_and_end_exclusive() {
+        let start = 2_460_000.0;
+        let end = start + 1.0 / 24.0;
+        assert_eq!(normalize_event_into_window(start, start, end), Some(start));
+        assert_eq!(normalize_event_into_window(end, start, end), None);
+    }
+
+    #[test]
     fn find_solar_eclipse_finds_2024_mazatlan_totality() {
         // 2024-04-08 total solar eclipse. Peak over Mazatlán ≈ 18:13:08 UT,
         // totality 4m 17s. Bracket a ~6 h local window so the contact-time
@@ -2016,7 +2076,7 @@ mod tests {
         // V-52d producer contract off-event: on a quiet date with
         // Jupiter visible, the producer must emit zero Planet(Jupiter)
         // entries whose front-disk radius matches a Galilean moon's
-        // shadow extent. The Moon-on-Stars cull entry plus any
+        // finite-Sun umbra. The Moon-on-Stars cull entry plus any
         // V-51d/f planet-targeted entries are unaffected by this
         // assertion; only the Galilean-sized shadows are gated here.
         let start = jd_utc_from_iso_hours(2025, 7, 1, 0.0);
@@ -2028,9 +2088,10 @@ mod tests {
             if occ.target != OccluderTarget::Planet(3) {
                 continue;
             }
-            // A Galilean shadow's apparent radius is the moon's
-            // physical radius divided by the Earth-Jupiter distance
-            // (a few hundredths of a Jovian apparent radius). V-51d
+            // A Galilean shadow's opaque apparent radius is the finite-Sun
+            // umbra at Jupiter's centre plane divided by the Earth-Jupiter
+            // distance (a few hundredths of a Jovian apparent radius). The
+            // wider penumbra affects partial-contact admission only. V-51d
             // Moon-on-Jupiter entries are roughly the Moon's apparent
             // radius (≈ 1000″) — three orders of magnitude bigger.
             // The two are easy to discriminate without re-running the
@@ -2050,7 +2111,7 @@ mod tests {
         // ingress is pinned by
         // `jupiter_shadows::tests::io_shadow_ingress_within_five_minutes_of_horizons_2008_12_20`).
         // The producer must emit one Planet(Jupiter) entry whose
-        // front-disk angular radius matches Io's `radius / Δ` extent.
+        // front-disk angular radius matches Io's finite-Sun umbral extent.
         let observer =
             Observer::from_degrees(35.68, 139.69, jd_utc_from_iso_hours(2008, 12, 20, 14.0));
         let list = active_occluders(observer);

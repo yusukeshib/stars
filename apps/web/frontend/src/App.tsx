@@ -106,8 +106,10 @@ const vec3Param = (
   min: number,
   max: number,
 ): { x: number; y: number; z: number } => {
-  const parts = (params.get(key) ?? "").split(",").map((part) => Number(part));
-  if (parts.length !== 3 || parts.some((value) => !Number.isFinite(value))) return fallback;
+  const rawParts = (params.get(key) ?? "").split(",");
+  if (rawParts.length !== 3 || rawParts.some((part) => part.trim() === "")) return fallback;
+  const parts = rawParts.map((part) => Number(part));
+  if (parts.some((value) => !Number.isFinite(value))) return fallback;
   const clamp = (value: number) => Math.max(min, Math.min(max, value));
   return { x: clamp(parts[0]), y: clamp(parts[1]), z: clamp(parts[2]) };
 };
@@ -168,9 +170,9 @@ function loadAtmosphereFromUrl(params?: URLSearchParams): AtmosphereConfig | nul
   };
 }
 
-function loadSessionFromUrl(): UrlSession | null {
-  if (typeof window === "undefined") return null;
-  const params = new URLSearchParams(window.location.search);
+function loadSessionFromUrl(params?: URLSearchParams): UrlSession | null {
+  if (params === undefined && typeof window === "undefined") return null;
+  params ??= new URLSearchParams(window.location.search);
   const sessionKeys = [
     "lat",
     "lng",
@@ -182,6 +184,7 @@ function loadSessionFromUrl(): UrlSession | null {
     "grid",
     "overlayOpacity",
     "deepSkyMag",
+    "overlayPalette",
     "planets",
     "satellites",
     "satExposure",
@@ -217,6 +220,9 @@ function loadSessionFromUrl(): UrlSession | null {
     "eyepieceFocalMm",
     "eyepieceAfovDeg",
     "eyepieceFieldStopMm",
+    "telescopeDesign",
+    "spiderVanes",
+    "otaRotationDeg",
   ];
   if (!sessionKeys.some((key) => params.has(key))) return null;
   const observer: Observer = {
@@ -255,7 +261,10 @@ function loadSessionFromUrl(): UrlSession | null {
     params.has("otaFocalMm") ||
     params.has("eyepieceFocalMm") ||
     params.has("eyepieceAfovDeg") ||
-    params.has("eyepieceFieldStopMm");
+    params.has("eyepieceFieldStopMm") ||
+    params.has("telescopeDesign") ||
+    params.has("spiderVanes") ||
+    params.has("otaRotationDeg");
   const projectionParam = params.get("projection");
   const viewpointParam = params.get("viewpoint");
   const hasExternalViewpointParam = params.has("originPc") || params.has("targetPc") || params.has("up");

@@ -33,8 +33,14 @@ use std::collections::HashMap;
 
 use glam::Vec3;
 
-use crate::ingest::parse_gaia_dr3_csv;
+use crate::ingest::parse_gaia_dr3_csv_report_bounded;
 use crate::Star;
+
+/// Per-tile safety ceilings for index metadata, raw cache payloads, and CSV
+/// decoding. Tiles are generated well below these limits; exceeding either
+/// bound indicates corrupt or untrusted cache metadata.
+const MAX_TILE_ROWS: u32 = 100_000;
+const MAX_TILE_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
 
 /// Number of latitude (declination) bands in the equirectangular tile grid.
 /// 18 bands → 10° each. Kept small so the bright base tier stays a handful of
@@ -343,12 +349,20 @@ impl<S: BlobStore> LodCatalog<S> {
     /// Stream the tiles needed for `query`, decode their payloads, and return
     /// the stars in stable tier-then-row order.
     pub fn stream(&self, query: &LodQuery) -> LodStream {
+        if query.max_rows == Some(0) {
+            return LodStream {
+                stars: Vec::new(),
+                tiles_examined: 0,
+                tiles_loaded: 0,
+            };
+        }
+
         let mut selected: Vec<&LodTileEntry> = Vec::new();
         let mut tiles_examined = 0usize;
         for entry in self.index.entries() {
             // Index files are external inputs. Ignore impossible IDs before
             // indexing tier bounds or evaluating their cell geometry.
-            if !entry.tile.is_valid() {
+            if !entry.tile.is_valid() || !(1..=MAX_TILE_ROWS).contains(&entry.rows) {
                 continue;
             }
             // A tier can be skipped without geometry work only when even its
@@ -377,19 +391,36 @@ impl<S: BlobStore> LodCatalog<S> {
         let mut stars = Vec::new();
         let mut tiles_loaded = 0usize;
         for entry in selected {
+            let remaining = query
+                .max_rows
+                .map_or(usize::MAX, |limit| limit.saturating_sub(stars.len()));
+            if remaining == 0 {
+                break;
+            }
+
             let Some(bytes) = self.store.get(&entry.content_hash) else {
                 continue; // missing blob: skip rather than fail the whole frame
             };
-            tiles_loaded += 1;
-            let text = String::from_utf8_lossy(&bytes);
-            for star in parse_gaia_dr3_csv(&text) {
-                if star.magnitude <= query.faint_limit_mag {
-                    stars.push(star);
-                }
+            if bytes.len() > MAX_TILE_PAYLOAD_BYTES {
+                continue;
             }
-        }
-        if let Some(max_rows) = query.max_rows {
-            stars.truncate(max_rows);
+            let Ok(text) = std::str::from_utf8(&bytes) else {
+                continue;
+            };
+            let expected_rows = entry.rows as usize;
+            let report = parse_gaia_dr3_csv_report_bounded(text, Some(expected_rows));
+            if !report.warnings.is_empty() || report.stars.len() != expected_rows {
+                continue;
+            }
+
+            tiles_loaded += 1;
+            stars.extend(
+                report
+                    .stars
+                    .into_iter()
+                    .filter(|star| star.magnitude <= query.faint_limit_mag)
+                    .take(remaining),
+            );
         }
         LodStream {
             stars,
@@ -400,9 +431,10 @@ impl<S: BlobStore> LodCatalog<S> {
 }
 
 /// Fast, non-cryptographic content hash (FNV-1a, 64-bit, hex) used as the CAS
-/// key inside the engine. Provenance-grade hashing of committed fixtures stays
-/// SHA-256 via `data/manifest.toml`; this only needs to be deterministic and
-/// collision-resistant enough to dedupe identical tile payloads.
+/// key inside the engine. It is only an integrity check for a trusted cache,
+/// not proof of cryptographic authenticity against malicious content. The
+/// provenance-grade hash for committed fixtures remains SHA-256 via
+/// `data/manifest.toml`.
 fn is_valid_content_hash(value: &str) -> bool {
     value.len() == 16 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -634,6 +666,92 @@ mod tests {
         assert_eq!(stream.tiles_examined, 0);
         assert_eq!(stream.tiles_loaded, 0);
         assert!(stream.stars.is_empty());
+    }
+
+    #[test]
+    fn max_rows_stops_before_loading_later_tiles() {
+        let mut store = MemoryBlobStore::new();
+        let mut index = LodIndex::new();
+        for (lon, source_id) in [(0, 1), (1, 2)] {
+            let hash = store.put(gaia_tile(source_id, lon as f64 * 10.0, 0.0, 4.0));
+            index.insert(
+                TileId {
+                    tier: BASE_TIER,
+                    lat: 9,
+                    lon,
+                },
+                hash,
+                1,
+            );
+        }
+        let mut query = LodQuery::all_sky(6.0);
+        query.max_rows = Some(1);
+        let stream = LodCatalog::new(index, store).stream(&query);
+        assert_eq!(stream.stars.len(), 1);
+        assert_eq!(stream.tiles_loaded, 1);
+    }
+
+    #[test]
+    fn corrupt_or_mismatched_tile_payloads_are_rejected_atomically() {
+        let cases = [
+            (gaia_tile(1, 0.0, 0.0, 4.0), 2),
+            (
+                "source_id,ra,dec,phot_g_mean_mag\n\"unterminated,0,0,4\n".to_owned(),
+                1,
+            ),
+            (
+                "source_id,ra,dec,phot_g_mean_mag\nNaN,0,0,4\n".to_owned(),
+                1,
+            ),
+        ];
+
+        for (payload, rows) in cases {
+            let mut store = MemoryBlobStore::new();
+            let hash = store.put(payload);
+            let mut index = LodIndex::new();
+            index.insert(
+                TileId {
+                    tier: BASE_TIER,
+                    lat: 9,
+                    lon: 0,
+                },
+                hash,
+                rows,
+            );
+            let stream = LodCatalog::new(index, store).stream(&LodQuery::all_sky(6.0));
+            assert!(stream.stars.is_empty());
+            assert_eq!(stream.tiles_loaded, 0);
+        }
+    }
+
+    #[test]
+    fn tile_metadata_and_payload_bounds_are_enforced() {
+        let mut store = MemoryBlobStore::new();
+        let oversized_hash = store.put(vec![b'x'; MAX_TILE_PAYLOAD_BYTES + 1]);
+        let valid_hash = store.put(gaia_tile(1, 0.0, 0.0, 4.0));
+        let mut index = LodIndex::new();
+        index.insert(
+            TileId {
+                tier: BASE_TIER,
+                lat: 9,
+                lon: 0,
+            },
+            oversized_hash,
+            1,
+        );
+        index.insert(
+            TileId {
+                tier: BASE_TIER,
+                lat: 9,
+                lon: 1,
+            },
+            valid_hash,
+            MAX_TILE_ROWS + 1,
+        );
+
+        let stream = LodCatalog::new(index, store).stream(&LodQuery::all_sky(6.0));
+        assert!(stream.stars.is_empty());
+        assert_eq!(stream.tiles_loaded, 0);
     }
 
     #[test]

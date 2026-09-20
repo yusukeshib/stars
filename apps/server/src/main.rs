@@ -16,7 +16,11 @@
 //! No external network calls. Observer geocoding stays client-side; the
 //! catalog path is server-local and read-only at request time.
 
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::{Context, Result};
 use axum::{
@@ -29,9 +33,9 @@ use axum::{
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use stars_host_common::{
-    encode_png, render_scene_from_catalog_path, scene_preset_infos, session_from_preset,
-    validate_render_dimensions, ScenePresetArg, ScenePresetInfo, SessionScene, StarSession,
-    DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+    encode_png, hyg_catalog_snapshot, render_scene_from_catalog_path, scene_preset_infos,
+    session_from_preset, validate_render_dimensions, ScenePresetArg, ScenePresetInfo, SessionScene,
+    StarSession, DEFAULT_SCREEN_LIMITING_MAGNITUDE,
 };
 use tokio::{net::TcpListener, sync::Semaphore};
 
@@ -49,8 +53,7 @@ struct Args {
     #[arg(long, default_value_t = 8787)]
     port: u16,
 
-    /// Default catalog path used when an incoming session has no
-    /// `catalog.path` of its own.
+    /// Server-local catalog path used for every render request.
     #[arg(long, default_value = "crates/catalog/data/hyg_v42.csv")]
     catalog: PathBuf,
 }
@@ -205,13 +208,18 @@ fn default_skyglow() -> bool {
     true
 }
 
+fn force_configured_catalog(scene: &mut SessionScene, catalog: &Path) {
+    scene.catalog = hyg_catalog_snapshot(catalog, scene.catalog.limiting_magnitude);
+}
+
 async fn render_route(
     State(state): State<AppState>,
     Query(q): Query<RenderQuery>,
     Json(session): Json<StarSession>,
 ) -> Result<Response, AppError> {
     validate_render_dimensions(q.width, q.height).map_err(AppError::bad_request)?;
-    let scene = session.to_scene().map_err(AppError::bad_request)?;
+    let mut scene = session.to_scene().map_err(AppError::bad_request)?;
+    force_configured_catalog(&mut scene, state.catalog.as_path());
     let options = stars_host_common::RenderOptions {
         width: q.width,
         height: q.height,
@@ -223,7 +231,7 @@ async fn render_route(
 
     // Fail immediately rather than queueing unbounded catalog loads and GPU
     // allocations. The owned permit stays live through rendering and encoding.
-    let _render_permit = state
+    let render_permit = state
         .render_permits
         .clone()
         .try_acquire_owned()
@@ -231,21 +239,22 @@ async fn render_route(
 
     // The GPU pipeline is sync-driven (pollster) — run it on a blocking
     // worker so the axum runtime stays responsive while the bounded render is
-    // in flight.
-    let scene_clone: SessionScene = scene;
+    // in flight. Keep both the permit and PNG encoding in this closure: a
+    // disconnected client may cancel the request future, but cannot free GPU
+    // capacity while its blocking render is still running.
     let catalog = state.catalog.clone();
-    let pixels: Vec<u8> = tokio::task::spawn_blocking(move || {
-        pollster::block_on(render_scene_from_catalog_path(
-            &scene_clone,
+    let png = tokio::task::spawn_blocking(move || {
+        let _render_permit = render_permit;
+        let pixels = pollster::block_on(render_scene_from_catalog_path(
+            &scene,
             catalog.as_path(),
             options,
-        ))
+        ))?;
+        encode_png(options.width, options.height, pixels)
     })
     .await
     .map_err(|e| AppError::internal(anyhow::anyhow!(e)))?
     .map_err(AppError::internal)?;
-
-    let png = encode_png(options.width, options.height, pixels).map_err(AppError::internal)?;
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/png"));
     Ok((StatusCode::OK, headers, png).into_response())
@@ -274,9 +283,10 @@ impl AppError {
         }
     }
     fn internal(err: anyhow::Error) -> Self {
+        log::error!("internal server error: {err:#}");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: format!("{err:#}"),
+            message: "request failed".to_string(),
         }
     }
     fn overloaded() -> Self {
@@ -346,6 +356,44 @@ mod tests {
         assert_eq!(json["error"], "Not Found");
 
         server.abort();
+    }
+
+    #[test]
+    fn configured_catalog_replaces_request_path_and_backend() {
+        let session = session_from_preset(
+            ScenePresetArg::TokyoTonight,
+            env!("CARGO_PKG_VERSION"),
+            "stars-server-test",
+            "/request/controlled/catalog.csv",
+            DEFAULT_SCREEN_LIMITING_MAGNITUDE,
+        )
+        .unwrap();
+        let mut scene = session.to_scene().unwrap();
+        scene.catalog.backend = "gaia-dr3".to_string();
+
+        force_configured_catalog(&mut scene, Path::new("/server/catalog.csv"));
+
+        assert_eq!(scene.catalog.backend, "hyg-csv");
+        assert_eq!(scene.catalog.path.as_deref(), Some("/server/catalog.csv"));
+        assert_eq!(
+            scene.catalog.limiting_magnitude,
+            DEFAULT_SCREEN_LIMITING_MAGNITUDE
+        );
+    }
+
+    #[tokio::test]
+    async fn internal_errors_are_not_exposed_to_clients() {
+        let response =
+            AppError::internal(anyhow::anyhow!("sensitive renderer failure")).into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["error"], "Internal Server Error");
+        assert_eq!(body["detail"], "request failed");
+        assert!(!String::from_utf8_lossy(&bytes).contains("sensitive renderer failure"));
     }
 
     #[tokio::test]

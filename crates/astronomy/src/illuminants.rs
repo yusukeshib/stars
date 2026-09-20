@@ -18,12 +18,11 @@ pub fn solar_illuminance_lux(distance_au: f64) -> f64 {
     SOLAR_ILLUMINANCE_1_AU_LUX / (distance_au * distance_au)
 }
 
-/// CIE standard illuminant D65 white point converted to linear RGB and
-/// normalised to the green channel.
+/// CIE standard illuminant D65 represented in linear sRGB.
 ///
-/// This is a rendering convenience derived from the CIE daylight basis. The
-/// absolute photopic scale comes from [`solar_illuminance_lux`].
-pub const SOLAR_LINEAR_RGB: [f64; 3] = [0.950, 1.000, 1.089];
+/// D65 is the sRGB reference white, so its normalized linear-sRGB channels are
+/// equal. The absolute photopic scale comes from [`solar_illuminance_lux`].
+pub const SOLAR_LINEAR_RGB: [f64; 3] = [1.0, 1.0, 1.0];
 
 /// Full-moon horizontal illuminance at sea level under a clear atmosphere,
 /// order-of-magnitude average in lux.
@@ -104,10 +103,11 @@ pub const FULL_MOON_XYZ_Y_NORMALIZED: [f64; 3] = [1.01, 1.0, 0.82];
 /// The phase term follows the widely used Krisciunas & Schaefer 1991 full-Moon
 /// relative magnitude polynomial, normalised so `phase_angle_rad = 0` preserves
 /// [`FULL_MOON_ILLUMINANCE_LUX`]. That empirical phase law already includes the
-/// changing illuminated area, so `illuminated_fraction` is retained only for
-/// API compatibility and must not be applied as a second phase factor.
+/// changing illuminated area, so `illuminated_fraction` is retained only to
+/// identify the exact-new-Moon boundary and must not be applied as a second
+/// phase factor.
 pub fn lunar_illuminance_lux(
-    _illuminated_fraction: f64,
+    illuminated_fraction: f64,
     distance_km: f64,
     phase_angle_rad: f64,
 ) -> f64 {
@@ -121,6 +121,12 @@ pub fn lunar_illuminance_lux(
     } else {
         180.0
     };
+    // The empirical fit has a small non-zero tail at 180°. Enforce the exact
+    // physical boundary without multiplying intermediate phases by the
+    // illuminated fraction a second time.
+    if illuminated_fraction <= 0.0 || phase_deg >= 180.0 {
+        return 0.0;
+    }
     // Krisciunas & Schaefer 1991 Eq. 8: phase darkening relative to full Moon
     // in magnitudes, valid for visual sky-brightness estimates outside the
     // innermost lunar aureole.
@@ -216,7 +222,7 @@ mod tests {
         let new_moon = lunar_illuminance_lux(0.0, MEAN_MOON_DISTANCE_KM, std::f64::consts::PI);
         assert!((full - 0.25).abs() < 1e-12);
         assert!((quarter - 0.022_749_088_942_184_147).abs() < 1e-15);
-        assert!((new_moon - 0.000_070_197_881_969_730_68).abs() < 1e-18);
+        assert_eq!(new_moon, 0.0);
 
         // The empirical phase law already includes illuminated area: supplying
         // a duplicate geometric fraction must not dim the result again.
@@ -335,6 +341,11 @@ mod tests {
             0.5 * LUNAR_BOND_ALBEDO_CANONICAL,
         );
         assert!((halved / base - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn d65_is_neutral_in_linear_srgb() {
+        assert_eq!(SOLAR_LINEAR_RGB, [1.0, 1.0, 1.0]);
     }
 
     #[test]

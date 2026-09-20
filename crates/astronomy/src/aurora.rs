@@ -168,8 +168,10 @@ pub fn emission_apparent_altitude_rad(central_angle_rad: f64, height_km: f64) ->
     let num = gamma.cos() - rh;
     let den = gamma.sin();
     if den.abs() < 1e-9 {
-        // Directly overhead.
-        return PI / 2.0;
+        // At zero separation the emission is overhead; at the antipode it is
+        // directly below the observer. `atan2` cannot distinguish those cases
+        // once the tiny sine denominator is treated as zero.
+        return if num >= 0.0 { PI / 2.0 } else { -PI / 2.0 };
     }
     num.atan2(den)
 }
@@ -312,6 +314,12 @@ mod tests {
     fn overhead_emission_is_at_zenith() {
         let el = emission_apparent_altitude_rad(0.0, AURORA_GREEN_HEIGHT_KM);
         assert!((el - PI / 2.0).abs() < 1e-6, "γ=0 must be the zenith");
+    }
+
+    #[test]
+    fn antipodal_emission_is_at_nadir() {
+        let el = emission_apparent_altitude_rad(PI, AURORA_GREEN_HEIGHT_KM);
+        assert!((el + PI / 2.0).abs() < 1e-12, "γ=π must be the nadir");
     }
 
     #[test]

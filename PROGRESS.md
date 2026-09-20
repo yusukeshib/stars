@@ -13,8 +13,9 @@ relevant host applications.
 The repository-wide 2026 critical review tightened shipped behavior without
 adding a new roadmap phase: catalogue-to-renderer deep-sky data now crosses a
 neutral host DTO; headless dimensions, GPU concurrency, LOD/CAS payloads, and
-catalogue ingest are validated rather than panicking or silently accepting
-corruption; browser session URLs preserve scintillation, meteor, and output
+catalogue ingest report APIs expose row diagnostics while LOD/CAS payloads are
+validated rather than panicking or silently accepting corruption; browser
+session URLs preserve scintillation, meteor, and output
 colour settings; and the browser preview explicitly falls back to sRGB.
 
 Scientific corrections cover distance-monotonic Galactic dust integration,

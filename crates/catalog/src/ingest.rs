@@ -91,7 +91,10 @@ fn field(record: &csv::StringRecord, index: Option<usize>) -> Option<&str> {
 }
 
 fn parse_f64(record: &csv::StringRecord, index: Option<usize>) -> Option<f64> {
-    field(record, index)?.parse::<f64>().ok()
+    field(record, index)?
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
 }
 
 fn parse_u32(record: &csv::StringRecord, index: Option<usize>) -> Option<u32> {
@@ -567,6 +570,15 @@ pub fn parse_gaia_dr3_csv(data: &str) -> Vec<Star> {
 
 /// Parse Gaia DR3 CSV while retaining diagnostics for malformed input.
 pub fn parse_gaia_dr3_csv_report(data: &str) -> CsvIngestReport {
+    parse_gaia_dr3_csv_report_bounded(data, None)
+}
+
+/// Parse at most `max_records` Gaia rows. The LOD reader uses this to keep a
+/// corrupt tile from decoding more rows than its bounded index metadata claims.
+pub(crate) fn parse_gaia_dr3_csv_report_bounded(
+    data: &str,
+    max_records: Option<usize>,
+) -> CsvIngestReport {
     let mut report = CsvIngestReport::default();
     let mut reader = csv_reader(data);
     let header = match reader.headers() {
@@ -601,6 +613,14 @@ pub fn parse_gaia_dr3_csv_report(data: &str) -> CsvIngestReport {
 
     for (record_index, record) in reader.records().enumerate() {
         let row = record_index + 2;
+        if max_records.is_some_and(|limit| record_index >= limit) {
+            warn(
+                &mut report,
+                row,
+                "Gaia DR3 row count exceeds the configured decode limit",
+            );
+            break;
+        }
         let record = match record {
             Ok(record) => record,
             Err(error) => {
@@ -874,6 +894,36 @@ mod tests {
 
         // Existing callers retain the original stars-only API and behavior.
         assert_eq!(parse_gaia_dr3_csv(input).len(), 1);
+    }
+
+    #[test]
+    fn non_finite_required_numeric_values_are_rejected() {
+        let hip =
+            parse_hipparcos_csv_report("HIP,RAICRS,DEICRS,Vmag\n1,NaN,20.0,5.0\n2,10.0,20.0,inf\n");
+        assert!(hip.stars.is_empty());
+        assert_eq!(hip.warnings.len(), 2);
+
+        let tycho =
+            parse_tycho2_csv_report("TYC1,TYC2,TYC3,RAmdeg,DEmdeg,VTmag\n1,2,3,-inf,20.0,5.0\n");
+        assert!(tycho.stars.is_empty());
+        assert_eq!(tycho.warnings.len(), 1);
+
+        let gaia = parse_gaia_dr3_csv_report(
+            "source_id,ra,dec,phot_g_mean_mag\n1,10.0,NaN,5.0\n2,10.0,20.0,-inf\n",
+        );
+        assert!(gaia.stars.is_empty());
+        assert_eq!(gaia.warnings.len(), 2);
+    }
+
+    #[test]
+    fn bounded_gaia_decode_reports_excess_rows() {
+        let report = parse_gaia_dr3_csv_report_bounded(
+            "source_id,ra,dec,phot_g_mean_mag\n1,10.0,20.0,5.0\n2,11.0,21.0,6.0\n",
+            Some(1),
+        );
+        assert_eq!(report.stars.len(), 1);
+        assert_eq!(report.warnings.len(), 1);
+        assert!(report.warnings[0].message.contains("decode limit"));
     }
 
     #[test]

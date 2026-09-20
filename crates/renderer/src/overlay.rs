@@ -111,8 +111,8 @@ pub enum OverlayKind {
     ConstellationLines,
     /// IAU/Delporte constellation boundaries embedded by the renderer crate.
     ConstellationBoundaries,
-    /// Diamond markers for Messier deep-sky objects whose V magnitude is
-    /// brighter than [`OverlayConfig::deep_sky_magnitude_limit`].
+    /// Host-supplied diamond/ring markers for deep-sky objects whose V
+    /// magnitude is brighter than [`OverlayConfig::deep_sky_magnitude_limit`].
     DeepSkyObjects,
     /// Text labels (`M1`, `M31`, …) for Messier deep-sky objects whose V
     /// magnitude is brighter than [`OverlayConfig::deep_sky_magnitude_limit`].
@@ -242,9 +242,9 @@ pub struct OverlayConfig {
     pub grid_step_deg: f64,
     /// Global multiplier on line-overlay alpha. Text labels remain fully opaque for legibility.
     pub opacity: f32,
-    /// V magnitude cutoff for [`OverlayKind::DeepSkyObjects`] and
-    /// [`OverlayKind::DeepSkyLabels`]: only Messier objects with `mag <= limit`
-    /// are drawn. Defaults to [`DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT`]; clamped
+    /// V magnitude cutoff for host-supplied [`OverlayKind::DeepSkyObjects`]
+    /// markers and embedded [`OverlayKind::DeepSkyLabels`]: only entries with
+    /// `mag <= limit` are drawn. Defaults to [`DEFAULT_DEEP_SKY_MAGNITUDE_LIMIT`]; clamped
     /// to `[-5.0, 99.0]` at apply time so a tampered WASM caller cannot
     /// disable the layer with NaN or crash the builder.
     pub deep_sky_magnitude_limit: f32,

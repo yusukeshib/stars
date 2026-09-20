@@ -130,6 +130,10 @@ const DUST_H_R_PC: f64 = 3000.0;
 /// Dust vertical scale height (pc) — dust hugs the plane more tightly than
 /// stars (Drimmel & Spergel 2001).
 const DUST_H_Z_PC: f64 = 120.0;
+/// Finite support used for the numerical dust column. At 100 kpc the
+/// exponential disk contribution is negligible, while this bound prevents an
+/// untrusted distance from turning into an effectively unbounded loop.
+const MAX_DUST_INTEGRATION_DISTANCE_PC: f64 = 100_000.0;
 
 fn sech2(x: f64) -> f64 {
     let c = x.cosh();
@@ -222,12 +226,13 @@ pub fn dust_extinction_az(distance_pc: f64, l_rad: f64, b_rad: f64) -> f64 {
         (-(r - R_SUN_PC) / DUST_H_R_PC).exp() * (-z.abs() / DUST_H_Z_PC).exp()
     };
 
-    let full_cells = (distance_pc / STEP_PC).floor() as usize;
+    let bounded_distance_pc = distance_pc.min(MAX_DUST_INTEGRATION_DISTANCE_PC);
+    let full_cells = (bounded_distance_pc / STEP_PC).floor() as usize;
     let mut column_pc = 0.0;
     for i in 0..full_cells {
         column_pc += density_at((i as f64 + 0.5) * STEP_PC) * STEP_PC;
     }
-    let remainder_pc = distance_pc - full_cells as f64 * STEP_PC;
+    let remainder_pc = bounded_distance_pc - full_cells as f64 * STEP_PC;
     if remainder_pc > 0.0 {
         // Use the same fixed-cell midpoint as the eventual full cell. Scaling
         // its positive contribution by the covered fraction preserves strict
@@ -312,6 +317,14 @@ mod tests {
         let plane = dust_extinction_az(2000.0, 0.0, 0.0);
         let pole = dust_extinction_az(2000.0, 0.0, 60_f64.to_radians());
         assert!(plane > pole, "in-plane {plane} > out-of-plane {pole}");
+    }
+
+    #[test]
+    fn dust_extinction_bounds_untrusted_distances() {
+        let at_model_edge = dust_extinction_az(MAX_DUST_INTEGRATION_DISTANCE_PC, 0.0, 0.0);
+        let enormous = dust_extinction_az(f64::MAX, 0.0, 0.0);
+        assert!(at_model_edge.is_finite());
+        assert_eq!(enormous, at_model_edge);
     }
 
     #[test]
