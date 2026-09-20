@@ -7,7 +7,7 @@ use crate::camera::{Camera, CameraUniform, PlanetUniforms};
 use crate::overlay::{DeepSkyMarker, OverlayConfig, OverlayRenderer};
 use crate::pipeline;
 use crate::skyglow::Skyglow;
-use crate::text::TextRenderer;
+use crate::text::{SkyLabel, TextRenderer};
 use crate::tonemap::{Tonemap, HDR_FORMAT};
 use crate::vertex::{QuadVertex, StarInstance};
 
@@ -135,10 +135,7 @@ impl Renderer {
         let skyglow = Skyglow::new(device, &camera_bind_group_layout);
         let overlay = OverlayRenderer::new(device, final_format);
         let text = TextRenderer::new(device, final_format);
-        // Tonemap pass borrows the camera buffer directly (it samples
-        // `magnitude_zeropoint` for the HDR-flux→cd/m² conversion that
-        // drives the mesopic regime split).
-        let tonemap = Tonemap::new(device, final_format, &camera_buffer, width, height);
+        let tonemap = Tonemap::new(device, final_format, width, height);
 
         Self {
             pipeline,
@@ -185,6 +182,11 @@ impl Renderer {
         self.overlay.set_deep_sky_markers(markers);
     }
 
+    /// Replace catalog-owned labels adapted into renderer-neutral records.
+    pub fn set_sky_labels(&mut self, labels: &[SkyLabel]) {
+        self.text.set_labels(labels);
+    }
+
     /// Rebuild the overlay layers from `config`. Pass `OverlayConfig { layers: vec![], ..}`
     /// (or simply don't call this) to draw stars only.
     pub fn set_overlays(&mut self, device: &wgpu::Device, config: &OverlayConfig) {
@@ -196,8 +198,7 @@ impl Renderer {
     /// size. Hosts must call this whenever their swapchain / output
     /// texture changes size; cheap no-op when the size is unchanged.
     pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
-        self.tonemap
-            .resize(device, &self.camera_buffer, width, height);
+        self.tonemap.resize(device, width, height);
     }
 
     pub fn update_camera(&self, queue: &wgpu::Queue, camera: &Camera, width: u32, height: u32) {
@@ -213,6 +214,8 @@ impl Renderer {
         let uniform = camera.uniform_with_planets(width, height, &planet_uniforms);
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
         // V-50: keep the tonemap's output-gamut matrix in sync with the camera.
+        self.tonemap
+            .set_magnitude_zeropoint(queue, uniform.viewport_pixel_sr_zeropoint[3]);
         self.tonemap
             .set_output_colourspace(queue, camera.output_colourspace);
         self.overlay.update_camera(queue, camera);

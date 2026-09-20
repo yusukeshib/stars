@@ -1,0 +1,12 @@
+[package]
+name = "stars-scene"
+version = "0.1.0"
+edition = "2021"
+
+# Platform-neutral integration layer between catalog-domain records and the
+# renderer's DTOs. Keep this crate free of filesystem, clap, chrono, winit,
+# wgpu device ownership, and wasm-bindgen.
+
+[dependencies]
+catalog = { path = "../catalog", default-features = false }
+renderer = { path = "../renderer" }

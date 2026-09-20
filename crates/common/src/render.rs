@@ -12,7 +12,7 @@ use anyhow::{bail, Context, Result};
 use astronomy::Observer;
 use renderer::{Camera, Renderer, StarInstance};
 
-use crate::{load_star_instances_for_backend, SessionScene};
+use crate::{load_star_instances_for_backend, verify_catalog_digest, SessionScene};
 use catalog::CatalogBackendKind;
 
 /// Render target format used by every native host. `Rgba8UnormSrgb` matches
@@ -175,6 +175,7 @@ pub async fn render_scene_pixels(
         stars,
     );
     renderer.set_deep_sky_markers(&crate::deep_sky_markers());
+    renderer.set_sky_labels(&crate::sky_labels());
     renderer.set_overlays(&device, &scene.overlays);
     renderer.set_skyglow_enabled(options.skyglow_enabled);
     let mut camera = Camera::new(
@@ -269,6 +270,7 @@ pub async fn render_scene_from_catalog_path(
         .as_deref()
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| default_catalog.as_ref().to_path_buf());
+    verify_catalog_digest(&catalog_path, scene.catalog.hash.as_deref())?;
     let variable_jd = options.variable_magnitudes.then_some(scene.time.jd_utc);
     // L-17: re-select the session's recorded backend; unknown / legacy labels
     // fall back to HYG so older sessions still render.
@@ -292,14 +294,78 @@ pub async fn render_scene_from_catalog_path(
 /// Encode a raw RGBA8 buffer as a PNG byte stream. Used by the HTTP server's
 /// `/render` route, which returns the bytes directly instead of writing to
 /// disk like the CLI does.
-pub fn encode_png(width: u32, height: u32, pixels: Vec<u8>) -> Result<Vec<u8>> {
+pub fn encode_png(
+    width: u32,
+    height: u32,
+    pixels: Vec<u8>,
+    colourspace: renderer::OutputColourSpace,
+) -> Result<Vec<u8>> {
     validate_render_dimensions(width, height)?;
-    let img =
-        image::RgbaImage::from_raw(width, height, pixels).context("Pixel buffer size mismatch")?;
-    let mut buf = std::io::Cursor::new(Vec::new());
-    img.write_to(&mut buf, image::ImageFormat::Png)
-        .context("Encoding PNG buffer")?;
-    Ok(buf.into_inner())
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .context("Pixel buffer size overflow")?;
+    anyhow::ensure!(pixels.len() == expected, "Pixel buffer size mismatch");
+    let mut bytes = Vec::new();
+    write_png_to(&mut bytes, width, height, &pixels, colourspace)?;
+    Ok(bytes)
+}
+
+pub fn write_png(
+    path: &std::path::Path,
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+    colourspace: renderer::OutputColourSpace,
+) -> Result<()> {
+    validate_render_dimensions(width, height)?;
+    let file = std::fs::File::create(path)
+        .with_context(|| format!("Failed to create {}", path.display()))?;
+    write_png_to(
+        std::io::BufWriter::new(file),
+        width,
+        height,
+        pixels,
+        colourspace,
+    )
+}
+
+fn write_png_to(
+    output: impl std::io::Write,
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+    colourspace: renderer::OutputColourSpace,
+) -> Result<()> {
+    let mut encoder = png::Encoder::new(output, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    match colourspace {
+        renderer::OutputColourSpace::Srgb => {
+            encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
+        }
+        renderer::OutputColourSpace::DisplayP3 | renderer::OutputColourSpace::Rec2020 => {
+            // Pixels use the renderer's documented sRGB transfer curve even
+            // when the primaries are P3/Rec.2020. PNG gAMA cannot encode the
+            // piecewise curve exactly, but 1/2.2 is the standard interoperable
+            // signal alongside cHRM when no embedded ICC profile is available.
+            encoder.set_source_gamma(png::ScaledFloat::from_scaled(45_455));
+            let [red, green, blue, white] = colourspace.primaries_xy();
+            encoder.set_source_chromaticities(png::SourceChromaticities::new(
+                (white.0, white.1),
+                (red.0, red.1),
+                (green.0, green.1),
+                (blue.0, blue.1),
+            ));
+        }
+    }
+    let mut writer = encoder
+        .write_header()
+        .context("Failed to write PNG header")?;
+    writer
+        .write_image_data(pixels)
+        .context("Failed to write PNG image data")?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -322,5 +388,22 @@ mod tests {
         assert_eq!(layout.padded_bytes_per_row, 256);
         assert_eq!(layout.readback_bytes, 4096);
         assert_eq!(layout.pixel_bytes, 17 * 16 * 4);
+    }
+
+    #[test]
+    fn png_encoder_tags_the_requested_colourspace() {
+        let pixels = vec![0_u8; 16 * 16 * 4];
+        let srgb = encode_png(16, 16, pixels.clone(), renderer::OutputColourSpace::Srgb).unwrap();
+        assert!(srgb.windows(4).any(|chunk| chunk == b"sRGB"));
+
+        for colourspace in [
+            renderer::OutputColourSpace::DisplayP3,
+            renderer::OutputColourSpace::Rec2020,
+        ] {
+            let png = encode_png(16, 16, pixels.clone(), colourspace).unwrap();
+            assert!(png.windows(4).any(|chunk| chunk == b"cHRM"));
+            assert!(png.windows(4).any(|chunk| chunk == b"gAMA"));
+            assert!(!png.windows(4).any(|chunk| chunk == b"sRGB"));
+        }
     }
 }

@@ -14,11 +14,11 @@ use stars_host_common::{
     curated_satellite_layer, eyepiece_from_args, first_night_tour, light_pollution_from_args,
     load_session, overlay_config_from_args, parse_time_to_time_scales,
     render_scene_from_catalog_path, resolve_goto_query, save_session, scene_from_preset,
-    scene_preset_infos, scintillation_from_args, viewpoint_from_args, AtmosphereOverrides,
-    AtmospherePresetArg, AuroraSeasonArg, CatalogBackendArg, CorrectionSnapshot,
-    ExternalViewpointOverrides, EyepieceOverrides, LightPollutionOverrides, OpticalDesign,
-    OutputColourspaceArg, OverlayArg, OverlayPaletteArg, ProjectionArg, RenderOptions,
-    ScenePresetArg, ScintillationOverrides, SessionScene, StarSession, ViewpointArg,
+    scene_preset_infos, scintillation_from_args, viewpoint_from_args, write_png,
+    AtmosphereOverrides, AtmospherePresetArg, AuroraSeasonArg, CatalogBackendArg,
+    CorrectionSnapshot, ExternalViewpointOverrides, EyepieceOverrides, LightPollutionOverrides,
+    OpticalDesign, OutputColourspaceArg, OverlayArg, OverlayPaletteArg, ProjectionArg,
+    RenderOptions, ScenePresetArg, ScintillationOverrides, SessionScene, StarSession, ViewpointArg,
 };
 
 /// Resolve the V-45 optical design from the `--telescope-design` /
@@ -414,8 +414,8 @@ struct Args {
 
     /// V-50 output colour management: the primaries the PNG is encoded and
     /// tagged with. `srgb` (default) is the renderer's native working space;
-    /// `display-p3` and `rec2020` remap the gamut and write a PNG `cHRM`
-    /// chunk so a calibrated wide-gamut screen reproduces the same colour.
+    /// `display-p3` and `rec2020` remap the gamut and write PNG `cHRM` plus
+    /// `gAMA` metadata so a calibrated wide-gamut screen reproduces the same colour.
     /// Persisted in the session JSON so other hosts reproduce the choice.
     /// When omitted, a `--session` / `--preset` scene keeps its stored value;
     /// otherwise the default is sRGB.
@@ -732,47 +732,6 @@ fn main() -> Result<()> {
         args.output.display(),
         scene.output_colourspace.as_str()
     );
-    Ok(())
-}
-
-/// Write an 8-bit RGBA PNG, tagging the file with the V-50 output colour
-/// space. sRGB is written with the standard `sRGB` chunk; Display-P3 and
-/// Rec.2020 are tagged with a `cHRM` chunk carrying their primaries + D65
-/// white point so a colour-managed viewer reproduces the intended colour.
-fn write_png(
-    path: &std::path::Path,
-    width: u32,
-    height: u32,
-    rgba: &[u8],
-    colourspace: OutputColourSpace,
-) -> Result<()> {
-    use std::io::BufWriter;
-
-    let file = std::fs::File::create(path)
-        .with_context(|| format!("Failed to create {}", path.display()))?;
-    let mut encoder = png::Encoder::new(BufWriter::new(file), width, height);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    match colourspace {
-        OutputColourSpace::Srgb => {
-            encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
-        }
-        OutputColourSpace::DisplayP3 | OutputColourSpace::Rec2020 => {
-            let [red, green, blue, white] = colourspace.primaries_xy();
-            encoder.set_source_chromaticities(png::SourceChromaticities::new(
-                (white.0, white.1),
-                (red.0, red.1),
-                (green.0, green.1),
-                (blue.0, blue.1),
-            ));
-        }
-    }
-    let mut writer = encoder
-        .write_header()
-        .context("Failed to write PNG header")?;
-    writer
-        .write_image_data(rgba)
-        .context("Failed to write PNG image data")?;
     Ok(())
 }
 

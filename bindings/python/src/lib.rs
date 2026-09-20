@@ -54,6 +54,112 @@ const DEFAULT_SESSION_TEMPLATE: &str = include_str!(concat!(
     "/../../docs/presets/sessions/dark-sky.json"
 ));
 
+fn migrate_session_value(mut value: Value) -> Result<Value, String> {
+    let current = serde_json::from_str::<Value>(DEFAULT_SESSION_TEMPLATE)
+        .ok()
+        .and_then(|template| template.get("schemaVersion").and_then(Value::as_u64))
+        .ok_or_else(|| "embedded session template is invalid".to_owned())?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "session JSON must be an object".to_owned())?;
+    let version = object
+        .get("schemaVersion")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "session missing integer 'schemaVersion'".to_owned())?;
+    if !(1..=current).contains(&version) {
+        return Err(format!(
+            "unsupported session schemaVersion {version}; supported 1..={current}"
+        ));
+    }
+    if version == 1 {
+        let atmosphere = object
+            .get_mut("atmosphere")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| "v1 session missing atmosphere object".to_owned())?;
+        let turbidity = atmosphere
+            .remove("turbidity")
+            .and_then(|value| value.as_f64())
+            .ok_or_else(|| "v1 session missing numeric atmosphere.turbidity".to_owned())?;
+        let beta = (turbidity.clamp(1.7, 10.0) - 1.0)
+            * astronomy::atmosphere::RAYLEIGH_K550_MAG_PER_AIRMASS;
+        atmosphere.insert("aerosolBeta".to_owned(), serde_json::json!(beta));
+        atmosphere.insert("aerosolAlpha".to_owned(), serde_json::json!(1.3));
+        atmosphere.remove("visibilityKm");
+    }
+    if version < 3 {
+        let atmosphere = object
+            .get_mut("atmosphere")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| "session missing atmosphere object".to_owned())?;
+        atmosphere
+            .entry("surfaceAlbedo".to_owned())
+            .or_insert_with(|| serde_json::json!(0.2));
+    }
+
+    let time = object
+        .get_mut("time")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "session field 'time' must be an object".to_owned())?;
+    let jd_utc = time
+        .get("jdUtc")
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite())
+        .ok_or_else(|| "session time.jdUtc must be finite".to_owned())?;
+    let dut1 = time
+        .get("dut1Seconds")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let scales = TimeScales::from_utc_julian_date_with_dut1(jd_utc, dut1);
+    for (name, number) in [
+        ("jdUt1", scales.jd_ut1),
+        ("jdTai", scales.jd_tai),
+        ("jdTt", scales.jd_tt),
+        ("jdTdb", scales.jd_tdb),
+        ("taiMinusUtcSeconds", scales.tai_minus_utc_seconds),
+        ("dut1Seconds", scales.dut1_seconds),
+    ] {
+        time.insert(name.to_owned(), serde_json::json!(number));
+    }
+
+    let atmosphere = object
+        .get("atmosphere")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "session field 'atmosphere' must be an object".to_owned())?;
+    let refraction = atmosphere
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        && atmosphere
+            .get("pressureHpa")
+            .and_then(Value::as_f64)
+            .is_some_and(|pressure| pressure > 0.0);
+    let corrections = object
+        .get("corrections")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "session field 'corrections' must be an object".to_owned())?;
+    for name in [
+        "timeScales",
+        "precession",
+        "nutation",
+        "annualAberration",
+        "properMotion",
+        "topocentricSolarSystem",
+    ] {
+        if corrections.get(name).and_then(Value::as_bool) != Some(true) {
+            return Err(format!("unsupported correction setting {name}"));
+        }
+    }
+    if corrections
+        .get("atmosphericRefraction")
+        .and_then(Value::as_bool)
+        != Some(refraction)
+    {
+        return Err("correction snapshot does not match atmosphere state".to_owned());
+    }
+    object.insert("schemaVersion".to_owned(), serde_json::json!(current));
+    Ok(value)
+}
+
 // ---------------------------------------------------------------------------
 // Observer
 // ---------------------------------------------------------------------------
@@ -631,16 +737,14 @@ impl PySession {
         Ok(Self { value })
     }
 
-    /// Parse a session from a JSON string. Unknown / future fields are
-    /// preserved verbatim through a later `to_json`, so the binding never
-    /// silently drops data it does not understand.
+    /// Parse and migrate a v1–v7 session from JSON. Unknown fields are
+    /// preserved, while future schema versions and unsupported correction
+    /// states are rejected consistently with native/web hosts.
     #[staticmethod]
     fn from_json(text: &str) -> PyResult<Self> {
         let value: Value = serde_json::from_str(text)
             .map_err(|e| PyValueError::new_err(format!("invalid session JSON: {e}")))?;
-        if !value.is_object() {
-            return Err(PyValueError::new_err("session JSON must be an object"));
-        }
+        let value = migrate_session_value(value).map_err(PyValueError::new_err)?;
         Ok(Self { value })
     }
 
@@ -1671,6 +1775,26 @@ mod tests {
         assert!(session.latitude_deg().is_ok());
         assert!(session.jd_utc().is_ok());
         assert!(session.fov_deg().is_ok());
+    }
+
+    #[test]
+    fn historical_session_is_migrated_and_canonicalized() {
+        let mut value: Value = serde_json::from_str(DEFAULT_SESSION_TEMPLATE).unwrap();
+        value["schemaVersion"] = serde_json::json!(1);
+        let atmosphere = value["atmosphere"].as_object_mut().unwrap();
+        atmosphere.remove("aerosolBeta");
+        atmosphere.remove("aerosolAlpha");
+        atmosphere.remove("surfaceAlbedo");
+        atmosphere.insert("turbidity".to_owned(), serde_json::json!(3.0));
+        atmosphere.insert("visibilityKm".to_owned(), serde_json::json!(25.0));
+        value["time"].as_object_mut().unwrap().remove("jdTt");
+
+        let session = PySession::from_json(&value.to_string()).unwrap();
+        assert_eq!(session.schema_version().unwrap(), 7);
+        assert!(
+            (session.value["atmosphere"]["aerosolBeta"].as_f64().unwrap() - 0.171).abs() < 1e-6
+        );
+        assert!(session.value["time"]["jdTt"].as_f64().is_some());
     }
 
     /// Building a session, mutating observer / time / view, serialising, and

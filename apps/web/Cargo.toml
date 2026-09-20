@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 renderer = { path = "../../crates/renderer" }
 catalog = { path = "../../crates/catalog", default-features = false, features = ["embedded"] }
 astronomy = { path = "../../crates/astronomy" }
+stars-scene = { path = "../../crates/scene" }
 wgpu = "29"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

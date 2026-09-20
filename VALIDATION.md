@@ -43,6 +43,14 @@ render snapshots do not isolate:
   tests distinguish umbra, penumbra, and partial limb contact.
 - Malformed atlas/catalogue/CAS payloads, invalid LOD IDs, impossible render
   dimensions, and occupied server GPU capacity are explicit error cases.
+  Reproducible catalog loads use strict ingest/LOD APIs; best-effort streams
+  must expose `complete = false` and structured diagnostics.
+- Session fixtures cover historical v1 migration through current v7, future
+  version rejection, correction-capability mismatches, and catalog SHA-256
+  mismatch rejection. Derived time scales are recomputed from UTC + DUT1.
+- Shader tests validate CameraUniform member order/offsets against the canonical
+  WGSL declaration and Rust byte size. PNG tests require `sRGB` or `cHRM`
+  chunks matching the requested native output colour space.
 - Renderer model tests keep Sun/Moon disks and occultations active under
   `Atmosphere::OFF`; point-source extinction and the one-minute fast-moon cache
   are separately constrained.

@@ -13,12 +13,11 @@ use std::sync::OnceLock;
 use anyhow::{Context, Result};
 use astronomy::{FalchiAtlas, TimeScales};
 use catalog::{
-    load_from_file, parse_gaia_dr3_csv, parse_hipparcos_csv, parse_tycho2_csv, render_magnitude_at,
-    CatalogObjectId, CatalogSource, DeepSkyCatalog, DeepSkyId, MessierCatalog, NgcBrightCatalog,
-    Star,
+    load_from_file, parse_gaia_dr3_csv, parse_hipparcos_csv, parse_tycho2_csv, CatalogSource,
 };
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 mod comets;
 mod goto;
@@ -31,22 +30,25 @@ pub use goto::{resolve_goto_id, resolve_goto_query, GotoTarget};
 // L-19 CDS deep-link helpers. The pure URL builders live in `catalog` so the
 // WASM web binding can share the single source of truth; we re-export them on
 // the documented `stars_host_common` path for the native hosts.
-pub use catalog::{simbad_query_url, vizier_query_url, CatalogBackendKind, StarIdentifiers};
+pub use catalog::{
+    simbad_query_url, vizier_query_url, CatalogBackendKind, CatalogObjectId, StarIdentifiers,
+};
 pub use comets::{curated_comet_elements, curated_comet_layer, CURATED_COMET_TEXT};
 pub use presets::*;
 pub use render::*;
 pub use renderer::OpticalDesign;
 pub use renderer::DEFAULT_SCREEN_LIMITING_MAGNITUDE;
 use renderer::{
-    build_star_instance, Atmosphere, AtmospherePreset, DeepSkyMarker, DeepSkyMarkerShape,
-    ExternalViewpoint, EyepieceSimulation, LightPollution, OutputColourSpace, OverlayConfig,
-    OverlayKind, OverlayPalette, Scintillation, SkyProjection, SkyViewpoint, StarInstance,
+    Atmosphere, AtmospherePreset, ExternalViewpoint, EyepieceSimulation, LightPollution,
+    OutputColourSpace, OverlayConfig, OverlayKind, OverlayPalette, Scintillation, SkyProjection,
+    SkyViewpoint, StarInstance,
 };
 pub use satellites::{
     curated_satellite_layer, curated_satellite_tles, CURATED_TLE_TEXT,
     DEFAULT_SATELLITE_EXPOSURE_SECONDS,
 };
 pub use session::*;
+pub use stars_scene::{deep_sky_markers, sky_labels};
 pub use tour::{first_night_tour, Tour, TourScene, TourStep};
 
 /// CLI-facing mirror of [`OverlayKind`] that derives [`ValueEnum`] so `clap`
@@ -360,32 +362,6 @@ pub fn aurora_from_args(enabled: bool, kp: f32, season: AuroraSeasonArg) -> rend
 /// `deep_sky_magnitude_limit` controls the density filter for the Messier
 /// deep-sky markers and labels; the renderer clamps it again on the inside
 /// so a stale host value cannot crash the marker builder.
-/// Adapt catalogue records into renderer-neutral marker DTOs, applying the
-/// catalogue-owned resolved-cluster suppression policy at the host boundary.
-pub fn deep_sky_markers() -> Vec<DeepSkyMarker> {
-    let ngc = NgcBrightCatalog;
-    let messier = MessierCatalog;
-    ngc.objects(f32::INFINITY)
-        .into_iter()
-        .filter(|object| !ngc.resolve_as_member_field(object.id))
-        .chain(
-            messier
-                .objects(f32::INFINITY)
-                .into_iter()
-                .filter(|object| !messier.resolve_as_member_field(object.id)),
-        )
-        .map(|object| DeepSkyMarker {
-            position: object.position,
-            magnitude: object.magnitude,
-            size_arcmin: object.size_arcmin,
-            shape: match object.id {
-                DeepSkyId::Messier(_) => DeepSkyMarkerShape::Diamond,
-                DeepSkyId::Ngc(_) | DeepSkyId::Ic(_) => DeepSkyMarkerShape::Ring,
-            },
-        })
-        .collect()
-}
-
 pub fn overlay_config_from_args(
     overlays_disabled: bool,
     overlays: &[OverlayArg],
@@ -762,50 +738,20 @@ pub fn load_star_instances_from_file_at(
     )
 }
 
-/// Convert a parsed catalogue `Star` slice into renderer-ready instances using
-/// the shared perceptual magnitude / colour pipeline and (optionally) the
-/// `L-20` variable-star brightness override. Centralised so every backend
-/// bridges `catalog` → `renderer` identically.
-fn stars_to_instances(
-    stars: &[Star],
-    limiting_magnitude: f32,
-    variable_jd: Option<f64>,
-) -> Vec<StarInstance> {
-    stars
-        .iter()
-        .map(|s| {
-            let magnitude = match variable_jd {
-                Some(jd) => {
-                    render_magnitude_at(s.identifiers.hip, s.identifiers.hd, None, s.magnitude, jd)
-                }
-                None => s.magnitude,
-            };
-            build_star_instance(
-                s.position.into(),
-                s.proper_motion.into(),
-                s.color,
-                magnitude,
-                limiting_magnitude,
-                s.distance_pc,
-                // L-18: preserve the catalogue primary id through the instance.
-                s.identifiers.pick_handle(),
-            )
-        })
-        .collect()
+/// Renderer instances plus a host-owned, index-aligned catalogue identity
+/// sidecar. The renderer only sees `instances`; catalog semantics stay here.
+pub struct RenderCatalog {
+    pub instances: Vec<StarInstance>,
+    pub identities: Vec<Option<CatalogObjectId>>,
 }
 
-/// `L-17` host catalog selection: load a star catalogue with the chosen
-/// backend and bridge it to renderer instances. HYG (CSV) stays the native
-/// default; the Hipparcos / Tycho-2 / Gaia DR3 backends parse the normalised
-/// CSV export at `path` (fetched by `scripts/fetch-*.sh`). The embedded HYG
-/// backend is a WASM-only concept, so it falls back to the HYG CSV at `path`
-/// on native hosts.
-pub fn load_star_instances_for_backend(
+/// Load a catalog and retain host-owned identities for interactive picking.
+pub fn load_render_catalog_for_backend(
     backend: CatalogBackendKind,
     path: impl AsRef<Path>,
     limiting_magnitude: f32,
     variable_jd: Option<f64>,
-) -> Result<Vec<StarInstance>> {
+) -> Result<RenderCatalog> {
     let path = path.as_ref();
     let stars = match backend {
         CatalogBackendKind::HygCsv | CatalogBackendKind::HygEmbedded => load_from_file(path)
@@ -826,18 +772,33 @@ pub fn load_star_instances_for_backend(
             parse_gaia_dr3_csv(&data)
         }
     };
-    Ok(stars_to_instances(&stars, limiting_magnitude, variable_jd))
+    let (instances, identities) =
+        stars_scene::star_instances(&stars, limiting_magnitude, variable_jd);
+    Ok(RenderCatalog {
+        instances,
+        identities,
+    })
+}
+
+/// `L-17` host catalog selection for non-interactive renders.
+pub fn load_star_instances_for_backend(
+    backend: CatalogBackendKind,
+    path: impl AsRef<Path>,
+    limiting_magnitude: f32,
+    variable_jd: Option<f64>,
+) -> Result<Vec<StarInstance>> {
+    Ok(load_render_catalog_for_backend(backend, path, limiting_magnitude, variable_jd)?.instances)
 }
 
 /// `L-18` interactive pick for native hosts: resolve a screen-space click to a
 /// catalogue identity. Maps the click to a J2000 equatorial ray via the
 /// camera inverse, finds the nearest rendered star within `tol_rad`, and
 /// returns its canonical primary-id label (`"HIP 32349"`, `"HD 48915"`, …)
-/// from the instance's preserved pick handle. `None` for a miss, an instance
+/// through the host-owned identity sidecar. `None` for a miss, an instance
 /// without an id, or a non-perspective viewpoint.
 pub fn pick_star_label(
     camera: &renderer::Camera,
-    instances: &[StarInstance],
+    catalog: &RenderCatalog,
     px: f32,
     py: f32,
     width: f32,
@@ -845,12 +806,38 @@ pub fn pick_star_label(
     tol_rad: f32,
 ) -> Option<String> {
     let ray = camera.screen_ray_equatorial(px, py, width, height)?;
-    let idx = renderer::pick_nearest(instances, ray, tol_rad)?;
-    let (kind, value) = instances[idx].catalog_id_parts()?;
-    CatalogObjectId::from_parts(kind, value).map(|id| id.label())
+    let idx = renderer::pick_nearest(&catalog.instances, ray, tol_rad)?;
+    catalog
+        .identities
+        .get(idx)
+        .copied()
+        .flatten()
+        .map(CatalogObjectId::label)
 }
 
 /// Build the session catalog snapshot for the current HYG CSV backend.
+pub fn verify_catalog_digest(path: impl AsRef<Path>, expected: Option<&str>) -> Result<()> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let expected_hex = expected
+        .strip_prefix("sha256:")
+        .with_context(|| format!("unsupported catalog digest format: {expected}"))?;
+    let bytes = std::fs::read(path.as_ref()).with_context(|| {
+        format!(
+            "Reading catalog for digest verification at {}",
+            path.as_ref().display()
+        )
+    })?;
+    let actual = format!("{:x}", Sha256::digest(bytes));
+    anyhow::ensure!(
+        actual == expected_hex,
+        "catalog digest mismatch at {}: expected {expected_hex}, got {actual}",
+        path.as_ref().display()
+    );
+    Ok(())
+}
+
 pub fn hyg_catalog_snapshot(path: impl AsRef<Path>, limiting_magnitude: f32) -> CatalogSnapshot {
     catalog_snapshot_for(CatalogBackendKind::HygCsv, path, limiting_magnitude)
 }
@@ -874,7 +861,10 @@ pub fn catalog_snapshot_for(
         source: source.name.to_string(),
         version: source.version.map(str::to_string),
         path: Some(path.as_ref().display().to_string()),
-        hash: None,
+        hash: std::fs::read(path.as_ref()).ok().map(|bytes| {
+            let digest = Sha256::digest(bytes);
+            format!("sha256:{digest:x}")
+        }),
         limiting_magnitude,
     }
 }
@@ -919,6 +909,17 @@ mod tests {
             b.extend_from_slice(&v.to_le_bytes());
         }
         FalchiAtlas::from_bytes(&b).unwrap()
+    }
+
+    #[test]
+    fn catalog_digest_verification_rejects_drift() {
+        let path = std::env::temp_dir().join(format!("stars-digest-{}.csv", std::process::id()));
+        std::fs::write(&path, b"catalog-v1").unwrap();
+        let snapshot = catalog_snapshot_for(CatalogBackendKind::HygCsv, &path, 7.5);
+        verify_catalog_digest(&path, snapshot.hash.as_deref()).unwrap();
+        std::fs::write(&path, b"catalog-v2").unwrap();
+        assert!(verify_catalog_digest(&path, snapshot.hash.as_deref()).is_err());
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

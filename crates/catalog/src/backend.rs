@@ -11,7 +11,7 @@ use std::fmt;
 #[cfg(feature = "embedded")]
 use crate::catalog::load_embedded;
 #[cfg(any(feature = "filesystem", test))]
-use crate::catalog::load_from_csv;
+use crate::catalog::load_from_csv_report;
 use crate::catalog::DEFAULT_MAX_MAGNITUDE;
 use crate::Star;
 
@@ -279,13 +279,51 @@ impl CatalogBackendKind {
     }
 }
 
-/// Query shape used by current HYG loading and reserved for future paged / LOD
-/// backends. `max_magnitude` is a source-filtering limit, not the renderer's
-/// observer limiting magnitude.
+/// A structured problem found while decoding a catalog row or schema.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogDiagnostic {
+    /// One-based CSV row number (the header is row 1).
+    pub row: usize,
+    pub message: String,
+}
+
+/// Parsed stars plus diagnostics for source data that could not be used.
+#[derive(Debug, Default)]
+pub struct CatalogIngestReport {
+    pub stars: Vec<Star>,
+    pub diagnostics: Vec<CatalogDiagnostic>,
+}
+
+/// Controls whether a filesystem backend rejects or reports malformed rows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CatalogIngestMode {
+    #[default]
+    Strict,
+    BestEffort,
+}
+
+/// Opaque position at which a subsequent catalog request resumes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CatalogCursor {
+    offset: u64,
+    backend: CatalogBackendKind,
+    max_magnitude_bits: u32,
+}
+
+/// Query shape used by flat catalog backends. `max_magnitude` is a
+/// source-filtering limit, not the renderer's observer limiting magnitude.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CatalogQuery {
     pub max_magnitude: f32,
     pub max_rows: Option<usize>,
+    pub cursor: Option<CatalogCursor>,
+}
+
+impl CatalogQuery {
+    pub fn continuing_from(mut self, cursor: CatalogCursor) -> Self {
+        self.cursor = Some(cursor);
+        self
+    }
 }
 
 impl Default for CatalogQuery {
@@ -293,19 +331,75 @@ impl Default for CatalogQuery {
         Self {
             max_magnitude: DEFAULT_MAX_MAGNITUDE,
             max_rows: None,
+            cursor: None,
         }
     }
 }
 
-/// One page of catalog stars. The current HYG adapter returns a single complete
-/// page; large backends can later set `next_page` and `truncated`.
+/// One page of catalog stars and any best-effort ingest diagnostics.
 #[derive(Debug, Clone)]
 pub struct CatalogPage {
     pub source: CatalogSource,
     pub query: CatalogQuery,
     pub stars: Vec<Star>,
+    pub diagnostics: Vec<CatalogDiagnostic>,
     pub truncated: bool,
-    pub next_page: Option<u64>,
+    pub next_page: Option<CatalogCursor>,
+}
+
+pub(crate) fn page_from_report(
+    mut report: CatalogIngestReport,
+    query: CatalogQuery,
+    source: CatalogSource,
+    mode: CatalogIngestMode,
+) -> Result<CatalogPage, CatalogError> {
+    if mode == CatalogIngestMode::Strict && !report.diagnostics.is_empty() {
+        return Err(CatalogError::Ingest {
+            source,
+            diagnostics: report.diagnostics,
+        });
+    }
+    if query.max_rows == Some(0) {
+        return Err(CatalogError::InvalidQuery(
+            "max_rows must be greater than zero".to_owned(),
+        ));
+    }
+
+    report
+        .stars
+        .retain(|star| star.magnitude <= query.max_magnitude);
+    if let Some(cursor) = query.cursor {
+        if cursor.backend != source.backend
+            || cursor.max_magnitude_bits != query.max_magnitude.to_bits()
+        {
+            return Err(CatalogError::InvalidQuery(
+                "continuation cursor does not match catalog source/filter".to_owned(),
+            ));
+        }
+    }
+    let offset = query
+        .cursor
+        .and_then(|cursor| usize::try_from(cursor.offset).ok())
+        .unwrap_or(0)
+        .min(report.stars.len());
+    let end = query.max_rows.map_or(report.stars.len(), |limit| {
+        offset.saturating_add(limit).min(report.stars.len())
+    });
+    let next_page = (end < report.stars.len()).then_some(CatalogCursor {
+        offset: end as u64,
+        backend: source.backend,
+        max_magnitude_bits: query.max_magnitude.to_bits(),
+    });
+    let stars = report.stars.drain(offset..end).collect();
+
+    Ok(CatalogPage {
+        source,
+        query,
+        stars,
+        diagnostics: report.diagnostics,
+        truncated: next_page.is_some(),
+        next_page,
+    })
 }
 
 pub trait CatalogBackend {
@@ -316,12 +410,27 @@ pub trait CatalogBackend {
 #[derive(Debug)]
 pub enum CatalogError {
     Io(std::io::Error),
+    Ingest {
+        source: CatalogSource,
+        diagnostics: Vec<CatalogDiagnostic>,
+    },
+    InvalidQuery(String),
 }
 
 impl fmt::Display for CatalogError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(error) => write!(f, "catalog I/O failed: {error}"),
+            Self::Ingest {
+                source,
+                diagnostics,
+            } => write!(
+                f,
+                "{} catalog ingest failed with {} diagnostic(s)",
+                source.name,
+                diagnostics.len()
+            ),
+            Self::InvalidQuery(message) => write!(f, "invalid catalog query: {message}"),
         }
     }
 }
@@ -330,6 +439,7 @@ impl Error for CatalogError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),
+            Self::Ingest { .. } | Self::InvalidQuery(_) => None,
         }
     }
 }
@@ -344,12 +454,25 @@ impl From<std::io::Error> for CatalogError {
 #[derive(Debug, Clone)]
 pub struct HygCsvBackend {
     path: std::path::PathBuf,
+    ingest_mode: CatalogIngestMode,
 }
 
 #[cfg(feature = "filesystem")]
 impl HygCsvBackend {
+    /// Create a strict backend that rejects any malformed schema or row.
     pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            ingest_mode: CatalogIngestMode::Strict,
+        }
+    }
+
+    /// Create a backend that returns valid rows and exposes skipped-row diagnostics.
+    pub fn best_effort(path: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            ingest_mode: CatalogIngestMode::BestEffort,
+        }
     }
 
     pub fn path(&self) -> &std::path::Path {
@@ -365,22 +488,12 @@ impl CatalogBackend for HygCsvBackend {
 
     fn load(&self, query: CatalogQuery) -> Result<CatalogPage, CatalogError> {
         let data = std::fs::read_to_string(&self.path)?;
-        let mut stars = load_from_csv(&data);
-        stars.retain(|star| star.magnitude <= query.max_magnitude);
-        let truncated = if let Some(max_rows) = query.max_rows {
-            let truncated = stars.len() > max_rows;
-            stars.truncate(max_rows);
-            truncated
-        } else {
-            false
-        };
-        Ok(CatalogPage {
-            source: self.source(),
+        page_from_report(
+            load_from_csv_report(&data),
             query,
-            stars,
-            truncated,
-            next_page: None,
-        })
+            self.source(),
+            self.ingest_mode,
+        )
     }
 }
 
@@ -395,22 +508,15 @@ impl CatalogBackend for HygEmbeddedBackend {
     }
 
     fn load(&self, query: CatalogQuery) -> Result<CatalogPage, CatalogError> {
-        let mut stars = load_embedded();
-        stars.retain(|star| star.magnitude <= query.max_magnitude);
-        let truncated = if let Some(max_rows) = query.max_rows {
-            let truncated = stars.len() > max_rows;
-            stars.truncate(max_rows);
-            truncated
-        } else {
-            false
-        };
-        Ok(CatalogPage {
-            source: self.source(),
+        page_from_report(
+            CatalogIngestReport {
+                stars: load_embedded(),
+                diagnostics: Vec::new(),
+            },
             query,
-            stars,
-            truncated,
-            next_page: None,
-        })
+            self.source(),
+            CatalogIngestMode::Strict,
+        )
     }
 }
 
@@ -535,14 +641,61 @@ mod tests {
             .load(CatalogQuery {
                 max_magnitude: 5.0,
                 max_rows: Some(1),
+                cursor: None,
             })
             .expect("load temporary HYG fixture");
-        std::fs::remove_file(path).expect("remove temporary HYG fixture");
 
         assert_eq!(page.source, CatalogSource::HYG_CSV);
         assert_eq!(page.query.max_magnitude, 5.0);
         assert!(page.truncated);
         assert_eq!(page.stars.len(), 1);
         assert_eq!(page.stars[0].identifiers.hyg, Some(1));
+
+        let second = backend
+            .load(CatalogQuery {
+                max_magnitude: 5.0,
+                max_rows: Some(1),
+                cursor: page.next_page,
+            })
+            .expect("continue temporary HYG fixture");
+        let mismatched = backend.load(CatalogQuery {
+            max_magnitude: 4.0,
+            max_rows: Some(1),
+            cursor: page.next_page,
+        });
+        assert!(matches!(mismatched, Err(CatalogError::InvalidQuery(_))));
+        std::fs::remove_file(path).expect("remove temporary HYG fixture");
+        assert!(!second.truncated);
+        assert_eq!(second.stars.len(), 1);
+        assert_eq!(second.stars[0].identifiers.hyg, Some(2));
+    }
+
+    #[test]
+    fn strict_ingest_rejects_partial_catalog_but_best_effort_reports_it() {
+        let path = std::env::temp_dir().join(format!(
+            "stars-hyg-diagnostics-{}-{}.csv",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("test clock")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &path,
+            format!(
+                "{HEADER}\n1,1,11,,,,Good,0.0,0.0,10.0,0.0,0.0,0.0,1.0,0.0,G2V,0.0,0,0,0,0,0,0,0,0,0,0,,,Ori,1,1,,1.0,,,\nbad,row\n"
+            ),
+        )
+        .expect("write malformed fixture");
+
+        let strict = HygCsvBackend::new(path.clone()).load(CatalogQuery::default());
+        assert!(matches!(strict, Err(CatalogError::Ingest { .. })));
+
+        let page = HygCsvBackend::best_effort(path.clone())
+            .load(CatalogQuery::default())
+            .expect("best effort page");
+        std::fs::remove_file(path).expect("remove malformed fixture");
+        assert_eq!(page.stars.len(), 1);
+        assert_eq!(page.diagnostics.len(), 1);
     }
 }

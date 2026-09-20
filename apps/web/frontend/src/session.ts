@@ -50,16 +50,17 @@ export const SESSION_SCHEMA_VERSION = 7;
 const APP_VERSION = "0.1.0";
 const UNIX_EPOCH_JD = 2440587.5;
 const SECONDS_PER_DAY = 86400;
-const TT_MINUS_TAI_SECONDS = 32.184;
 
 export type SessionTime = {
   jdUtc: number;
-  jdUt1: number;
-  jdTai: number;
-  jdTt: number;
-  jdTdb: number;
-  taiMinusUtcSeconds: number;
   dut1Seconds: number;
+  // Native hosts may include these derived values for inspection, but readers
+  // recompute them from jdUtc + dut1Seconds using astronomy's canonical table.
+  jdUt1?: number;
+  jdTai?: number;
+  jdTt?: number;
+  jdTdb?: number;
+  taiMinusUtcSeconds?: number;
 };
 
 export type StarSession = {
@@ -116,16 +117,6 @@ export type SessionState = {
   timeMs: number;
 };
 
-const LEAP_SECONDS: Array<[number, number]> = [
-  [2441317.5, 10], [2441499.5, 11], [2441683.5, 12], [2442048.5, 13],
-  [2442413.5, 14], [2442778.5, 15], [2443144.5, 16], [2443509.5, 17],
-  [2443874.5, 18], [2444239.5, 19], [2444786.5, 20], [2445151.5, 21],
-  [2445516.5, 22], [2446247.5, 23], [2447161.5, 24], [2447892.5, 25],
-  [2448257.5, 26], [2448804.5, 27], [2449169.5, 28], [2449534.5, 29],
-  [2450083.5, 30], [2450630.5, 31], [2451179.5, 32], [2453736.5, 33],
-  [2454832.5, 34], [2456109.5, 35], [2457204.5, 36], [2457754.5, 37],
-];
-
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
@@ -140,35 +131,10 @@ const parseVec3 = (value: unknown, fallback: Vec3, min: number, max: number): Ve
     : fallback;
 };
 
-const taiMinusUtcAtJd = (jdUtc: number): number => {
-  for (let i = LEAP_SECONDS.length - 1; i >= 0; i -= 1) {
-    const [effectiveJd, offset] = LEAP_SECONDS[i];
-    if (jdUtc >= effectiveJd) return offset;
-  }
-  return LEAP_SECONDS[0][1];
-};
-
-const approximateTdbFromTt = (jdTt: number): number => {
-  const meanAnomalyRad = ((357.53 + 0.9856003 * (jdTt - 2451545.0)) * Math.PI) / 180;
-  return jdTt + (0.001658 * Math.sin(meanAnomalyRad) + 0.000014 * Math.sin(2 * meanAnomalyRad)) / SECONDS_PER_DAY;
-};
-
-export const timeScalesFromUnixMs = (timeMs: number, dut1Seconds = 0): SessionTime => {
-  const jdUtc = UNIX_EPOCH_JD + timeMs / 1000 / SECONDS_PER_DAY;
-  const taiMinusUtcSeconds = taiMinusUtcAtJd(jdUtc);
-  const jdUt1 = jdUtc + dut1Seconds / SECONDS_PER_DAY;
-  const jdTai = jdUtc + taiMinusUtcSeconds / SECONDS_PER_DAY;
-  const jdTt = jdTai + TT_MINUS_TAI_SECONDS / SECONDS_PER_DAY;
-  return {
-    jdUtc,
-    jdUt1,
-    jdTai,
-    jdTt,
-    jdTdb: approximateTdbFromTt(jdTt),
-    taiMinusUtcSeconds,
-    dut1Seconds,
-  };
-};
+export const timeScalesFromUnixMs = (timeMs: number, dut1Seconds = 0): SessionTime => ({
+  jdUtc: UNIX_EPOCH_JD + timeMs / 1000 / SECONDS_PER_DAY,
+  dut1Seconds,
+});
 
 export const unixMsFromJdUtc = (jdUtc: number): number => (jdUtc - UNIX_EPOCH_JD) * SECONDS_PER_DAY * 1000;
 
@@ -217,15 +183,29 @@ export const starSessionJson = (state: SessionState): string =>
 export function parseStarSessionJson(raw: string): SessionState {
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || typeof parsed !== "object") throw new Error("Session JSON must be an object.");
-  const s = parsed as Partial<StarSession>;
-  if (s.schemaVersion !== SESSION_SCHEMA_VERSION) {
-    throw new Error(`Unsupported session schemaVersion ${String(s.schemaVersion)}.`);
+  const mutable = parsed as Record<string, unknown>;
+  const version = mutable.schemaVersion;
+  if (typeof version !== "number" || !Number.isInteger(version) || version < 1 || version > SESSION_SCHEMA_VERSION) {
+    throw new Error(`Unsupported session schemaVersion ${String(version)}.`);
   }
+  if (version === 1 && mutable.atmosphere && typeof mutable.atmosphere === "object") {
+    const atmosphere = mutable.atmosphere as Record<string, unknown>;
+    const turbidity = atmosphere.turbidity;
+    if (typeof turbidity === "number" && Number.isFinite(turbidity)) {
+      atmosphere.aerosolBeta = (Math.min(10, Math.max(1.7, turbidity)) - 1) * 0.0855;
+      atmosphere.aerosolAlpha = 1.3;
+    }
+  }
+  const s = mutable as unknown as Partial<StarSession>;
 
   const observer = parseObserver(s.observer);
   const view = parseView(s.view);
   const overlays = parseOverlays(s.overlays);
   const atmosphere = parseAtmosphere(s.atmosphere);
+  validateCorrections(
+    (s as { corrections?: unknown }).corrections,
+    atmosphere.enabled && atmosphere.pressureHpa > 0,
+  );
   const scintillation = parseScintillation(s.scintillation);
   const planets = parsePlanets(s.planets);
   const satellites = parseSatellites(s.satellites);
@@ -254,6 +234,24 @@ export function parseStarSessionJson(raw: string): SessionState {
     outputColourspace,
     timeMs,
   };
+}
+
+function validateCorrections(value: unknown, atmosphereEnabled: boolean): void {
+  if (!value || typeof value !== "object") throw new Error("Invalid correction snapshot.");
+  const c = value as Record<string, unknown>;
+  for (const name of [
+    "timeScales",
+    "precession",
+    "nutation",
+    "annualAberration",
+    "properMotion",
+    "topocentricSolarSystem",
+  ]) {
+    if (c[name] !== true) throw new Error(`Unsupported correction setting ${name}.`);
+  }
+  if (c.atmosphericRefraction !== atmosphereEnabled) {
+    throw new Error("Correction snapshot does not match the atmosphere state.");
+  }
 }
 
 function parseObserver(value: unknown): Observer {

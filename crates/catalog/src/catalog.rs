@@ -1,6 +1,7 @@
 use glam::Vec3;
 use serde::Deserialize;
 
+use crate::backend::{CatalogDiagnostic, CatalogIngestReport};
 use crate::color::bv_to_rgb;
 use crate::coords::{proper_motion_vector_radians_per_year, radec_hours_deg_to_cartesian};
 use crate::CatalogIdentifiers;
@@ -68,22 +69,63 @@ const EMBEDDED_HEADER_LEN: usize = 12;
 #[cfg(feature = "embedded")]
 const EMBEDDED_RECORD_LEN: usize = 34;
 
+/// Parse HYG CSV using the legacy best-effort behavior.
 pub fn load_from_csv(data: &str) -> Vec<Star> {
+    load_from_csv_report(data).stars
+}
+
+/// Parse HYG CSV while retaining structured diagnostics for malformed rows.
+pub fn load_from_csv_report(data: &str) -> CatalogIngestReport {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .from_reader(data.as_bytes());
+    let mut report = CatalogIngestReport::default();
+    let headers = match reader.headers() {
+        Ok(headers) => headers.clone(),
+        Err(error) => {
+            report.diagnostics.push(CatalogDiagnostic {
+                row: 1,
+                message: format!("invalid HYG CSV header: {error}"),
+            });
+            return report;
+        }
+    };
+    for required in ["ra", "dec", "mag"] {
+        if !headers.iter().any(|header| header == required) {
+            report.diagnostics.push(CatalogDiagnostic {
+                row: 1,
+                message: format!("HYG CSV missing required column {required}"),
+            });
+        }
+    }
+    if !report.diagnostics.is_empty() {
+        return report;
+    }
 
-    let mut stars = Vec::new();
-
-    for result in reader.deserialize::<RawStar>() {
+    for (record_index, result) in reader.deserialize::<RawStar>().enumerate() {
         let raw = match result {
-            Ok(r) => r,
-            Err(e) => {
-                log::warn!("Skipping malformed row: {e}");
+            Ok(raw) => raw,
+            Err(error) => {
+                report.diagnostics.push(CatalogDiagnostic {
+                    row: record_index + 2,
+                    message: format!("malformed HYG CSV record: {error}"),
+                });
                 continue;
             }
         };
 
+        let required_finite = raw.ra.is_finite() && raw.dec.is_finite() && raw.mag.is_finite();
+        let optional_finite = [raw.dist, raw.ci, raw.pmrarad, raw.pmdecrad]
+            .into_iter()
+            .flatten()
+            .all(f64::is_finite);
+        if !required_finite || !optional_finite {
+            report.diagnostics.push(CatalogDiagnostic {
+                row: record_index + 2,
+                message: "non-finite HYG numeric field".to_owned(),
+            });
+            continue;
+        }
         if raw.mag > DEFAULT_MAX_MAGNITUDE as f64 {
             continue;
         }
@@ -96,7 +138,7 @@ pub fn load_from_csv(data: &str) -> Vec<Star> {
             None => 1.0,
         };
 
-        stars.push(Star {
+        report.stars.push(Star {
             identifiers: CatalogIdentifiers::from_hyg_row(raw.id, raw.hip, raw.hd),
             position: radec_hours_deg_to_cartesian(raw.ra, raw.dec),
             distance_pc,
@@ -114,13 +156,13 @@ pub fn load_from_csv(data: &str) -> Vec<Star> {
     // V-54: resolve merged WDS visual doubles (Algieba, the epsilon Lyrae
     // Double Double) into their component sprites. No-op for any catalog that
     // does not contain a bootstrap primary.
-    let stars = crate::doubles::resolve_doubles(stars);
-
+    report.stars = crate::doubles::resolve_doubles(report.stars);
     log::info!(
-        "Loaded {} stars (mag <= {DEFAULT_MAX_MAGNITUDE})",
-        stars.len()
+        "Loaded {} stars (mag <= {DEFAULT_MAX_MAGNITUDE}) with {} diagnostic(s)",
+        report.stars.len(),
+        report.diagnostics.len()
     );
-    stars
+    report
 }
 
 #[cfg(feature = "embedded")]
@@ -232,6 +274,16 @@ pub fn load_from_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<
         .map(|page| page.stars)
         .map_err(|error| match error {
             CatalogError::Io(error) => error,
+            CatalogError::Ingest { diagnostics, .. } => std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "catalog ingest failed with {} diagnostic(s)",
+                    diagnostics.len()
+                ),
+            ),
+            CatalogError::InvalidQuery(message) => {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, message)
+            }
         })
 }
 
@@ -270,6 +322,19 @@ mod tests {
             1,
             "should filter mag > {DEFAULT_MAX_MAGNITUDE}"
         );
+    }
+
+    #[test]
+    fn report_rejects_missing_schema_and_non_finite_rows() {
+        let missing = load_from_csv_report("id,ra\n1,1.0\n");
+        assert!(missing.stars.is_empty());
+        assert!(missing.diagnostics.iter().any(|d| d.row == 1));
+
+        let non_finite = load_from_csv_report(&format!(
+            "{HEADER}\n1,1,1,,,,Bad,NaN,0,10,0,0,0,1,0,G2V,0,0,0,0,0,0,0,0,0,0,0,,,,,,,,,\n"
+        ));
+        assert!(non_finite.stars.is_empty());
+        assert_eq!(non_finite.diagnostics.len(), 1);
     }
 
     #[test]

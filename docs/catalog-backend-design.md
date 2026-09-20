@@ -18,8 +18,9 @@ rewriting host/rendering paths.
 - Separate source filtering from display exposure: catalog queries use
   `CatalogQuery::max_magnitude`; renderer limiting magnitude remains a visual
   observer/exposure control.
-- Leave room for large-catalog paging and LOD: `CatalogPage` has `truncated` and
-  `next_page` fields even though HYG currently returns a single page.
+- Large-catalog paging uses an opaque `CatalogCursor`: every backend applies
+  the cursor after deterministic source filtering and returns `next_page` when
+  more rows remain.
 
 ## Implemented scaffold
 
@@ -32,18 +33,19 @@ rewriting host/rendering paths.
   manifests;
 - `CatalogObjectId` and `CatalogIdentifiers` — numeric cross-ID storage for
   HYG, HIP, HD, Tycho-2, and Gaia DR3 identifiers;
-- `CatalogQuery` — source-side filters, currently `max_magnitude` and optional
-  `max_rows`; the HYG adapter keeps the historical repository-wide m≤8 cap and
-  lets queries narrow that set further;
-- `CatalogPage` — one page of stars plus source/query metadata;
+- `CatalogQuery` — source-side filters (`max_magnitude`, optional `max_rows`)
+  plus an opaque continuation cursor; the HYG adapter keeps the historical
+  repository-wide m≤8 cap and lets queries narrow that set further;
+- `CatalogPage` — one page of stars, source/query metadata, continuation cursor,
+  and best-effort ingest diagnostics;
 - `HygCsvBackend` — filesystem-backed HYG adapter used by the legacy
   `load_from_file` compatibility function;
 - `HygEmbeddedBackend` — embedded compact-HYG adapter for WASM / single-binary
   builds.
 
-The public `Star` struct now includes `identifiers: CatalogIdentifiers`. The
-existing renderer and host conversion paths keep ignoring those identifiers
-until `L-18` (legacy `P3-02`) wires ID-aware hover/copy/session behaviour through the renderer.
+The public `Star` struct includes `identifiers: CatalogIdentifiers`.
+`stars-scene` converts stars into renderer instances and a parallel host-owned
+identity sidecar; renderer buffers never contain catalog IDs.
 
 ## Backend boundaries
 
@@ -74,8 +76,8 @@ A backend is **not** responsible for:
   rows whose source is those catalogs.
 - Cross-match tables should fill the optional fields instead of replacing the
   source's primary ID.
-- Renderer buffers should receive compact numeric IDs only after `L-18` (legacy `P3-02`) defines
-  hover/click/session requirements; until then IDs stay CPU-side in `catalog`.
+- IDs stay CPU-side in `catalog` / host sidecars. Renderer picking returns an
+  instance index and never interprets catalog namespaces.
 
 ## LOD, paging, and spatial index plan
 
@@ -88,8 +90,8 @@ backends should add these pieces behind `CatalogBackend`:
    tiles so all-sky projections and telescope fields can request bounded cells.
 3. **Stable ordering** — sort by source ID inside a tile, and by brightness for
    top-N fallbacks, so notebook/session outputs remain diffable.
-4. **Page cursors** — use `CatalogPage::next_page` for deterministic continuation
-   tokens when a query is truncated.
+4. **Page cursors** — pass `CatalogPage::next_page` back through
+   `CatalogQuery::cursor` for deterministic continuation when truncated.
 5. **Renderer upload batches** — translate pages to `StarInstance` batches and
    avoid rebuilding the whole GPU buffer when only one tile changes.
 
@@ -118,8 +120,11 @@ size-capped web subset is documented in the data manifest.
   provenance hashing of any *committed* tile fixture still uses SHA-256 in
   `data/manifest.toml`.
 
-The `LodStream` result reports `tiles_examined` / `tiles_loaded`; the
-`lod_cull_does_not_blow_up_with_catalog_size` test pins that the loaded
+The `LodStream` result reports `tiles_examined` / `tiles_loaded`, `complete`,
+and structured per-tile issues. Interactive callers may explicitly consume the
+best-effort partial result; validation uses `stream_strict` and fails atomically
+on missing/corrupt hashes, oversized payloads, UTF-8/row errors, or invalid
+metadata. The `lod_cull_does_not_blow_up_with_catalog_size` test pins that the loaded
 faint-tile count for a fixed FOV stays bounded as the index grows, i.e. the
 cull is O(visible sky) not O(catalogue). Renderer upload batching (plan item 5)
 remains future work: hosts currently materialise the streamed `Vec<Star>`
@@ -141,6 +146,7 @@ through the existing `build_star_instance` path.
   the exact Riello 2021 `G→V` photometric transform, and CLI / viewer
   `--catalog-backend` host wiring all shipped. `DATA_SOURCES.md` and
   `data/manifest.toml` carry the catalogue fetch-service + cross-match rows.
-- `L-18` (legacy `P3-02`) should pass compact object IDs through renderer/host selection paths.
-- `L-19` (legacy `P3-03`) should build optional SIMBAD / VizieR links from preserved IDs without
-  making external services part of deterministic rendering.
+- `L-18` (legacy `P3-02`) — **done**: hosts retain index-aligned object-ID
+  sidecars while renderer selection stays catalog-agnostic.
+- `L-19` (legacy `P3-03`) — **done**: optional SIMBAD / VizieR links are built
+  from preserved IDs without making external services part of deterministic rendering.

@@ -16,18 +16,6 @@ use crate::camera::{
 };
 use crate::overlay::{OverlayConfig, OverlayKind};
 
-// The generated `label_data.rs` is included as if it were written inline.
-// Some f32 magnitude / position literals happen to fall near constants from
-// `clippy::approx_constant`'s table (e.g. NGC 6752 has V ≈ 6.280, which
-// clippy reads as TAU). The catalogue numbers are not those constants, so
-// the lint is silenced module-wide; no hand-written code in this file uses
-// a TAU-shaped literal where the named constant should be preferred.
-#[allow(clippy::approx_constant)]
-mod label_data {
-    include!(concat!(env!("OUT_DIR"), "/label_data.rs"));
-}
-use label_data::{CONSTELLATION_LABELS, DEEP_SKY_LABELS, STAR_LABELS};
-
 const ASCII_FIRST: u8 = 32;
 const ASCII_LAST: u8 = 126;
 const ATLAS_COLS: u32 = 16;
@@ -99,6 +87,25 @@ enum LabelPlacement {
     Centered,
     /// Anchor point is the labelled object; text starts just to its right.
     LeftAlignedToAnchor,
+}
+
+/// Host-provided neutral label category. Catalog identity and source formats
+/// remain outside the renderer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkyLabelKind {
+    Star,
+    Constellation,
+    Messier,
+    Ngc,
+}
+
+/// A host-owned catalog label adapted for renderer consumption.
+#[derive(Debug, Clone)]
+pub struct SkyLabel {
+    pub position: [f32; 3],
+    pub text: String,
+    pub magnitude: f32,
+    pub kind: SkyLabelKind,
 }
 
 #[derive(Debug, Clone)]
@@ -177,6 +184,7 @@ pub(crate) struct TextRenderer {
     atlas_uploaded: Cell<bool>,
     vertex_count: Cell<u32>,
     config: TextConfig,
+    labels: Vec<SkyLabel>,
 }
 
 impl TextRenderer {
@@ -344,11 +352,16 @@ impl TextRenderer {
             atlas_uploaded: Cell::new(false),
             vertex_count: Cell::new(0),
             config: TextConfig::default(),
+            labels: Vec::new(),
         }
     }
 
     pub fn set_config(&mut self, config: &OverlayConfig) {
         self.config = TextConfig::from_overlay_config(config);
+    }
+
+    pub fn set_labels(&mut self, labels: &[SkyLabel]) {
+        self.labels = labels.to_vec();
     }
 
     pub fn update_camera(
@@ -561,59 +574,48 @@ impl TextRenderer {
                 });
             }
         }
-        if self.config.stars {
-            for label in STAR_LABELS {
-                out.push(LabelCandidate {
-                    frame: LabelFrame::Equatorial,
-                    position: label.position,
-                    text: Cow::Borrowed(label.text),
-                    color: [0.86, 0.93, 1.0, alpha],
-                    priority: label.magnitude,
-                    placement: LabelPlacement::LeftAlignedToAnchor,
-                });
-            }
-        }
-        if self.config.constellations {
-            for label in CONSTELLATION_LABELS {
-                out.push(LabelCandidate {
-                    frame: LabelFrame::Equatorial,
-                    position: label.position,
-                    text: Cow::Borrowed(label.text),
-                    color: [0.55, 0.73, 1.0, alpha * 0.85],
-                    priority: 50.0,
-                    placement: LabelPlacement::Centered,
-                });
-            }
-        }
-        if self.config.deep_sky {
-            let limit = self.config.deep_sky_magnitude_limit;
-            for label in DEEP_SKY_LABELS {
-                if !matches!(
-                    label.magnitude.partial_cmp(&limit),
-                    Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal),
-                ) {
-                    // Skips NaN magnitudes without panicking; same policy as
-                    // the marker builder in `overlay::deep_sky_markers`.
-                    continue;
+        for label in &self.labels {
+            let (enabled, color, priority, placement) = match label.kind {
+                SkyLabelKind::Star => (
+                    self.config.stars,
+                    [0.86, 0.93, 1.0, alpha],
+                    label.magnitude,
+                    LabelPlacement::LeftAlignedToAnchor,
+                ),
+                SkyLabelKind::Constellation => (
+                    self.config.constellations,
+                    [0.55, 0.73, 1.0, alpha * 0.85],
+                    50.0,
+                    LabelPlacement::Centered,
+                ),
+                SkyLabelKind::Messier | SkyLabelKind::Ngc => {
+                    let in_limit = matches!(
+                        label
+                            .magnitude
+                            .partial_cmp(&self.config.deep_sky_magnitude_limit),
+                        Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal),
+                    );
+                    let color = if label.kind == SkyLabelKind::Messier {
+                        [0.60, 0.92, 0.65, alpha]
+                    } else {
+                        [0.55, 0.85, 0.78, alpha]
+                    };
+                    (
+                        self.config.deep_sky && in_limit,
+                        color,
+                        label.magnitude,
+                        LabelPlacement::LeftAlignedToAnchor,
+                    )
                 }
-                // Messier and NGC labels share the same green tonal range so
-                // they pair visually with their respective markers, but NGC
-                // labels are tinted slightly cooler to mirror the marker-
-                // shape distinction (diamond vs. ring) added by V-42.
-                let color = if label.is_messier {
-                    [0.60, 0.92, 0.65, alpha]
-                } else {
-                    [0.55, 0.85, 0.78, alpha]
-                };
+            };
+            if enabled {
                 out.push(LabelCandidate {
                     frame: LabelFrame::Equatorial,
                     position: label.position,
-                    text: Cow::Borrowed(label.text),
+                    text: Cow::Borrowed(&label.text),
                     color,
-                    // Brighter (lower-mag) objects win the label-placement
-                    // tie-break against fainter ones.
-                    priority: label.magnitude,
-                    placement: LabelPlacement::LeftAlignedToAnchor,
+                    priority,
+                    placement,
                 });
             }
         }
@@ -976,68 +978,8 @@ fn glyph_rows(ch: char) -> [u8; FONT_H] {
 }
 
 #[cfg(test)]
-fn collect_static_test_candidates<'a>(out: &mut Vec<LabelCandidate<'a>>) {
-    for label in STAR_LABELS {
-        out.push(LabelCandidate {
-            frame: LabelFrame::Equatorial,
-            position: label.position,
-            text: Cow::Borrowed(label.text),
-            color: [1.0; 4],
-            priority: label.magnitude,
-            placement: LabelPlacement::LeftAlignedToAnchor,
-        });
-    }
-    for label in CONSTELLATION_LABELS {
-        out.push(LabelCandidate {
-            frame: LabelFrame::Equatorial,
-            position: label.position,
-            text: Cow::Borrowed(label.text),
-            color: [1.0; 4],
-            priority: 50.0,
-            placement: LabelPlacement::Centered,
-        });
-    }
-    for label in DEEP_SKY_LABELS {
-        out.push(LabelCandidate {
-            frame: LabelFrame::Equatorial,
-            position: label.position,
-            text: Cow::Borrowed(label.text),
-            color: [1.0; 4],
-            priority: label.magnitude,
-            placement: LabelPlacement::LeftAlignedToAnchor,
-        });
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn generated_label_catalogs_are_populated() {
-        assert_eq!(STAR_LABELS.len(), 50);
-        assert!(CONSTELLATION_LABELS.len() >= 80);
-        // All 110 Messier objects are always baked into the deep-sky label
-        // table; the rest of the entries come from the bright NGC / IC
-        // subset and exceed the Messier count comfortably.
-        let messier_count = DEEP_SKY_LABELS
-            .iter()
-            .filter(|label| label.is_messier)
-            .count();
-        assert_eq!(messier_count, 110);
-        assert!(DEEP_SKY_LABELS.len() > 110);
-        assert!(STAR_LABELS
-            .iter()
-            .any(|label| label.text.contains("Sirius")));
-        assert!(CONSTELLATION_LABELS
-            .iter()
-            .any(|label| label.text == "Orion"));
-        assert!(DEEP_SKY_LABELS.iter().any(|l| l.text == "M31"));
-        assert!(DEEP_SKY_LABELS.iter().any(|l| l.text == "M110"));
-        // V-42 NGC / IC follow-up: anchor showpieces must be labelled.
-        assert!(DEEP_SKY_LABELS.iter().any(|l| l.text == "NGC7000"));
-        assert!(DEEP_SKY_LABELS.iter().any(|l| l.text == "IC434"));
-    }
 
     #[test]
     fn atlas_has_expected_size_and_visible_glyphs() {
@@ -1080,9 +1022,11 @@ mod tests {
 
     #[test]
     fn bright_star_labels_sort_before_constellations() {
-        let mut labels = Vec::new();
-        collect_static_test_candidates(&mut labels);
-        labels.sort_by(|a, b| a.priority.total_cmp(&b.priority));
-        assert!(labels.first().unwrap().priority < 5.0);
+        let mut labels = [
+            (SkyLabelKind::Constellation, 50.0),
+            (SkyLabelKind::Star, -1.46),
+        ];
+        labels.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        assert_eq!(labels[0].0, SkyLabelKind::Star);
     }
 }

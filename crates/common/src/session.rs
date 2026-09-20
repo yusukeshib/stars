@@ -62,6 +62,7 @@ pub struct StarSession {
     /// Rust-emitted preset JSON stays byte-identical.
     #[serde(default)]
     pub light_pollution: SessionLightPollution,
+    #[serde(default)]
     pub scintillation: SessionScintillation,
     pub planets: SessionPlanets,
     #[serde(default)]
@@ -299,11 +300,17 @@ pub struct SessionObserver {
 #[serde(rename_all = "camelCase")]
 pub struct SessionTime {
     pub jd_utc: f64,
+    #[serde(default)]
     pub jd_ut1: f64,
+    #[serde(default)]
     pub jd_tai: f64,
+    #[serde(default)]
     pub jd_tt: f64,
+    #[serde(default)]
     pub jd_tdb: f64,
+    #[serde(default)]
     pub tai_minus_utc_seconds: f64,
+    #[serde(default)]
     pub dut1_seconds: f64,
 }
 
@@ -507,6 +514,12 @@ pub struct SessionScintillation {
     pub seed: u32,
 }
 
+impl Default for SessionScintillation {
+    fn default() -> Self {
+        Scintillation::default().into()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionPlanets {
@@ -571,6 +584,16 @@ impl CorrectionSnapshot {
             ..Self::default()
         }
     }
+
+    fn validate_for_scene(self, atmosphere: Atmosphere) -> Result<Self> {
+        let supported = Self::for_scene(atmosphere);
+        if self != supported {
+            bail!(
+                "session correction flags do not match renderer capabilities: requested {self:?}, supported {supported:?}"
+            );
+        }
+        Ok(self)
+    }
 }
 
 impl StarSession {
@@ -634,9 +657,9 @@ impl StarSession {
     }
 
     pub fn to_scene(&self) -> Result<SessionScene> {
-        if self.schema_version != SESSION_SCHEMA_VERSION {
+        if !(1..=SESSION_SCHEMA_VERSION).contains(&self.schema_version) {
             bail!(
-                "Unsupported session schemaVersion {} (expected {})",
+                "Unsupported session schemaVersion {} (supported 1..={})",
                 self.schema_version,
                 SESSION_SCHEMA_VERSION
             );
@@ -646,6 +669,8 @@ impl StarSession {
             finite(self.time.dut1_seconds, "time.dut1Seconds")?,
         );
         let atmosphere_preset: AtmospherePreset = self.atmosphere.preset.into();
+        let atmosphere = self.atmosphere.to_atmosphere()?;
+        let corrections = self.corrections.validate_for_scene(atmosphere)?;
         Ok(SessionScene {
             latitude_deg: finite_in_range(
                 self.observer.latitude_deg,
@@ -709,7 +734,7 @@ impl StarSession {
                     .unwrap_or(renderer::OverlayPalette::Default),
             },
             atmosphere_preset,
-            atmosphere: self.atmosphere.to_atmosphere()?,
+            atmosphere,
             light_pollution: self.light_pollution.to_light_pollution()?,
             scintillation: self.scintillation.to_scintillation()?,
             planets_enabled: self.planets.enabled,
@@ -720,7 +745,7 @@ impl StarSession {
             external_viewpoint: self.projection.external.to_external_viewpoint()?,
             eyepiece: self.eyepiece.to_eyepiece()?,
             catalog: self.catalog.validated()?,
-            corrections: self.corrections,
+            corrections,
             output_colourspace: self.output_colourspace.into(),
             meteors: self.meteors.to_meteor_layer(),
             aurora: self.aurora.to_aurora_layer(),
@@ -1029,12 +1054,57 @@ impl From<AtmospherePreset> for AtmospherePresetArg {
     }
 }
 
+pub fn parse_session_json(raw: &str) -> Result<StarSession> {
+    let mut value: serde_json::Value = serde_json::from_str(raw).context("Parsing session JSON")?;
+    let version = value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        .context("session missing integer schemaVersion")?;
+    if !(1..=u64::from(SESSION_SCHEMA_VERSION)).contains(&version) {
+        bail!(
+            "Unsupported session schemaVersion {version} (supported 1..={SESSION_SCHEMA_VERSION})"
+        );
+    }
+
+    let root = value
+        .as_object_mut()
+        .context("session JSON must be an object")?;
+    if version == 1 {
+        let atmosphere = root
+            .get_mut("atmosphere")
+            .and_then(serde_json::Value::as_object_mut)
+            .context("v1 session missing atmosphere object")?;
+        let turbidity = atmosphere
+            .remove("turbidity")
+            .and_then(|value| value.as_f64())
+            .context("v1 session missing numeric atmosphere.turbidity")?;
+        let beta = (turbidity.clamp(1.7, 10.0) - 1.0)
+            * astronomy::atmosphere::RAYLEIGH_K550_MAG_PER_AIRMASS;
+        atmosphere.insert("aerosolBeta".to_owned(), serde_json::json!(beta));
+        atmosphere.insert("aerosolAlpha".to_owned(), serde_json::json!(1.3));
+        atmosphere.remove("visibilityKm");
+    }
+    if version < 3 {
+        let atmosphere = root
+            .get_mut("atmosphere")
+            .and_then(serde_json::Value::as_object_mut)
+            .context("session missing atmosphere object")?;
+        atmosphere
+            .entry("surfaceAlbedo".to_owned())
+            .or_insert_with(|| serde_json::json!(0.2));
+    }
+    root.insert(
+        "schemaVersion".to_owned(),
+        serde_json::json!(SESSION_SCHEMA_VERSION),
+    );
+    serde_json::from_value(value).context("Decoding migrated session JSON")
+}
+
 pub fn load_session(path: impl AsRef<Path>) -> Result<StarSession> {
     let path = path.as_ref();
     let raw = fs::read_to_string(path)
         .with_context(|| format!("Reading session JSON at {}", path.display()))?;
-    serde_json::from_str(&raw)
-        .with_context(|| format!("Parsing session JSON at {}", path.display()))
+    parse_session_json(&raw).with_context(|| format!("Parsing session JSON at {}", path.display()))
 }
 
 pub fn save_session(path: impl AsRef<Path>, session: &StarSession) -> Result<()> {
@@ -1159,9 +1229,42 @@ mod tests {
     }
 
     #[test]
+    fn migrates_v1_session_to_current_schema() {
+        let session = StarSession::from_scene("0.1.0", "test", &sample_scene());
+        let mut value = serde_json::to_value(session).unwrap();
+        let root = value.as_object_mut().unwrap();
+        root.insert("schemaVersion".to_owned(), serde_json::json!(1));
+        root.remove("scintillation");
+        root.remove("lightPollution");
+        root.remove("satellites");
+        root.remove("outputColourspace");
+        let atmosphere = root.get_mut("atmosphere").unwrap().as_object_mut().unwrap();
+        atmosphere.remove("aerosolBeta");
+        atmosphere.remove("aerosolAlpha");
+        atmosphere.remove("surfaceAlbedo");
+        atmosphere.insert("turbidity".to_owned(), serde_json::json!(3.0));
+        atmosphere.insert("visibilityKm".to_owned(), serde_json::json!(25.0));
+
+        let migrated = parse_session_json(&value.to_string()).unwrap();
+        assert_eq!(migrated.schema_version, SESSION_SCHEMA_VERSION);
+        assert!((migrated.atmosphere.aerosol_beta - 0.171).abs() < 1.0e-6);
+        assert_eq!(migrated.atmosphere.aerosol_alpha, 1.3);
+        assert_eq!(migrated.atmosphere.surface_albedo, 0.2);
+        migrated.to_scene().unwrap();
+    }
+
+    #[test]
     fn rejects_future_schema() {
         let mut session = StarSession::from_scene("0.1.0", "test", &sample_scene());
         session.schema_version = SESSION_SCHEMA_VERSION + 1;
+        assert!(session.to_scene().is_err());
+        assert!(parse_session_json(&serde_json::to_string(&session).unwrap()).is_err());
+    }
+
+    #[test]
+    fn rejects_correction_metadata_the_renderer_cannot_honor() {
+        let mut session = StarSession::from_scene("0.1.0", "test", &sample_scene());
+        session.corrections.precession = false;
         assert!(session.to_scene().is_err());
     }
 
